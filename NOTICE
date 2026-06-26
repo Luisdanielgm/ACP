@@ -1,0 +1,21 @@
+ACP — Agent Communication Protocol
+Copyright (c) 2026 Luisdanielgm and the ACP project contributors
+
+This repository contains components under different open-source licenses
+(see LICENSING.md for the full map):
+
+  - ACP Manager (server) — GNU Affero General Public License v3.0 or later.
+    See LICENSE.
+  - ACP Client / SDK (ACP_AGENT/) — Apache License, Version 2.0.
+    See ACP_AGENT/LICENSE.
+
+Trademark notice:
+  "ACP" and the ACP name and logos are trademarks of Luisdanielgm.
+  The licenses above cover the source code only; they do not grant permission
+  to use the ACP name or marks to identify or promote a competing hosted
+  service. See LICENSING.md.
+
+Contributions are accepted under the Contributor License Agreement in CLA.md.
+
+Portions of this product include software developed by third parties under
+their own licenses; those licenses are retained in the corresponding source.

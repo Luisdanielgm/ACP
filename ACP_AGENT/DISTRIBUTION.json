@@ -1,0 +1,9 @@
+{
+  "distribution_id": "acp-community",
+  "product_name": "ACP Community",
+  "default_hub_mode": "explicit",
+  "default_hub_label": "community-managed hub",
+  "default_hub_http": null,
+  "default_hub_ws": null,
+  "default_manifest_url": null
+}

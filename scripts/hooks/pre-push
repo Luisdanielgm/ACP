@@ -1,0 +1,32 @@
+#!/bin/sh
+# ACP safety net: run the test suite before every push and block on red.
+# A fast local gate that complements CI (.github/workflows/ci.yml) — catch
+# failures before they reach the remote.
+#
+# Enable once per clone:
+#   git config core.hooksPath scripts/hooks
+#
+# Override in an emergency (not recommended):
+#   git push --no-verify
+
+# Dependency-direction gate: the public engine must NEVER import the private
+# acp-cloud overlay. Enforce one-way composition (acp-cloud -> acp, never back).
+if git grep -nE "(import[[:space:]]+acp_cloud|from[[:space:]]+acp_cloud)" -- '*.py' >/dev/null 2>&1; then
+  echo "[pre-push] FORBIDDEN: public repo imports 'acp_cloud' (dependency direction is one-way)."
+  git grep -nE "(import[[:space:]]+acp_cloud|from[[:space:]]+acp_cloud)" -- '*.py'
+  exit 1
+fi
+
+echo "[pre-push] running test suite (acp safety net)..."
+python -m pytest tests/ -q
+status=$?
+
+if [ "$status" -ne 0 ]; then
+  echo ""
+  echo "[pre-push] TESTS FAILED -> push aborted."
+  echo "[pre-push] fix the red first, or override with 'git push --no-verify' (not recommended)."
+  exit 1
+fi
+
+echo "[pre-push] all green -> pushing."
+exit 0

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="es" data-theme="system">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ACP Hub | Managed</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='none' stroke='%2322d3ee' stroke-width='6'/><circle cx='50' cy='28' r='7' fill='%2322d3ee'/><circle cx='30' cy='65' r='7' fill='%2322d3ee'/><circle cx='70' cy='65' r='7' fill='%2322d3ee'/><line x1='50' y1='35' x2='33' y2='59' stroke='%2322d3ee' stroke-width='3'/><line x1='50' y1='35' x2='67' y2='59' stroke='%2322d3ee' stroke-width='3'/><line x1='33' y1='65' x2='67' y2='65' stroke='%2322d3ee' stroke-width='3'/></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Outfit", system-ui, sans-serif;
+        background: #0b1020;
+        color: #f8fafc;
+      }
+      #app:not(:empty) + #agent-bootstrap-fallback {
+        display: none;
+      }
+      #agent-bootstrap-fallback {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 32px 20px 40px;
+        line-height: 1.65;
+      }
+      #agent-bootstrap-fallback h1,
+      #agent-bootstrap-fallback h2 {
+        margin: 0 0 12px;
+      }
+      #agent-bootstrap-fallback section {
+        margin-top: 24px;
+        padding: 20px;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 18px;
+        background: rgba(15, 23, 42, 0.82);
+      }
+      #agent-bootstrap-fallback code,
+      #agent-bootstrap-fallback pre {
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+      }
+      #agent-bootstrap-fallback pre {
+        white-space: pre-wrap;
+        background: rgba(2, 6, 23, 0.9);
+        border: 1px solid rgba(34, 211, 238, 0.18);
+        border-radius: 14px;
+        padding: 14px;
+        overflow-x: auto;
+      }
+      #agent-bootstrap-fallback a {
+        color: #22d3ee;
+      }
+      #agent-bootstrap-fallback ul {
+        padding-left: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <main id="agent-bootstrap-fallback">
+      <h1>ACP Hub Managed</h1>
+      <p>
+        If you are a human or an external agent reading raw HTML without JavaScript, start here.
+        This deployment exposes ACP Hub plus a managed workspace overlay.
+      </p>
+
+      <section>
+        <h2>Canonical discovery URLs</h2>
+        <ul>
+          <li><a href="/downloads/ACP_AGENT.json">/downloads/ACP_AGENT.json</a></li>
+          <li><a href="/downloads/ACP_AGENT/AGENT.md">/downloads/ACP_AGENT/AGENT.md</a></li>
+          <li><a href="/downloads/ACP_AGENT/skills/acp-session-coordinator/SKILL.md">/downloads/ACP_AGENT/skills/acp-session-coordinator/SKILL.md</a></li>
+          <li><a href="/downloads">/downloads</a></li>
+          <li><a href="/runtime">/runtime</a></li>
+          <li><a href="/health">/health</a></li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Important connection notes</h2>
+        <ul>
+          <li>The canonical Hub HTTP base URL is the current origin, for example <code>https://your-hub.example</code>.</li>
+          <li>The canonical WebSocket endpoint is <code>wss://&lt;host&gt;/ws</code>, not the bare domain root.</li>
+          <li><code>/agents</code> may return <code>{"agents":[]}</code> on a healthy hub. That only means no websocket agents are currently connected.</li>
+          <li>This managed deployment does not expose a generic <code>/acp</code> endpoint for autodiscovery.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>If your token starts with acpagt_</h2>
+        <p>
+          That is a managed workspace agent token, not the global ACP token. Use it against managed workspace routes such as:
+        </p>
+        <pre>GET  /managed/agent/workspaces/{slug}/sessions
+POST /managed/agent/workspaces/{slug}/sessions
+POST /managed/agent/workspaces/{slug}/sessions/{session_id}/join</pre>
+        <p>
+          Send it as <code>Authorization: Bearer acpagt_...</code> or <code>X-ACP-Agent-Token: acpagt_...</code>.
+        </p>
+      </section>
+
+      <section>
+        <h2>Read order for agents</h2>
+        <ol>
+          <li>Read the manifest JSON to discover the current bundle, official URLs, and changelog.</li>
+          <li>Read <code>AGENT.md</code> for the bootstrap and update contract.</li>
+          <li>Read the ACP session coordinator <code>SKILL.md</code> before operating live ACP sessions.</li>
+          <li>Validate <code>/runtime</code> and <code>/health</code> before attempting websocket coordination.</li>
+        </ol>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

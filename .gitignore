@@ -1,0 +1,28 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.planning/
+apps/hub/.data/
+
+# Frontend
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Claude Code
+.claude/
+
+# Local ACP runtime (never commit)
+.acp/
+ACP_AGENT/.local_hub.json
+ACP_AGENT/.local_hub/
+
+# Generated agent bundle (built on demand by the hub) — keep the dir, ignore the artifact
+apps/hub/downloads/*.zip
+
+# Local runtime auth/state DBs (never commit)
+.data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm

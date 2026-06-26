@@ -1,0 +1,559 @@
+{
+  "_comment": "A-DETANGLE-00 regression baseline. Frozen route+state surface of acp_managed.create_managed_app(). The de-tangle (slice 2/3) must preserve this exactly. Regenerate ONLY for intentional API changes.",
+  "route_count": 90,
+  "state_keys": [
+    "managed_access_service",
+    "managed_agent_token_manager",
+    "managed_auth_rate_limiter",
+    "managed_principal_store",
+    "managed_router_deps",
+    "managed_runtime",
+    "managed_session_manager",
+    "managed_workspace_invitation_service",
+    "managed_workspace_session_service",
+    "managed_workspace_token_service",
+    "runtime"
+  ],
+  "routes": [
+    {
+      "path": "/",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/agents",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/api/release",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/dashboard",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/dashboard/auth/login",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/dashboard/auth/logout",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/dashboard/auth/session",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/dashboard/overview",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/dashboard/session",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/docs",
+      "methods": [
+        "GET",
+        "HEAD"
+      ]
+    },
+    {
+      "path": "/docs/oauth2-redirect",
+      "methods": [
+        "GET",
+        "HEAD"
+      ]
+    },
+    {
+      "path": "/downloads",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/downloads/ACP_AGENT.json",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/downloads/ACP_AGENT.zip",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/downloads/ACP_AGENT/AGENT.md",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/downloads/ACP_AGENT/skills/acp-session-coordinator/SKILL.md",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/health",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/admin/audit",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/admin/workspaces",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/admin/workspaces",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/admin/workspaces/ui",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/admin/workspaces/{slug}",
+      "methods": [
+        "DELETE"
+      ]
+    },
+    {
+      "path": "/managed/admin/workspaces/{slug}",
+      "methods": [
+        "PATCH"
+      ]
+    },
+    {
+      "path": "/managed/admin/workspaces/{slug}/agent-tokens",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/admin/workspaces/{slug}/agent-tokens",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/admin/workspaces/{slug}/agent-tokens/{token_id}",
+      "methods": [
+        "DELETE"
+      ]
+    },
+    {
+      "path": "/managed/admin/workspaces/{slug}/disable",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/admin/workspaces/{slug}/invite-admin",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/admin/workspaces/{slug}/presets/create",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/agent/bootstrap",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/agent/sessions",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/agent/sessions",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/agent/sessions/{session_id}",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/agent/sessions/{session_id}/close",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/agent/sessions/{session_id}/join",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/agent/sessions/{session_id}/replay",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/agent/workspaces/{slug}/sessions",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/agent/workspaces/{slug}/sessions",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/agent/workspaces/{slug}/sessions/{session_id}",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/agent/workspaces/{slug}/sessions/{session_id}/close",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/agent/workspaces/{slug}/sessions/{session_id}/join",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/agent/workspaces/{slug}/sessions/{session_id}/replay",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/assets",
+      "methods": []
+    },
+    {
+      "path": "/managed/auth/login",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/auth/logout",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/auth/me",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/dashboard",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/dashboard/auth/session",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/dashboard/session",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/invitations/{token}",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/invitations/{token}",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/invitations/{token}/accept",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/invitations/{token}/preview",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/login",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/login",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/logout",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/logout",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/ui/workspaces",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/ui/workspaces/{slug}",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/ui/workspaces/{slug}/sessions",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/ui/workspaces/{slug}/sessions/create",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/ui/workspaces/{slug}/sessions/{session_id}",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/ui/workspaces/{slug}/sessions/{session_id}/live",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/workspaces",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/sessions",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/sessions",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/sessions/{session_id}",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/token/revoke",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/token/rotate",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/openapi.json",
+      "methods": [
+        "GET",
+        "HEAD"
+      ]
+    },
+    {
+      "path": "/redoc",
+      "methods": [
+        "GET",
+        "HEAD"
+      ]
+    },
+    {
+      "path": "/replay/events",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/replay/messages/{message_id}",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/runtime",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/send",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/sessions",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/sessions/cancel-wait",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/sessions/heartbeat",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/sessions/join",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/sessions/leave",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/sessions/runs/events",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/sessions/send",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/sessions/status",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/sessions/wait",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/sessions/{session_id}",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/sessions/{session_id}/admin/close",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/sessions/{session_id}/admin/members/{agent_name}/disconnect",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/sessions/{session_id}/detail",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/ws",
+      "methods": []
+    }
+  ]
+}

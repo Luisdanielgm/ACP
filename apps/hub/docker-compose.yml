@@ -1,0 +1,35 @@
+services:
+  hub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: acp-hub
+    restart: unless-stopped
+    environment:
+      ACP_HOST: ${ACP_HOST:-0.0.0.0}
+      ACP_PORT: ${ACP_PORT:-8000}
+      ACP_ASGI_APP: ${ACP_ASGI_APP:-acp_managed.app:app}
+      ACP_PUBLIC_WEB_ENABLED: ${ACP_PUBLIC_WEB_ENABLED:-false}
+      ACP_LEGACY_DASHBOARD_ENABLED: ${ACP_LEGACY_DASHBOARD_ENABLED:-false}
+      ACP_PERSISTENCE_BACKEND: ${ACP_PERSISTENCE_BACKEND:-sqlite}
+      ACP_SQLITE_PATH: ${ACP_SQLITE_PATH:-/data/acp/acp.sqlite3}
+      ACP_MANAGED_AUTH_SQLITE_PATH: ${ACP_MANAGED_AUTH_SQLITE_PATH:-/data/acp/acp-managed-auth.sqlite3}
+      ACP_MANAGED_SESSION_SECRET: ${ACP_MANAGED_SESSION_SECRET?ACP_MANAGED_SESSION_SECRET is required}
+      ACP_MANAGED_AGENT_TOKEN_SECRET: ${ACP_MANAGED_AGENT_TOKEN_SECRET:-}
+      ACP_MANAGED_SESSION_TTL_SECONDS: ${ACP_MANAGED_SESSION_TTL_SECONDS:-43200}
+      ACP_MANAGED_WHITELIST: ${ACP_MANAGED_WHITELIST:-}
+      ACP_TOKEN: ${ACP_TOKEN:-}
+      ACP_MAX_PAYLOAD_BYTES: ${ACP_MAX_PAYLOAD_BYTES:-32768}
+    ports:
+      - "${ACP_PORT:-8000}:${ACP_PORT:-8000}"
+    volumes:
+      - acp_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,sys,urllib.request; p=os.getenv('ACP_PORT','8000'); sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{p}/health', timeout=2).status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  acp_data:

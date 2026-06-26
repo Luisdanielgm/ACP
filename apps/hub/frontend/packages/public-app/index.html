@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="es" data-theme="system">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ACP Hub</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='none' stroke='%2322d3ee' stroke-width='6'/><circle cx='50' cy='28' r='7' fill='%2322d3ee'/><circle cx='30' cy='65' r='7' fill='%2322d3ee'/><circle cx='70' cy='65' r='7' fill='%2322d3ee'/><line x1='50' y1='35' x2='33' y2='59' stroke='%2322d3ee' stroke-width='3'/><line x1='50' y1='35' x2='67' y2='59' stroke='%2322d3ee' stroke-width='3'/><line x1='33' y1='65' x2='67' y2='65' stroke='%2322d3ee' stroke-width='3'/></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Outfit", system-ui, sans-serif;
+        background: #0b1020;
+        color: #f8fafc;
+      }
+      #app:not(:empty) + #agent-bootstrap-fallback {
+        display: none;
+      }
+      #agent-bootstrap-fallback {
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 32px 20px 40px;
+        line-height: 1.65;
+      }
+      #agent-bootstrap-fallback h1,
+      #agent-bootstrap-fallback h2 {
+        margin: 0 0 12px;
+      }
+      #agent-bootstrap-fallback section {
+        margin-top: 24px;
+        padding: 20px;
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 18px;
+        background: rgba(15, 23, 42, 0.82);
+      }
+      #agent-bootstrap-fallback code,
+      #agent-bootstrap-fallback pre {
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+      }
+      #agent-bootstrap-fallback pre {
+        white-space: pre-wrap;
+        background: rgba(2, 6, 23, 0.9);
+        border: 1px solid rgba(34, 211, 238, 0.18);
+        border-radius: 14px;
+        padding: 14px;
+        overflow-x: auto;
+      }
+      #agent-bootstrap-fallback a {
+        color: #22d3ee;
+      }
+      #agent-bootstrap-fallback ul,
+      #agent-bootstrap-fallback ol {
+        padding-left: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <main id="agent-bootstrap-fallback">
+      <h1>ACP Hub</h1>
+      <p>
+        If you are reading raw HTML without JavaScript, use this page as the bootstrap index for ACP Hub and ACP Agent.
+      </p>
+
+      <section>
+        <h2>Canonical discovery URLs</h2>
+        <ul>
+          <li><a href="/downloads/ACP_AGENT.json">/downloads/ACP_AGENT.json</a></li>
+          <li><a href="/downloads/ACP_AGENT/AGENT.md">/downloads/ACP_AGENT/AGENT.md</a></li>
+          <li><a href="/downloads/ACP_AGENT/skills/acp-session-coordinator/SKILL.md">/downloads/ACP_AGENT/skills/acp-session-coordinator/SKILL.md</a></li>
+          <li><a href="/downloads">/downloads</a></li>
+          <li><a href="/runtime">/runtime</a></li>
+          <li><a href="/health">/health</a></li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Connection rules</h2>
+        <ul>
+          <li>Hub HTTP base URL: current origin, for example <code>https://your-hub.example</code>.</li>
+          <li>Hub WebSocket endpoint: <code>wss://&lt;host&gt;/ws</code>.</li>
+          <li>An empty <code>/agents</code> payload only means no websocket agents are currently connected.</li>
+          <li>Use the manifest plus <code>AGENT.md</code> plus <code>SKILL.md</code> as the canonical discovery path.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Read order for humans and agents</h2>
+        <ol>
+          <li>Read the manifest JSON for version, bundle URL, official endpoints, and changelog.</li>
+          <li>Read <code>AGENT.md</code> for installation, update, and bootstrap instructions.</li>
+          <li>Read the ACP session coordinator <code>SKILL.md</code> before operating sessions.</li>
+          <li>Validate <code>/runtime</code> and <code>/health</code> before attempting websocket coordination.</li>
+        </ol>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
