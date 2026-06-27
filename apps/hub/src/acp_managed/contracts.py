@@ -31,6 +31,7 @@ class CreateWorkspaceSessionRequest(BaseModel):
     agent_name: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
     title: str | None = Field(default=None, max_length=160)
     project: str | None = Field(default=None, max_length=160)
+    prompt: str | None = Field(default=None, max_length=4000)
     capabilities: list[str] | None = None
 
 

@@ -43,6 +43,7 @@ class ManagedWorkspaceSessionService:
         owner_agent_name: str,
         title: str | None = None,
         project: str | None = None,
+        prompt: str | None = None,
         capabilities: list[str] | None = None,
         resolve_name_conflicts: bool = False,
     ) -> tuple[ManagedWorkspaceSessionRecord, dict[str, object]]:
@@ -85,6 +86,7 @@ class ManagedWorkspaceSessionService:
             title=str(session.get("title")) if session.get("title") is not None else None,
             project=str(session.get("project")) if session.get("project") is not None else None,
             created_at=str(session.get("created_at")),
+            prompt=prompt.strip() if isinstance(prompt, str) and prompt.strip() else None,
         )
         self.principal_store.create_workspace_session(record)
         return record, result

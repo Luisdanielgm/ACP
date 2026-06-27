@@ -39,6 +39,7 @@ class ManagedWorkspaceSessionRecord:
     title: str | None
     project: str | None
     created_at: str
+    prompt: str | None = None
 
 
 @dataclass(frozen=True)
@@ -151,6 +152,7 @@ class SqliteManagedPrincipalStore:
                     owner_member_token TEXT NULL,
                     title TEXT NULL,
                     project TEXT NULL,
+                    prompt TEXT NULL,
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (workspace_id) REFERENCES managed_workspaces(workspace_id) ON DELETE CASCADE,
                     FOREIGN KEY (created_by_email) REFERENCES managed_principals(email)
@@ -215,6 +217,13 @@ class SqliteManagedPrincipalStore:
                     """
                     ALTER TABLE managed_workspace_sessions
                     ADD COLUMN owner_member_token TEXT NULL
+                    """
+                )
+            if "prompt" not in session_columns:
+                conn.execute(
+                    """
+                    ALTER TABLE managed_workspace_sessions
+                    ADD COLUMN prompt TEXT NULL
                     """
                 )
             conn.execute(
@@ -1120,8 +1129,9 @@ class SqliteManagedPrincipalStore:
                     owner_member_token,
                     title,
                     project,
+                    prompt,
                     created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.session_id,
@@ -1131,6 +1141,7 @@ class SqliteManagedPrincipalStore:
                     record.owner_member_token,
                     record.title,
                     record.project,
+                    record.prompt,
                     record.created_at,
                 ),
             )
@@ -1346,7 +1357,7 @@ class SqliteManagedPrincipalStore:
         try:
             row = conn.execute(
                 """
-                SELECT session_id, workspace_id, created_by_email, owner_agent_name, owner_member_token, title, project, created_at
+                SELECT session_id, workspace_id, created_by_email, owner_agent_name, owner_member_token, title, project, prompt, created_at
                 FROM managed_workspace_sessions
                 WHERE session_id = ?
                 LIMIT 1
@@ -1363,6 +1374,7 @@ class SqliteManagedPrincipalStore:
                 owner_member_token=str(row["owner_member_token"]) if row["owner_member_token"] is not None else None,
                 title=str(row["title"]) if row["title"] is not None else None,
                 project=str(row["project"]) if row["project"] is not None else None,
+                prompt=str(row["prompt"]) if row["prompt"] is not None else None,
                 created_at=str(row["created_at"]),
             )
         finally:
@@ -1373,7 +1385,7 @@ class SqliteManagedPrincipalStore:
         try:
             rows = conn.execute(
                 """
-                SELECT session_id, workspace_id, created_by_email, owner_agent_name, owner_member_token, title, project, created_at
+                SELECT session_id, workspace_id, created_by_email, owner_agent_name, owner_member_token, title, project, prompt, created_at
                 FROM managed_workspace_sessions
                 WHERE workspace_id = ?
                 ORDER BY created_at DESC, session_id ASC
@@ -1389,6 +1401,7 @@ class SqliteManagedPrincipalStore:
                     owner_member_token=str(row["owner_member_token"]) if row["owner_member_token"] is not None else None,
                     title=str(row["title"]) if row["title"] is not None else None,
                     project=str(row["project"]) if row["project"] is not None else None,
+                    prompt=str(row["prompt"]) if row["prompt"] is not None else None,
                     created_at=str(row["created_at"]),
                 )
                 for row in rows

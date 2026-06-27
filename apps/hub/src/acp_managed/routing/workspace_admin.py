@@ -337,6 +337,7 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
             owner_agent_name=payload.agent_name.strip(),
             title=payload.title.strip() if isinstance(payload.title, str) and payload.title.strip() else None,
             project=payload.project.strip() if isinstance(payload.project, str) and payload.project.strip() else None,
+            prompt=payload.prompt,
             capabilities=payload.capabilities,
             resolve_name_conflicts=True,
         )

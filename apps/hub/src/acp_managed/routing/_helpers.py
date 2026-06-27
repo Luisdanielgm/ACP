@@ -65,6 +65,7 @@ def _sanitize_workspace_session(
         "owner_agent_name": record.owner_agent_name,
         "title": record.title,
         "project": record.project,
+        "prompt": record.prompt,
         "created_at": record.created_at,
     }
     # The owner member token lets the holder operate the session as the chief
