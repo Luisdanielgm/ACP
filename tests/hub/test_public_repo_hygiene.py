@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_EXTRACTION_SOURCES = (
@@ -113,6 +115,8 @@ def test_public_distribution_defaults_require_explicit_hub_configuration() -> No
 def test_state_doc_has_no_tbd_and_matches_v03_phase_range() -> None:
     state_path = REPO_ROOT / ".planning" / "STATE.md"
     roadmap_path = REPO_ROOT / ".planning" / "ROADMAP.md"
+    if not state_path.exists() or not roadmap_path.exists():
+        pytest.skip("internal .planning state docs are not shipped in the public repo")
 
     state_text = state_path.read_text(encoding="utf-8")
     assert "TBD" not in state_text

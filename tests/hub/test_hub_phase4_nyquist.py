@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 _PHASE4_REQUIREMENTS = {
     "HUB-05",
     "HUB-06",
@@ -95,9 +97,10 @@ def test_phase4_nyquist_referenced_tests_exist_in_declared_files() -> None:
 
 
 def test_phase4_nyquist_validation_contract_mentions_required_c_signals() -> None:
-    validation_text = _read_file(
-        ".planning/phases/04-compatibility-apis-and-dashboard/04-VALIDATION.md"
-    )
+    validation_rel = ".planning/phases/04-compatibility-apis-and-dashboard/04-VALIDATION.md"
+    if not (_repo_root() / validation_rel).exists():
+        pytest.skip("internal .planning phase docs are not shipped in the public repo")
+    validation_text = _read_file(validation_rel)
 
     for requirement in sorted(_SIGNAL_C_REQUIRED):
         assert requirement in validation_text

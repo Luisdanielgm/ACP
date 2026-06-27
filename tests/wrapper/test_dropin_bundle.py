@@ -56,11 +56,14 @@ def test_dropin_bundle_tracks_runtime_and_skill_sources() -> None:
     assert Path("ACP_AGENT/VERSION").read_text(encoding="utf-8").strip()
     assert "0.3.0" in Path("ACP_AGENT/CHANGELOG.md").read_text(encoding="utf-8")
 
-    skill_source = Path(".codex/skills/acp-session-coordinator/SKILL.md").read_text(encoding="utf-8")
-    bundle_skill = Path("ACP_AGENT/skills/acp-session-coordinator/SKILL.md").read_text(
-        encoding="utf-8"
-    )
-    assert bundle_skill == skill_source
+    # The bundled skill is the source of truth in the public repo. When the
+    # internal authoring source (.codex/skills) is present (private/dev tree),
+    # assert the bundle tracks it; in the public repo that source is absent.
+    skill_source_path = Path(".codex/skills/acp-session-coordinator/SKILL.md")
+    bundle_skill = Path("ACP_AGENT/skills/acp-session-coordinator/SKILL.md").read_text(encoding="utf-8")
+    assert bundle_skill.strip()
+    if skill_source_path.exists():
+        assert bundle_skill == skill_source_path.read_text(encoding="utf-8")
 
 
 def test_agent_bootstrap_docs_are_clean_and_session_aligned() -> None:
