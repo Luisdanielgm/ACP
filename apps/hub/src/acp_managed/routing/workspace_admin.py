@@ -48,6 +48,8 @@ from acp_managed.routing._helpers import (
 
 
 _MAX_ROOM_FILE_BYTES = 256 * 1024
+_MAX_ROOM_FILES = 20
+_MAX_ROOM_TOTAL_BYTES = 1024 * 1024
 
 
 def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
@@ -576,6 +578,31 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
             headers={"content-disposition": f"attachment; filename*=UTF-8''{quoted_name}"},
         )
 
+    def _room_file_quota_payload(files) -> dict[str, int]:
+        total_bytes = sum(item.size_bytes for item in files)
+        return {
+            "count": len(files),
+            "total_bytes": total_bytes,
+            "max_file_bytes": _MAX_ROOM_FILE_BYTES,
+            "max_files": _MAX_ROOM_FILES,
+            "max_total_bytes": _MAX_ROOM_TOTAL_BYTES,
+            "remaining_files": max(_MAX_ROOM_FILES - len(files), 0),
+            "remaining_bytes": max(_MAX_ROOM_TOTAL_BYTES - total_bytes, 0),
+        }
+
+    def _require_room_file_quota(files, *, next_size_bytes: int) -> None:
+        quota = _room_file_quota_payload(files)
+        if quota["count"] >= _MAX_ROOM_FILES:
+            raise HTTPException(status_code=409, detail="room file count quota exceeded")
+        if quota["total_bytes"] + next_size_bytes > _MAX_ROOM_TOTAL_BYTES:
+            raise HTTPException(status_code=413, detail="room file total bytes quota exceeded")
+
+    def _normalize_room_file_purpose(purpose: str) -> str:
+        normalized = purpose.strip().lower() if isinstance(purpose, str) else "artifact"
+        if normalized not in {"artifact", "instruction"}:
+            raise HTTPException(status_code=422, detail="room file purpose must be artifact or instruction")
+        return normalized
+
     @router.get("/managed/workspaces/{slug}/sessions/{session_id}/files")
     async def managed_workspace_session_files(
         slug: str,
@@ -593,9 +620,7 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
                 "workspace": _sanitize_workspace(workspace),
                 "workspace_session": _sanitize_workspace_session(record, include_owner_member_token=True),
                 "files": [_sanitize_room_file(item) for item in files],
-                "count": len(files),
-                "total_bytes": sum(item.size_bytes for item in files),
-                "max_file_bytes": _MAX_ROOM_FILE_BYTES,
+                **_room_file_quota_payload(files),
             }
         )
 
@@ -603,6 +628,7 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
     async def managed_upload_workspace_session_file(
         slug: str,
         session_id: str,
+        purpose: str = Form(default="artifact"),
         file: UploadFile = File(...),
         acp_managed_session: str | None = Cookie(default=None),
     ) -> JSONResponse:
@@ -612,10 +638,13 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
             acp_managed_session=acp_managed_session,
         )
         content = await _read_room_file_upload(file)
+        existing_files = principal_store.list_room_files(session_id=record.session_id)
+        _require_room_file_quota(existing_files, next_size_bytes=len(content))
         created = principal_store.create_room_file(
             session_id=record.session_id,
             workspace_id=workspace.workspace_id,
             filename=file.filename or "room-file",
+            purpose=_normalize_room_file_purpose(purpose),
             content_type=file.content_type or "application/octet-stream",
             content=content,
             uploaded_by_type="owner",

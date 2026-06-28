@@ -85,6 +85,7 @@ export interface RoomFile {
   session_id: string
   workspace_id: string
   filename: string
+  purpose: 'artifact' | 'instruction'
   content_type: string
   size_bytes: number
   uploaded_by_type: 'owner' | 'agent'
@@ -312,11 +313,16 @@ export async function fetchSessionFiles(slug: string, sessionId: string) {
     count: number
     total_bytes: number
     max_file_bytes: number
+    max_files: number
+    max_total_bytes: number
+    remaining_files: number
+    remaining_bytes: number
   }>(`/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/files`)
 }
 
-export async function uploadSessionFile(slug: string, sessionId: string, file: File) {
+export async function uploadSessionFile(slug: string, sessionId: string, file: File, purpose: RoomFile['purpose']) {
   const body = new FormData()
+  body.append('purpose', purpose)
   body.append('file', file)
   return apiFetch<{ status: string; workspace: Workspace; workspace_session: WorkspaceSession; file: RoomFile }>(
     `/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/files`,

@@ -73,6 +73,7 @@ class ManagedRoomFileRecord:
     session_id: str
     workspace_id: str
     filename: str
+    purpose: str
     content_type: str
     size_bytes: int
     content: bytes
@@ -317,6 +318,7 @@ class SqliteManagedPrincipalStore:
                     session_id TEXT NOT NULL,
                     workspace_id TEXT NOT NULL,
                     filename TEXT NOT NULL,
+                    purpose TEXT NOT NULL DEFAULT 'artifact',
                     content_type TEXT NOT NULL,
                     size_bytes INTEGER NOT NULL,
                     content BLOB NOT NULL,
@@ -334,6 +336,17 @@ class SqliteManagedPrincipalStore:
                 ON managed_room_files(session_id, created_at ASC, file_id ASC)
                 """
             )
+            room_file_columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(managed_room_files)").fetchall()
+            }
+            if "purpose" not in room_file_columns:
+                conn.execute(
+                    """
+                    ALTER TABLE managed_room_files
+                    ADD COLUMN purpose TEXT NOT NULL DEFAULT 'artifact'
+                    """
+                )
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS managed_audit_log (
@@ -1792,6 +1805,7 @@ class SqliteManagedPrincipalStore:
             session_id=str(row["session_id"]),
             workspace_id=str(row["workspace_id"]),
             filename=str(row["filename"]),
+            purpose=str(row["purpose"]),
             content_type=str(row["content_type"]),
             size_bytes=int(row["size_bytes"]),
             content=bytes(content) if content is not None else b"",
@@ -1806,6 +1820,7 @@ class SqliteManagedPrincipalStore:
         session_id: str,
         workspace_id: str,
         filename: str,
+        purpose: str = "artifact",
         content_type: str,
         content: bytes,
         uploaded_by_type: str,
@@ -1814,6 +1829,9 @@ class SqliteManagedPrincipalStore:
         normalized_filename = filename.replace("\\", "/").split("/")[-1].strip() if isinstance(filename, str) else ""
         if not normalized_filename:
             normalized_filename = "room-file"
+        normalized_purpose = purpose.strip().lower() if isinstance(purpose, str) else "artifact"
+        if normalized_purpose not in {"artifact", "instruction"}:
+            raise ValueError("room file purpose must be artifact or instruction")
         normalized_content_type = content_type.strip() if isinstance(content_type, str) and content_type.strip() else "application/octet-stream"
         if uploaded_by_type not in {"owner", "agent"}:
             raise ValueError("room file uploaded_by_type must be owner or agent")
@@ -1825,6 +1843,7 @@ class SqliteManagedPrincipalStore:
             session_id=session_id,
             workspace_id=workspace_id,
             filename=normalized_filename,
+            purpose=normalized_purpose,
             content_type=normalized_content_type,
             size_bytes=len(content),
             content=bytes(content),
@@ -1841,19 +1860,21 @@ class SqliteManagedPrincipalStore:
                     session_id,
                     workspace_id,
                     filename,
+                    purpose,
                     content_type,
                     size_bytes,
                     content,
                     uploaded_by_type,
                     uploaded_by_name,
                     created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.file_id,
                     record.session_id,
                     record.workspace_id,
                     record.filename,
+                    record.purpose,
                     record.content_type,
                     record.size_bytes,
                     record.content,
@@ -1874,7 +1895,7 @@ class SqliteManagedPrincipalStore:
         try:
             rows = conn.execute(
                 """
-                SELECT file_id, session_id, workspace_id, filename, content_type, size_bytes, content, uploaded_by_type, uploaded_by_name, created_at
+                SELECT file_id, session_id, workspace_id, filename, purpose, content_type, size_bytes, content, uploaded_by_type, uploaded_by_name, created_at
                 FROM managed_room_files
                 WHERE session_id = ?
                 ORDER BY created_at ASC, file_id ASC
@@ -1890,7 +1911,7 @@ class SqliteManagedPrincipalStore:
         try:
             row = conn.execute(
                 """
-                SELECT file_id, session_id, workspace_id, filename, content_type, size_bytes, content, uploaded_by_type, uploaded_by_name, created_at
+                SELECT file_id, session_id, workspace_id, filename, purpose, content_type, size_bytes, content, uploaded_by_type, uploaded_by_name, created_at
                 FROM managed_room_files
                 WHERE file_id = ?
                 LIMIT 1

@@ -109,6 +109,12 @@
             </div>
 
             <form class="file-form" @submit.prevent="handleUploadFile">
+              <label for="room-file-purpose">{{ t('room_files_purpose_label') }}</label>
+              <select id="room-file-purpose" v-model="selectedFilePurpose" :disabled="uploadingFile">
+                <option value="artifact">{{ t('room_files_purpose_artifact') }}</option>
+                <option value="instruction">{{ t('room_files_purpose_instruction') }}</option>
+              </select>
+
               <label for="room-file">{{ t('room_files_upload_label') }}</label>
               <input
                 id="room-file"
@@ -118,6 +124,15 @@
               />
               <p class="operator-note">
                 {{ t('room_files_limit').replace('{size}', formatBytes(maxFileBytes)) }}
+              </p>
+              <p class="operator-note">
+                {{
+                  t('room_files_quota')
+                    .replace('{remainingFiles}', String(remainingFiles))
+                    .replace('{maxFiles}', String(maxFiles))
+                    .replace('{remainingBytes}', formatBytes(remainingBytes))
+                    .replace('{maxBytes}', formatBytes(maxTotalBytes))
+                }}
               </p>
               <button class="primary-button" type="submit" :disabled="uploadingFile || !selectedFile">
                 <span v-if="uploadingFile" class="spinner" aria-hidden="true"></span>
@@ -174,6 +189,7 @@
               <article v-for="file in files" :key="file.file_id" class="room-file">
                 <div>
                   <h3>{{ file.filename }}</h3>
+                  <span class="file-purpose">{{ t(file.purpose === 'instruction' ? 'room_files_purpose_instruction' : 'room_files_purpose_artifact') }}</span>
                   <p class="file-meta">
                     {{ formatBytes(file.size_bytes) }} · {{ file.content_type }} · {{ relativeTime(file.created_at) }}
                   </p>
@@ -246,7 +262,12 @@ const acpSession = ref<any | null>(null)
 const posts = ref<RoomWallPost[]>([])
 const files = ref<RoomFile[]>([])
 const selectedFile = ref<File | null>(null)
+const selectedFilePurpose = ref<RoomFile['purpose']>('artifact')
 const maxFileBytes = ref(0)
+const maxFiles = ref(0)
+const maxTotalBytes = ref(0)
+const remainingFiles = ref(0)
+const remainingBytes = ref(0)
 const newPostBody = ref('')
 const newPostPinned = ref(false)
 const operatorTo = ref('all')
@@ -283,6 +304,10 @@ async function loadDetail() {
   posts.value = wall.posts
   files.value = fileList.files
   maxFileBytes.value = fileList.max_file_bytes
+  maxFiles.value = fileList.max_files
+  maxTotalBytes.value = fileList.max_total_bytes
+  remainingFiles.value = fileList.remaining_files
+  remainingBytes.value = fileList.remaining_bytes
   const members: AcpMember[] = Array.isArray(detail.acp_session?.members) ? detail.acp_session.members : []
   const preferred = members.find((member: AcpMember) => (
     typeof member?.agent_name === 'string'
@@ -317,9 +342,12 @@ async function handleUploadFile() {
   if (!selectedFile.value) return
   uploadingFile.value = true
   try {
-    const result = await uploadSessionFile(slug.value, sessionId.value, selectedFile.value)
+    const result = await uploadSessionFile(slug.value, sessionId.value, selectedFile.value, selectedFilePurpose.value)
     files.value = [...files.value, result.file]
+    remainingFiles.value = Math.max(remainingFiles.value - 1, 0)
+    remainingBytes.value = Math.max(remainingBytes.value - result.file.size_bytes, 0)
     selectedFile.value = null
+    selectedFilePurpose.value = 'artifact'
     const input = document.getElementById('room-file') as HTMLInputElement | null
     if (input) input.value = ''
     toast.show(t('room_files_uploaded'), 'success')
@@ -404,6 +432,8 @@ async function deleteFile(file: RoomFile) {
   try {
     await deleteSessionFile(slug.value, sessionId.value, file.file_id)
     files.value = files.value.filter(item => item.file_id !== file.file_id)
+    remainingFiles.value = Math.min(remainingFiles.value + 1, maxFiles.value)
+    remainingBytes.value = Math.min(remainingBytes.value + file.size_bytes, maxTotalBytes.value)
     toast.show(t('room_files_deleted'), 'success')
   } catch (err) {
     toast.show(getApiErrorMessage(err), 'error')
@@ -576,6 +606,16 @@ textarea {
   margin: 0;
   color: var(--text-2);
   font-size: 0.85rem;
+}
+.file-purpose {
+  display: inline-flex;
+  margin: 0 0 6px;
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 .file-actions {
   display: flex;

@@ -99,6 +99,7 @@ def _sanitize_room_file(record: ManagedRoomFileRecord) -> dict[str, str | int]:
         "session_id": record.session_id,
         "workspace_id": record.workspace_id,
         "filename": record.filename,
+        "purpose": record.purpose,
         "content_type": record.content_type,
         "size_bytes": record.size_bytes,
         "uploaded_by_type": record.uploaded_by_type,

@@ -40,6 +40,10 @@ from acp_managed.routing._helpers import (
     _sanitize_workspace_session,
 )
 
+_MAX_ROOM_FILE_BYTES = 256 * 1024
+_MAX_ROOM_FILES = 20
+_MAX_ROOM_TOTAL_BYTES = 1024 * 1024
+
 
 def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
     router = APIRouter()
@@ -264,6 +268,7 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
         if record is None or record.workspace_id != workspace.workspace_id:
             raise HTTPException(status_code=404, detail="managed workspace session does not exist")
         files = principal_store.list_room_files(session_id=record.session_id)
+        total_bytes = sum(item.size_bytes for item in files)
         return JSONResponse(
             {
                 "workspace": _sanitize_workspace(workspace),
@@ -271,7 +276,12 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
                 "workspace_session": _sanitize_workspace_session(record),
                 "files": [_sanitize_room_file(item) for item in files],
                 "count": len(files),
-                "total_bytes": sum(item.size_bytes for item in files),
+                "total_bytes": total_bytes,
+                "max_file_bytes": _MAX_ROOM_FILE_BYTES,
+                "max_files": _MAX_ROOM_FILES,
+                "max_total_bytes": _MAX_ROOM_TOTAL_BYTES,
+                "remaining_files": max(_MAX_ROOM_FILES - len(files), 0),
+                "remaining_bytes": max(_MAX_ROOM_TOTAL_BYTES - total_bytes, 0),
             }
         )
 

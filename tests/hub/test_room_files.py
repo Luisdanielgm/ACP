@@ -68,6 +68,7 @@ def test_room_files_owner_uploads_and_agents_can_read_without_owner_token(monkey
     assert file_item["content_type"] == "text/markdown"
     assert file_item["size_bytes"] == len(b"# Decision\nUse room files for durable artifacts.\n")
     assert file_item["uploaded_by_type"] == "owner"
+    assert file_item["purpose"] == "artifact"
     assert file_item["uploaded_by_name"] == "owner@example.com"
     assert "content" not in file_item
 
@@ -91,6 +92,7 @@ def test_room_files_owner_uploads_and_agents_can_read_without_owner_token(monkey
     agent_payload = agent_list.json()
     assert agent_payload["files"][0]["filename"] == "decision.md"
     assert "owner_member_token" not in agent_payload["workspace_session"]
+    assert agent_payload["files"][0]["purpose"] == "artifact"
 
     agent_download = agent.get(
         f"/managed/agent/workspaces/team-one/sessions/{session_id}/files/{file_item['file_id']}",
@@ -129,3 +131,50 @@ def test_room_files_owner_can_delete_and_large_files_are_rejected(monkeypatch, t
     listing = owner.get(f"/managed/workspaces/team-one/sessions/{session_id}/files")
     assert listing.status_code == 200, listing.text
     assert listing.json()["files"] == []
+
+
+def test_room_files_support_instruction_artifacts(monkeypatch, tmp_path) -> None:
+    app, owner, session_id = _owner_with_session(monkeypatch, tmp_path)
+
+    uploaded = owner.post(
+        f"/managed/workspaces/team-one/sessions/{session_id}/files",
+        data={"purpose": "instruction"},
+        files={"file": ("runbook.md", b"# Runbook\nAlways summarize decisions.\n", "text/markdown")},
+    )
+    assert uploaded.status_code == 200, uploaded.text
+    assert uploaded.json()["file"]["purpose"] == "instruction"
+
+    owner_list = owner.get(f"/managed/workspaces/team-one/sessions/{session_id}/files")
+    assert owner_list.status_code == 200, owner_list.text
+    assert owner_list.json()["files"][0]["purpose"] == "instruction"
+
+    token = _workspace_agent_token(owner)
+    agent = TestClient(app)
+    agent_list = agent.get(
+        f"/managed/agent/workspaces/team-one/sessions/{session_id}/files",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert agent_list.status_code == 200, agent_list.text
+    assert agent_list.json()["files"][0]["purpose"] == "instruction"
+
+
+def test_room_files_enforce_per_room_count_quota(monkeypatch, tmp_path) -> None:
+    _, owner, session_id = _owner_with_session(monkeypatch, tmp_path)
+
+    first = owner.get(f"/managed/workspaces/team-one/sessions/{session_id}/files")
+    assert first.status_code == 200, first.text
+    max_files = first.json()["max_files"]
+
+    for index in range(max_files):
+        uploaded = owner.post(
+            f"/managed/workspaces/team-one/sessions/{session_id}/files",
+            files={"file": (f"note-{index}.txt", b"x", "text/plain")},
+        )
+        assert uploaded.status_code == 200, uploaded.text
+
+    over_quota = owner.post(
+        f"/managed/workspaces/team-one/sessions/{session_id}/files",
+        files={"file": ("too-many.txt", b"x", "text/plain")},
+    )
+    assert over_quota.status_code == 409, over_quota.text
+    assert "room file count quota" in over_quota.json()["detail"]
