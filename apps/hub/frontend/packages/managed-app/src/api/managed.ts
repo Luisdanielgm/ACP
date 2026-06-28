@@ -43,6 +43,7 @@ export interface WorkspaceSession {
   owner_member_token?: string
   title?: string
   project?: string
+  prompt?: string | null
   created_at: string
   // Live coordination state. "active" when the session is currently held by
   // the coordination service; "closed" when only the persisted record exists.
@@ -216,7 +217,7 @@ export async function fetchWorkspaceSessions(slug: string) {
   return apiFetch<{ workspace: Workspace; sessions: WorkspaceSession[]; count: number }>(`/managed/workspaces/${encodeURIComponent(slug)}/sessions`)
 }
 
-export async function createWorkspaceSession(slug: string, data: { agent_name: string; title?: string; project?: string }) {
+export async function createWorkspaceSession(slug: string, data: { agent_name: string; title?: string; project?: string; prompt?: string }) {
   return apiFetch<{ status: string; workspace: Workspace; workspace_session: WorkspaceSession; acp_session: any }>(`/managed/workspaces/${encodeURIComponent(slug)}/sessions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

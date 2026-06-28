@@ -100,6 +100,10 @@
                   <label for="session-project">{{ t('project_label') }}</label>
                   <input id="session-project" v-model="newSession.project" type="text" :placeholder="t('project_ph')" />
                 </div>
+                <div class="field">
+                  <label for="session-prompt">{{ t('prompt_label') }}</label>
+                  <textarea id="session-prompt" v-model="newSession.prompt" rows="3" :placeholder="t('prompt_ph')"></textarea>
+                </div>
                 <button type="submit" class="primary-button full-width" :disabled="sessionLoading">
                   <span v-if="sessionLoading" class="spinner" aria-hidden="true"></span>
                   {{ sessionLoading ? t('creating_session') : t('create_session_and_open_dashboard') }}
@@ -314,7 +318,7 @@ const sessionLoading = ref(false)
 const showConfirmRevoke = ref(false)
 const pageBanner = ref<{ title: string; body: string } | null>(null)
 
-const newSession = ref({ agent_name: '', title: '', project: '' })
+const newSession = ref({ agent_name: '', title: '', project: '', prompt: '' })
 const sessionErrors = ref({ agent_name: '', title: '', project: '' })
 
 function validateSession(): boolean {
@@ -502,6 +506,7 @@ async function handleCreateSession() {
       agent_name: newSession.value.agent_name,
       title: newSession.value.title || undefined,
       project: newSession.value.project || undefined,
+      prompt: newSession.value.prompt || undefined,
     })
     await openCreatedSession(result, newSession.value.agent_name)
   } catch (err) {

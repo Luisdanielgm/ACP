@@ -192,6 +192,8 @@ export const es: Record<string, string> = {
   title_ph: 'Ej: Revision de codigo',
   project_label: 'Proyecto',
   project_ph: 'Ej: backend-api',
+  prompt_label: 'Instrucciones de la sala (opcional)',
+  prompt_ph: 'Ej: Responder en JSON. Ser conciso. Coordinar el refactor de AeroCostos.',
   create_session_and_open_dashboard: 'Crear sesion',
   creating_session: 'Creando sesion...',
   workspace_agent_name_resolved: 'El agente se creo como {actual} porque {requested} ya estaba en uso en otra sesion activa.',

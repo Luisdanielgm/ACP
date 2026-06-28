@@ -192,6 +192,8 @@ export const en: Record<string, string> = {
   title_ph: 'e.g. Code review',
   project_label: 'Project',
   project_ph: 'e.g. backend-api',
+  prompt_label: 'Room instructions (optional)',
+  prompt_ph: 'e.g. Reply in JSON. Be concise. Coordinate on the AeroCostos refactor.',
   create_session_and_open_dashboard: 'Create session',
   creating_session: 'Creating session...',
   workspace_agent_name_resolved: 'The agent was created as {actual} because {requested} was already in use by another active session.',
