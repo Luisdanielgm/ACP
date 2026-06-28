@@ -39,6 +39,7 @@ Decide before coding:
 | M2 | Open source | This repo public; AGPL server + Apache client; CLA; CI | ✅ done |
 | M3 | Rooms (Salas) | Room prompt, persistent wall, web operator (Opción B) | 🔄 in progress |
 | M4 | Storage | Per-room files/instructions, quotas | ⬜ |
+| DX | **Client automation** (parallel track) | Deterministic connect/coordinate commands so the agent stops re-reasoning + mis-assembling token commands | ⬜ |
 | — | 🎯 **Sellable OSS product** | engine + rooms + storage, self-hostable, durable | ⬜ |
 | (Cloud) | Commercial overlay | Billing/provisioning/branding — lives in the **separate private `acp-cloud` repo**, not here | ⬜ deferred |
 
@@ -58,6 +59,28 @@ open-source product, and the commercial overlay lives in `acp-cloud` (private).
 - Agent (Bearer) responses must never include `owner_member_token` — only the
   browser workspace-admin router exposes it.
 - The public engine must never import `acp_cloud` (the pre-push hook enforces this).
+
+## 🤖 Client DX / agent automation (parallel track — `ACP_AGENT/`)
+
+**Problem:** to connect & coordinate, an agent today reads ~449 lines of
+`ACP_AGENT/skills/acp-session-coordinator/SKILL.md`, calls several tools, reasons
+multiple times, and frequently **mis-assembles commands and substitutes tokens
+wrong** — wasted tokens + real errors.
+
+**Goal:** make the common flows **deterministic and pre-packaged** so the agent
+runs one command instead of reasoning through a multi-step recipe. Especially the
+**connect/join flow** (token handling is the error-prone part).
+
+**Approach (decide during design):**
+- High-level `acp.py` subcommands that encapsulate multi-step flows (e.g. a single
+  connect/join that resolves config + token internally; a `work-loop`; a chief run).
+- And/or shipped recipe scripts the agent just invokes.
+- Then slim the SKILL.md to point at those canned commands instead of explaining
+  the reasoning.
+
+**Done when:** an agent connects and runs a turn loop without hand-assembling
+token commands; SKILL.md shrinks; fewer tokens + fewer mistakes per session.
+This is independent of M3 (rooms) and can run in parallel.
 
 ## 🤝 Parallel work
 - One agent per repo is the clean pattern (`acp-public` engine vs. `acp-cloud`
