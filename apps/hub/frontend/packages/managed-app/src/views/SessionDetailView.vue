@@ -103,6 +103,31 @@
 
           <article class="surface-card">
             <div class="section-head">
+              <span class="section-chip section-chip-accent">{{ t('room_files_section') }}</span>
+              <h2>{{ t('room_files_title') }}</h2>
+              <p>{{ t('room_files_help') }}</p>
+            </div>
+
+            <form class="file-form" @submit.prevent="handleUploadFile">
+              <label for="room-file">{{ t('room_files_upload_label') }}</label>
+              <input
+                id="room-file"
+                type="file"
+                :disabled="uploadingFile"
+                @change="handleFileSelected"
+              />
+              <p class="operator-note">
+                {{ t('room_files_limit').replace('{size}', formatBytes(maxFileBytes)) }}
+              </p>
+              <button class="primary-button" type="submit" :disabled="uploadingFile || !selectedFile">
+                <span v-if="uploadingFile" class="spinner" aria-hidden="true"></span>
+                {{ t('room_files_upload') }}
+              </button>
+            </form>
+          </article>
+
+          <article class="surface-card">
+            <div class="section-head">
               <span class="section-chip section-chip-accent">{{ t('room_wall_posts') }}</span>
               <h2>{{ t('room_wall_current') }}</h2>
             </div>
@@ -132,6 +157,41 @@
               </article>
             </div>
           </article>
+
+          <article class="surface-card">
+            <div class="section-head">
+              <span class="section-chip section-chip-accent">{{ t('room_files_section') }}</span>
+              <h2>{{ t('room_files_current') }}</h2>
+              <p>{{ t('room_files_total').replace('{count}', String(files.length)).replace('{size}', formatBytes(totalFileBytes)) }}</p>
+            </div>
+
+            <div v-if="files.length === 0" class="empty-state compact">
+              <p class="empty-title">{{ t('room_files_empty') }}</p>
+              <p class="empty-body">{{ t('room_files_empty_body') }}</p>
+            </div>
+
+            <div v-else class="room-files">
+              <article v-for="file in files" :key="file.file_id" class="room-file">
+                <div>
+                  <h3>{{ file.filename }}</h3>
+                  <p class="file-meta">
+                    {{ formatBytes(file.size_bytes) }} · {{ file.content_type }} · {{ relativeTime(file.created_at) }}
+                  </p>
+                  <p class="file-meta">
+                    {{ t('room_files_uploaded_by').replace('{name}', file.uploaded_by_name) }}
+                  </p>
+                </div>
+                <div class="file-actions">
+                  <a class="secondary-button" :href="fileDownloadHref(file.file_id)" download>
+                    {{ t('room_files_download') }}
+                  </a>
+                  <button class="danger" type="button" @click="deleteFile(file)" :disabled="mutatingFileId === file.file_id">
+                    {{ t('confirm_delete_btn') }}
+                  </button>
+                </div>
+              </article>
+            </div>
+          </article>
         </div>
       </section>
     </main>
@@ -145,11 +205,16 @@ import ManagedNav from '../components/ManagedNav.vue'
 import SkeletonBlock from '../components/SkeletonBlock.vue'
 import {
   createSessionWallPost,
+  deleteSessionFile,
   deleteSessionWallPost,
   fetchSessionDetail,
+  fetchSessionFiles,
   fetchSessionWall,
+  sessionFileDownloadUrl,
   sendSessionOperatorMessage,
   updateSessionWallPost,
+  uploadSessionFile,
+  type RoomFile,
   type RoomWallPost,
   type WorkspaceSession,
 } from '../api/managed'
@@ -173,10 +238,15 @@ const sessionId = computed(() => String(route.params.sessionId || ''))
 const loading = ref(true)
 const posting = ref(false)
 const operatorSending = ref(false)
+const uploadingFile = ref(false)
 const mutatingPostId = ref('')
+const mutatingFileId = ref('')
 const session = ref<WorkspaceSession | null>(null)
 const acpSession = ref<any | null>(null)
 const posts = ref<RoomWallPost[]>([])
+const files = ref<RoomFile[]>([])
+const selectedFile = ref<File | null>(null)
+const maxFileBytes = ref(0)
 const newPostBody = ref('')
 const newPostPinned = ref(false)
 const operatorTo = ref('all')
@@ -185,6 +255,7 @@ const operatorPayload = ref('')
 const lastOperatorName = ref('')
 
 const sessionTitle = computed(() => session.value?.title || t('session_detail_title'))
+const totalFileBytes = computed(() => files.value.reduce((total, item) => total + item.size_bytes, 0))
 const memberOptions = computed<AcpMember[]>(() => {
   const members = acpSession.value?.members
   if (!Array.isArray(members)) return []
@@ -202,13 +273,16 @@ const livePath = computed(() => {
 })
 
 async function loadDetail() {
-  const [detail, wall] = await Promise.all([
+  const [detail, wall, fileList] = await Promise.all([
     fetchSessionDetail(slug.value, sessionId.value),
     fetchSessionWall(slug.value, sessionId.value),
+    fetchSessionFiles(slug.value, sessionId.value),
   ])
   session.value = detail.workspace_session
   acpSession.value = detail.acp_session
   posts.value = wall.posts
+  files.value = fileList.files
+  maxFileBytes.value = fileList.max_file_bytes
   const members: AcpMember[] = Array.isArray(detail.acp_session?.members) ? detail.acp_session.members : []
   const preferred = members.find((member: AcpMember) => (
     typeof member?.agent_name === 'string'
@@ -216,6 +290,44 @@ async function loadDetail() {
     && !member.agent_name.startsWith('web-operator-')
   ))
   operatorTo.value = preferred?.agent_name || 'all'
+}
+
+function handleFileSelected(event: Event) {
+  const input = event.target as HTMLInputElement
+  selectedFile.value = input.files?.[0] || null
+}
+
+function fileDownloadHref(fileId: string): string {
+  return sessionFileDownloadUrl(slug.value, sessionId.value, fileId)
+}
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let size = value
+  let unitIndex = 0
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size = size / 1024
+    unitIndex += 1
+  }
+  return `${size >= 10 || unitIndex === 0 ? Math.round(size) : size.toFixed(1)} ${units[unitIndex]}`
+}
+
+async function handleUploadFile() {
+  if (!selectedFile.value) return
+  uploadingFile.value = true
+  try {
+    const result = await uploadSessionFile(slug.value, sessionId.value, selectedFile.value)
+    files.value = [...files.value, result.file]
+    selectedFile.value = null
+    const input = document.getElementById('room-file') as HTMLInputElement | null
+    if (input) input.value = ''
+    toast.show(t('room_files_uploaded'), 'success')
+  } catch (err) {
+    toast.show(getApiErrorMessage(err), 'error')
+  } finally {
+    uploadingFile.value = false
+  }
 }
 
 async function handleCreatePost() {
@@ -287,6 +399,19 @@ async function deletePost(post: RoomWallPost) {
   }
 }
 
+async function deleteFile(file: RoomFile) {
+  mutatingFileId.value = file.file_id
+  try {
+    await deleteSessionFile(slug.value, sessionId.value, file.file_id)
+    files.value = files.value.filter(item => item.file_id !== file.file_id)
+    toast.show(t('room_files_deleted'), 'success')
+  } catch (err) {
+    toast.show(getApiErrorMessage(err), 'error')
+  } finally {
+    mutatingFileId.value = ''
+  }
+}
+
 onMounted(async () => {
   const currentUser = await requireAuth()
   if (!currentUser) return
@@ -311,7 +436,8 @@ onMounted(async () => {
 .detail-grid,
 .wall-posts,
 .wall-form,
-.operator-form {
+.operator-form,
+.file-form {
   display: flex;
   gap: 18px;
 }
@@ -325,7 +451,8 @@ onMounted(async () => {
 .detail-grid,
 .wall-posts,
 .wall-form,
-.operator-form {
+.operator-form,
+.file-form {
   flex-direction: column;
 }
 .panel-kicker,
@@ -376,7 +503,8 @@ select {
 textarea {
   resize: vertical;
 }
-.operator-form label {
+.operator-form label,
+.file-form label {
   color: var(--text-2);
   font-weight: 700;
 }
@@ -424,9 +552,43 @@ textarea {
   font-size: 0.72rem;
   font-weight: 700;
 }
+.room-files {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.room-file {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  background: var(--surface-1);
+}
+.room-file h3 {
+  margin: 0 0 6px;
+  color: var(--text-1);
+  font-size: 1rem;
+  word-break: break-word;
+}
+.file-meta {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 0.85rem;
+}
+.file-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
 @media (max-width: 720px) {
   .panel {
     padding: 18px;
+  }
+  .room-file {
+    flex-direction: column;
   }
 }
 </style>

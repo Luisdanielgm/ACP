@@ -1,5 +1,9 @@
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 
+export function apiUrl(path: string): string {
+  return `${BASE_URL}${path}`
+}
+
 export class ApiError extends Error {
   status: number
   body?: any
@@ -19,7 +23,7 @@ export function getApiErrorMessage(err: unknown): string {
 }
 
 export async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${BASE_URL}${path}`, {
+  const response = await fetch(apiUrl(path), {
     credentials: 'include',
     ...options,
   })

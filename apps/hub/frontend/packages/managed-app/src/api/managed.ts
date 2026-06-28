@@ -1,4 +1,4 @@
-import { apiFetch } from './client'
+import { apiFetch, apiUrl } from './client'
 
 // ── Types ──
 
@@ -77,6 +77,18 @@ export interface RoomWallPost {
   author_name: string
   body: string
   pinned: boolean
+  created_at: string
+}
+
+export interface RoomFile {
+  file_id: string
+  session_id: string
+  workspace_id: string
+  filename: string
+  content_type: string
+  size_bytes: number
+  uploaded_by_type: 'owner' | 'agent'
+  uploaded_by_name: string
   created_at: string
 }
 
@@ -289,6 +301,41 @@ export async function deleteSessionWallPost(slug: string, sessionId: string, pos
     `/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/wall/${encodeURIComponent(postId)}`,
     { method: 'DELETE' },
   )
+}
+
+
+export async function fetchSessionFiles(slug: string, sessionId: string) {
+  return apiFetch<{
+    workspace: Workspace
+    workspace_session: WorkspaceSession
+    files: RoomFile[]
+    count: number
+    total_bytes: number
+    max_file_bytes: number
+  }>(`/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/files`)
+}
+
+export async function uploadSessionFile(slug: string, sessionId: string, file: File) {
+  const body = new FormData()
+  body.append('file', file)
+  return apiFetch<{ status: string; workspace: Workspace; workspace_session: WorkspaceSession; file: RoomFile }>(
+    `/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/files`,
+    {
+      method: 'POST',
+      body,
+    },
+  )
+}
+
+export async function deleteSessionFile(slug: string, sessionId: string, fileId: string) {
+  return apiFetch<{ status: string; workspace: Workspace; workspace_session: WorkspaceSession; file_id: string }>(
+    `/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(fileId)}`,
+    { method: 'DELETE' },
+  )
+}
+
+export function sessionFileDownloadUrl(slug: string, sessionId: string, fileId: string): string {
+  return apiUrl(`/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(fileId)}`)
 }
 
 export async function sendSessionOperatorMessage(
