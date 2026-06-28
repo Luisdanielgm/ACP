@@ -12,12 +12,12 @@ See [OPEN_CORE_MODEL.md](OPEN_CORE_MODEL.md) for the open-core model and
 ## 📍 Current state (update me)
 
 - **Milestones reached:** ★ M1 (clean engine) · ★ M2 (open source — this repo is public).
-- **In progress:** ★ M3 (Rooms / Salas) and DX client automation.
+- **In progress:** M3 follow-up polish and DX client automation.
   - ✅ Broadcast (one-to-all) — already in `coordination_service.send_message`.
   - ✅ Room prompt (session instructions) — backend + dashboard. Owner sets it on
     session create; agents receive it on join/detail. (`test_room_prompt.py`)
-  - done: Persistent room wall ? separate durable wall store, owner/agent posts, owner pin/delete, managed dashboard detail view. (`test_room_wall.py`)
-  - todo: **Web operator** (Option B: server-side pseudo-member) ? next big slice (backend + Vue).
+  - [done] Persistent room wall - separate durable wall store, owner/agent posts, owner pin/delete, managed dashboard detail view. (`test_room_wall.py`)
+  - [done] Web operator (Option B: server-side pseudo-member) - browser admin can send into the room without exposing pseudo-member credentials. (`test_web_operator.py`)
 - **Tests:** `python -m pytest tests/ -q` → all green (a few skip when internal
   `.planning`/`.codex` artifacts are absent, which is normal in this public repo).
 - **DX client automation:** first deterministic turn-based worker entrypoint exists:
@@ -25,16 +25,16 @@ See [OPEN_CORE_MODEL.md](OPEN_CORE_MODEL.md) for the open-core model and
   for exactly one message, so agents do not hand-assemble session/member-token
   commands for the initial turn.
 
-### Persistent room wall ? DESIGN DECISION
+### Persistent room wall - DESIGN DECISION
 Implemented as a separate durable wall store, not as replay/event history.
 - Feed-style posts are attached to managed workspace sessions.
 - Owners and agents can post.
 - Owners can pin/unpin and delete in v1.
 - Replay remains operational audit/history, not the room wall.
 
-### Next slice: web operator
-Build the browser operator as a server-side pseudo-member so a human can operate
-the room from the managed dashboard without exposing agent credentials.
+### Web operator - IMPLEMENTED
+The browser operator is implemented as a server-side pseudo-member so a human can operate
+the room from the managed dashboard without exposing pseudo-member credentials to the browser.
 
 ---
 
@@ -44,7 +44,7 @@ the room from the managed dashboard without exposing agent credentials.
 |---|---|---|---|
 | M1 | Clean engine | De-tangled managed app (routers + `ManagedRouterDeps` seam), at-least-once message idempotency | ✅ done |
 | M2 | Open source | This repo public; AGPL server + Apache client; CLA; CI | ✅ done |
-| M3 | Rooms (Salas) | Room prompt, persistent wall, web operator (Opción B) | 🔄 in progress |
+| M3 | Rooms (Salas) | Room prompt, persistent wall, web operator (Option B) | core slices done; polish follow-up |
 | M4 | Storage | Per-room files/instructions, quotas | ⬜ |
 | DX | **Client automation** (parallel track) | Deterministic connect/coordinate commands so the agent stops re-reasoning + mis-assembling token commands | 🔄 first slice |
 | — | 🎯 **Sellable OSS product** | engine + rooms + storage, self-hostable, durable | ⬜ |
