@@ -492,6 +492,28 @@ def build_parser() -> argparse.ArgumentParser:
     connect_parser.add_argument("--task-timeout-seconds", type=float, default=1800.0, help="Runner provider execution timeout")
     connect_parser.add_argument("--retry-delay-seconds", type=float, default=2.0, help="Runner delay before retrying transient errors")
 
+    coordinate_parser = subparsers.add_parser(
+        "coordinate",
+        help="Connect through managed ACP and wait for one turn-ready message",
+    )
+    coordinate_parser.add_argument("--config", default=None, help="JSON config path for the local agent")
+    coordinate_parser.add_argument("--agent", "--name", dest="agent", default=None, help="Agent name/config stem to coordinate")
+    coordinate_parser.add_argument("--hub-http", default=None, help="Override managed Hub HTTP base URL")
+    coordinate_parser.add_argument("--hub-ws", default=None, help="Override managed Hub websocket URL used after binding")
+    coordinate_parser.add_argument("--workspace", default=None, help="Local project workspace path for project detection")
+    coordinate_parser.add_argument("--managed-workspace", default=None, help="Optional managed workspace slug. Current ACP managed hubs can infer it from the token.")
+    coordinate_parser.add_argument("--agent-token", default=None, help="Managed workspace agent token. Defaults to managed_agent_token in the selected config.")
+    coordinate_parser.add_argument("--session-id", default=None, help="Join this exact managed session id instead of matching by project")
+    coordinate_parser.add_argument("--project", default=None, help="Project label used to match an active managed session")
+    coordinate_parser.add_argument("--role", default="worker", choices=("auto", "worker", "chief"), help="Coordinate as worker, chief, or infer from existing config")
+    coordinate_parser.add_argument("--capabilities", default=None, help="Comma-separated capability tags to advertise")
+    coordinate_parser.add_argument("--provider", default=None, choices=("codex_local", "claude_local"), help="Local provider to persist for runner mode")
+    coordinate_parser.add_argument("--wait-for-session", type=float, default=120.0, help="Seconds to poll managed sessions until a matching project session appears")
+    coordinate_parser.add_argument("--prefer-latest", action="store_true", help="If several matching sessions exist, pick the latest by created_at instead of failing")
+    coordinate_parser.add_argument("--skip-ready", action="store_true", help="Join and prepare runner mode without sending the readiness INFO message")
+    coordinate_parser.add_argument("--listen-timeout-seconds", type=float, default=DEFAULT_LISTEN_TIMEOUT_SECONDS, help="Seconds to wait for one incoming coordination message")
+    coordinate_parser.add_argument("--retry-delay-seconds", type=float, default=2.0, help="Delay before retrying transient wait errors")
+
     invite_parser = subparsers.add_parser("invite", help="Generate a role-aware ACP invitation prompt")
     invite_parser.add_argument("--config", default=None, help="JSON config path for the inviting/local agent")
     invite_parser.add_argument("--agent", "--name", dest="agent", default=None, help="Default invitee agent name")
@@ -1069,6 +1091,7 @@ def resolve_hub_agent_settings(args: argparse.Namespace, *, require_hub_http: bo
         "managed-join",
         "managed-close",
         "connect",
+        "coordinate",
         "invite",
     } and (
         isinstance(getattr(args, "config", None), str) and getattr(args, "config", "").strip()
@@ -1701,6 +1724,7 @@ def _listen_namespace_for_config(config_path: Path, *, stop_after_message: bool 
         update_policy=None,
         manifest_url=None,
         allow_tracked_auto_update=False,
+        emit=True,
     )
 
 
@@ -2470,6 +2494,63 @@ def connect_from_args(args: argparse.Namespace) -> dict[str, Any]:
     payload["connect_role"] = "worker"
     payload["explanation"] = "Connected as worker; the chief will assign work based on session backlog and capabilities."
     return payload
+
+
+def coordinate_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    connect_payload = connect_from_args(
+        argparse.Namespace(
+            command="connect",
+            config=getattr(args, "config", None),
+            agent=getattr(args, "agent", None),
+            hub_http=getattr(args, "hub_http", None),
+            hub_ws=getattr(args, "hub_ws", None),
+            workspace=getattr(args, "workspace", None),
+            managed_workspace=getattr(args, "managed_workspace", None),
+            agent_token=getattr(args, "agent_token", None),
+            session_id=getattr(args, "session_id", None),
+            project=getattr(args, "project", None),
+            role=getattr(args, "role", "worker"),
+            capabilities=getattr(args, "capabilities", None),
+            provider=getattr(args, "provider", None),
+            wait_for_session=getattr(args, "wait_for_session", 120.0),
+            prefer_latest=getattr(args, "prefer_latest", False),
+            skip_ready=getattr(args, "skip_ready", False),
+            start_runner=False,
+            start_chief=False,
+            backlog_dir=None,
+            wait_timeout_seconds=getattr(args, "listen_timeout_seconds", DEFAULT_LISTEN_TIMEOUT_SECONDS),
+            task_timeout_seconds=1800.0,
+            retry_delay_seconds=getattr(args, "retry_delay_seconds", 2.0),
+        )
+    )
+
+    connect_role = str(connect_payload.get("connect_role") or "worker").strip().lower()
+    if connect_role == "chief":
+        return {
+            "status": connect_payload.get("status", "connected"),
+            "coordinate_role": "chief",
+            "connect": connect_payload,
+            "next_command": connect_payload.get("chief_command"),
+            "explanation": "Chief coordination is long-running; start the returned chief command instead of waiting for one worker turn.",
+        }
+
+    config_path_value = connect_payload.get("config_path") or getattr(args, "config", None)
+    if not isinstance(config_path_value, str) or not config_path_value.strip():
+        raise ValueError("coordinate could not resolve a config_path after connect.")
+
+    listen_args = _listen_namespace_for_config(Path(config_path_value), stop_after_message=True)
+    listen_args.timeout_seconds = float(getattr(args, "listen_timeout_seconds", DEFAULT_LISTEN_TIMEOUT_SECONDS))
+    listen_args.retry_delay_seconds = float(getattr(args, "retry_delay_seconds", 2.0))
+    listen_args.emit = False
+    message_payload = listen_for_session_message(listen_args)
+
+    return {
+        "status": "message_received",
+        "coordinate_role": "worker",
+        "connect": connect_payload,
+        "message": message_payload,
+        "reply_command_hint": f"python {ACP_ROOT / 'acp.py'} reply --config {config_path_value} --to <sender> --payload-file <path>",
+    }
 
 
 def invite_from_args(args: argparse.Namespace) -> dict[str, Any]:
@@ -3407,7 +3488,8 @@ def listen_for_session_message(args: argparse.Namespace) -> dict[str, Any]:
                     )
                     if auto_busy is not None:
                         enriched["auto_busy_hold"] = auto_busy
-            emit_json_line(enriched)
+            if bool(getattr(args, "emit", True)):
+                emit_json_line(enriched)
             if stop_after_message or notice is not None:
                 return enriched
             safe_update_session_status(settings=settings, state="waiting", text="waiting for session activity")
@@ -5406,7 +5488,7 @@ def main(argv: list[str] | None = None) -> int:
             resolve_runner_profile(args)
         elif args.command == "chief":
             resolve_hub_agent_settings(args)
-        elif args.command in {"create-session", "join-session", "start", "join", "managed-start", "managed-join", "onboard", "connect", "attach-session", "wait", "cancel-wait", "wait-window", "listen", "status", "heartbeat", "session-info", "leave-session", "send", "task", "reply"}:
+        elif args.command in {"create-session", "join-session", "start", "join", "managed-start", "managed-join", "onboard", "connect", "coordinate", "attach-session", "wait", "cancel-wait", "wait-window", "listen", "status", "heartbeat", "session-info", "leave-session", "send", "task", "reply"}:
             resolve_hub_agent_settings(args)
         elif args.command == "invite":
             pass
@@ -5486,6 +5568,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "connect":
             print(json.dumps(connect_from_args(args), ensure_ascii=True))
+            return 0
+        if args.command == "coordinate":
+            print(json.dumps(coordinate_from_args(args), ensure_ascii=True))
             return 0
         if args.command == "invite":
             print(json.dumps(invite_from_args(args), ensure_ascii=True))

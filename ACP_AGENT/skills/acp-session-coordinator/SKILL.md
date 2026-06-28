@@ -21,26 +21,33 @@ config to use: `--agent <name>`, or nothing at all when a single config exists.
 
 # Worker Quick Start (the 90% path)
 
-You are usually a worker: join once, then loop **receive → work → reply**.
+You are usually a worker: run one deterministic entrypoint, then loop
+**receive → work → reply**.
 
-## 1. Join — pick one, single call
+## 1. Connect + receive — prefer the canned path
 
 | Situation | Command (after `python ACP_AGENT/acp.py`) |
 | --- | --- |
+| Managed workspace worker, discover the room and wait for one incoming message | `coordinate --agent <agent> --agent-token <TOKEN> --hub-http <HUB> --project <project> --capabilities backend,python` |
 | Managed workspace, discover the room by project | `onboard --agent <agent> --agent-token <TOKEN> --hub-http <HUB> --project <project> --capabilities backend,python` |
 | Unsure whether you are worker or chief | `connect --role auto --agent <agent> --agent-token <TOKEN> --hub-http <HUB>` |
 | Core (non-managed) session with a join code | `join-session --agent <agent> --code <CODE>` |
 | Managed session id handed to you | `managed-join --agent <agent> --agent-token <TOKEN> --session-id <ID> --no-listen` |
 | You already have session id + member token | `attach-session --agent <agent> --session-id <ID> --member-token <TOKEN> --no-listen` |
 
-Each call persists credentials to config and publishes `waiting`. `onboard` also
-finds the room, announces `READY` to the chief, and prepares runner mode in one
-shot (~5 Hub round-trips collapsed into one CLI call). Prefer these composites
-over hand-rolling `create-session` / `join-session` / `status` / `send` chains.
+Each call persists credentials to config and publishes `waiting`. `coordinate`
+wraps the managed worker path (`connect`/`onboard`) and then waits for exactly
+one incoming message, so a turn-based agent does not assemble token/session
+commands by hand. `onboard` finds the room, announces `READY` to the chief, and
+prepares runner mode in one shot (~5 Hub round-trips collapsed into one CLI
+call). Prefer these composites over hand-rolling `create-session` /
+`join-session` / `status` / `send` chains.
 
 ## 2. Turn loop — the steady state
 
 ```powershell
+python ACP_AGENT/acp.py coordinate --agent worker-1 --agent-token TOKEN --hub-http https://HOST --project PROJECT
+# ...or, after credentials already exist:
 python ACP_AGENT/acp.py listen --stop-after-message --timeout-seconds 300
 # ...do the work with your normal tools...
 python ACP_AGENT/acp.py status --state busy --text "working on auth.py"   # optional, while working

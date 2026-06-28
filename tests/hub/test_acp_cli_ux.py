@@ -1709,6 +1709,166 @@ def test_connect_existing_chief_is_self_describing(tmp_path: Path) -> None:
     assert payload["chief_command"][2:4] == ["chief", "start"]
 
 
+def test_coordinate_connects_worker_then_waits_for_one_message(tmp_path: Path, monkeypatch: Any) -> None:
+    config_path = tmp_path / "agents" / "worker-1.json"
+    calls: dict[str, argparse.Namespace] = {}
+
+    def fake_connect(args: argparse.Namespace) -> dict[str, Any]:
+        calls["connect"] = args
+        return {
+            "status": "onboarded",
+            "connect_role": "worker",
+            "agent_name": "worker-1",
+            "config_path": str(config_path),
+        }
+
+    def fake_listen(args: argparse.Namespace) -> dict[str, Any]:
+        calls["listen"] = args
+        return {"status": "message", "message": {"action": "TASK", "payload": "implement slice"}}
+
+    monkeypatch.setattr(acp_cli, "connect_from_args", fake_connect)
+    monkeypatch.setattr(acp_cli, "listen_for_session_message", fake_listen)
+
+    payload = acp_cli.coordinate_from_args(
+        argparse.Namespace(
+            command="coordinate",
+            config=None,
+            agent="worker-1",
+            hub_http="https://hub.example",
+            hub_ws=None,
+            workspace=str(tmp_path),
+            managed_workspace=None,
+            agent_token="managed-token",
+            session_id=None,
+            project="ACP",
+            role="worker",
+            capabilities="backend,python",
+            provider=None,
+            wait_for_session=5.0,
+            prefer_latest=True,
+            skip_ready=False,
+            listen_timeout_seconds=12.5,
+            retry_delay_seconds=3.0,
+        )
+    )
+
+    assert payload["status"] == "message_received"
+    assert payload["connect"]["agent_name"] == "worker-1"
+    assert payload["message"]["message"]["action"] == "TASK"
+    assert calls["connect"].start_runner is False
+    assert calls["connect"].start_chief is False
+    assert calls["listen"].config == str(config_path)
+    assert calls["listen"].stop_after_message is True
+    assert calls["listen"].timeout_seconds == 12.5
+    assert calls["listen"].retry_delay_seconds == 3.0
+
+
+def test_coordinate_cli_prints_single_json_payload(tmp_path: Path, monkeypatch: Any, capsys: Any) -> None:
+    config_path = tmp_path / "agents" / "worker-1.json"
+
+    monkeypatch.setattr(acp_cli, "ACP_ROOT", tmp_path)
+    monkeypatch.setattr(
+        acp_cli,
+        "connect_from_args",
+        lambda args: {
+            "status": "onboarded",
+            "connect_role": "worker",
+            "agent_name": "worker-1",
+            "config_path": str(config_path),
+        },
+    )
+    monkeypatch.setattr(
+        acp_cli,
+        "listen_for_session_message",
+        lambda args: {"status": "message", "message": {"action": "INFO", "payload": "hello"}},
+    )
+
+    exit_code = acp_cli.main(
+        [
+            "coordinate",
+            "--agent",
+            "worker-1",
+            "--agent-token",
+            "managed-token",
+            "--hub-http",
+            "https://hub.example",
+            "--project",
+            "ACP",
+        ]
+    )
+
+    assert exit_code == 0
+    stdout_lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+    assert len(stdout_lines) == 1
+    payload = json.loads(stdout_lines[0])
+    assert payload["status"] == "message_received"
+    assert payload["message"]["message"]["action"] == "INFO"
+
+
+def test_coordinate_allows_missing_named_config_for_first_connect(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(acp_cli, "ACP_ROOT", tmp_path)
+
+    settings = acp_cli.resolve_hub_agent_settings(
+        argparse.Namespace(
+            command="coordinate",
+            config=None,
+            agent="worker-1",
+            hub_http="https://hub.example",
+            hub_ws=None,
+            token=None,
+        )
+    )
+
+    assert settings.config == {}
+    assert settings.agent_name == "worker-1"
+    assert settings.config_path == (tmp_path / "agents" / "worker-1.json").resolve()
+
+
+def test_coordinate_orients_existing_chief_without_waiting(tmp_path: Path, monkeypatch: Any) -> None:
+    config_path = tmp_path / "agents" / "chief.json"
+
+    def fake_connect(args: argparse.Namespace) -> dict[str, Any]:
+        return {
+            "status": "connected",
+            "connect_role": "chief",
+            "config_path": str(config_path),
+            "chief_command": ["python", "ACP_AGENT/acp.py", "chief", "start", "--config", str(config_path)],
+        }
+
+    def fail_listen(args: argparse.Namespace) -> dict[str, Any]:
+        raise AssertionError("coordinate must not wait as a chief")
+
+    monkeypatch.setattr(acp_cli, "connect_from_args", fake_connect)
+    monkeypatch.setattr(acp_cli, "listen_for_session_message", fail_listen)
+
+    payload = acp_cli.coordinate_from_args(
+        argparse.Namespace(
+            command="coordinate",
+            config=str(config_path),
+            agent=None,
+            hub_http=None,
+            hub_ws=None,
+            workspace=str(tmp_path),
+            managed_workspace=None,
+            agent_token=None,
+            session_id=None,
+            project=None,
+            role="auto",
+            capabilities=None,
+            provider=None,
+            wait_for_session=0.0,
+            prefer_latest=False,
+            skip_ready=False,
+            listen_timeout_seconds=12.5,
+            retry_delay_seconds=3.0,
+        )
+    )
+
+    assert payload["status"] == "connected"
+    assert payload["coordinate_role"] == "chief"
+    assert payload["next_command"][2:4] == ["chief", "start"]
+
+
 def test_invite_generates_role_aware_prompt_without_config() -> None:
     payload = acp_cli.invite_from_args(
         argparse.Namespace(

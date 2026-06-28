@@ -12,7 +12,7 @@ See [OPEN_CORE_MODEL.md](OPEN_CORE_MODEL.md) for the open-core model and
 ## 📍 Current state (update me)
 
 - **Milestones reached:** ★ M1 (clean engine) · ★ M2 (open source — this repo is public).
-- **In progress:** ★ M3 (Rooms / Salas).
+- **In progress:** ★ M3 (Rooms / Salas) and DX client automation.
   - ✅ Broadcast (one-to-all) — already in `coordination_service.send_message`.
   - ✅ Room prompt (session instructions) — backend + dashboard. Owner sets it on
     session create; agents receive it on join/detail. (`test_room_prompt.py`)
@@ -20,6 +20,10 @@ See [OPEN_CORE_MODEL.md](OPEN_CORE_MODEL.md) for the open-core model and
   - ⬜ Web operator (Opción B: server-side pseudo-member) — the big one (backend + Vue).
 - **Tests:** `python -m pytest tests/ -q` → all green (a few skip when internal
   `.planning`/`.codex` artifacts are absent, which is normal in this public repo).
+- **DX client automation:** first deterministic turn-based worker entrypoint exists:
+  `python ACP_AGENT/acp.py coordinate ...` wraps managed connect/onboard and waits
+  for exactly one message, so agents do not hand-assemble session/member-token
+  commands for the initial turn.
 
 ### Next slice: persistent room wall — OPEN DESIGN QUESTION
 Decide before coding:
@@ -39,7 +43,7 @@ Decide before coding:
 | M2 | Open source | This repo public; AGPL server + Apache client; CLA; CI | ✅ done |
 | M3 | Rooms (Salas) | Room prompt, persistent wall, web operator (Opción B) | 🔄 in progress |
 | M4 | Storage | Per-room files/instructions, quotas | ⬜ |
-| DX | **Client automation** (parallel track) | Deterministic connect/coordinate commands so the agent stops re-reasoning + mis-assembling token commands | ⬜ |
+| DX | **Client automation** (parallel track) | Deterministic connect/coordinate commands so the agent stops re-reasoning + mis-assembling token commands | 🔄 first slice |
 | — | 🎯 **Sellable OSS product** | engine + rooms + storage, self-hostable, durable | ⬜ |
 | (Cloud) | Commercial overlay | Billing/provisioning/branding — lives in the **separate private `acp-cloud` repo**, not here | ⬜ deferred |
 

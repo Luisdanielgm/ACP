@@ -185,12 +185,13 @@ usa un comando compuesto: cada uno es UNA sola llamada que colapsa ~5 round-trip
 persiste las credenciales en config y te deja listo para trabajar. Despues, nunca
 re-pases `session_id` ni `member_token`: se cargan solos desde config.
 
-- worker en sesion managed por proyecto: `onboard --agent <agent> --agent-token <ACPAGT_TOKEN> --hub-http https://YOUR_HUB --project <project>` (bootstrap + match + join + READY al chief + waiting + prep runner).
+- worker turn-based en sesion managed: `coordinate --agent <agent> --agent-token <ACPAGT_TOKEN> --hub-http https://YOUR_HUB --project <project>` (bootstrap + match + join + READY al chief + waiting + espera un mensaje y sale).
+- worker always-on en sesion managed por proyecto: `onboard --agent <agent> --agent-token <ACPAGT_TOKEN> --hub-http https://YOUR_HUB --project <project>` (bootstrap + match + join + READY al chief + waiting + prep runner).
 - no sabes si sos worker o chief: `connect --role auto` infiere el rol.
 - chief crea sesion: `managed-start --agent <agent> --agent-token <ACPAGT_TOKEN> --hub-http https://YOUR_HUB --title "..." --no-listen` (sin `--no-listen` entra en listen persistente y se bloquea).
 - ya tenes session-id + member-token: `attach-session --session-id <id> --member-token <token> --no-listen`.
 
-Tras onboardear, el turno worker es solo `listen --stop-after-message --timeout-seconds 300` -> trabajar -> `reply --to <chief> "..."` (agrega `--agent <agent>` solo si hay mas de un config).
+Tras conectar, el turno worker es `coordinate ...` la primera vez, o `listen --stop-after-message --timeout-seconds 300` si ya tenes config -> trabajar -> `reply --to <chief> "..."` (agrega `--agent <agent>` solo si hay mas de un config).
 
 ## Primitivas de escucha
 
@@ -242,10 +243,11 @@ Si se selecciona un config, estos comandos tambien pueden usar `managed_agent_to
 Si no queres recordar el flujo, usa el entrypoint self-describing:
 
 ```powershell
-python ACP_AGENT/acp.py connect --role worker --agent worker-1 --agent-token TOKEN --project PROJECT_ID --workspace C:\ruta\proyecto --capabilities backend,python
+python ACP_AGENT/acp.py coordinate --agent worker-1 --agent-token TOKEN --hub-http https://YOUR_HUB --project PROJECT_ID --workspace C:\ruta\proyecto --capabilities backend,python
+python ACP_AGENT/acp.py connect --role worker --agent worker-1 --agent-token TOKEN --hub-http https://YOUR_HUB --project PROJECT_ID --workspace C:\ruta\proyecto --capabilities backend,python
 ```
 
-`connect` decide el camino operativo: como worker corre `onboard`; como chief retoma o crea la sala managed y devuelve el comando `chief start`. Si un runtime no tiene la skill instalada globalmente, eso no bloquea ACP: corre `python ACP_AGENT/acp.py onboard-help` y usa el `acp.py` del bundle + la skill bundleada como documentacion opcional. Para generar un prompt listo para otro agente, usa:
+`coordinate` es el camino corto para un worker turn-based: conecta/onboardea y espera un mensaje en una sola llamada. `connect` decide el camino operativo: como worker corre `onboard`; como chief retoma o crea la sala managed y devuelve el comando `chief start`. Si un runtime no tiene la skill instalada globalmente, eso no bloquea ACP: corre `python ACP_AGENT/acp.py onboard-help` y usa el `acp.py` del bundle + la skill bundleada como documentacion opcional. Para generar un prompt listo para otro agente, usa:
 
 ```powershell
 python ACP_AGENT/acp.py invite --role worker --agent worker-1 --capabilities backend,python --session-id SESSION_ID --project PROJECT_ID
