@@ -57,6 +57,17 @@ class ManagedRoomWallPostRecord:
 
 
 @dataclass(frozen=True)
+class ManagedRoomOperatorRecord:
+    operator_id: str
+    session_id: str
+    workspace_id: str
+    principal_email: str
+    operator_agent_name: str
+    member_token: str
+    created_at: str
+
+
+@dataclass(frozen=True)
 class ManagedBrowserSessionRecord:
     session_id: str
     email: str
@@ -260,6 +271,29 @@ class SqliteManagedPrincipalStore:
                 """
                 CREATE INDEX IF NOT EXISTS idx_managed_room_wall_posts_session_order
                 ON managed_room_wall_posts(session_id, pinned DESC, created_at ASC, post_id ASC)
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS managed_room_operators (
+                    operator_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL,
+                    principal_email TEXT NOT NULL,
+                    operator_agent_name TEXT NOT NULL,
+                    member_token TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(session_id, principal_email),
+                    FOREIGN KEY (session_id) REFERENCES managed_workspace_sessions(session_id) ON DELETE CASCADE,
+                    FOREIGN KEY (workspace_id) REFERENCES managed_workspaces(workspace_id) ON DELETE CASCADE,
+                    FOREIGN KEY (principal_email) REFERENCES managed_principals(email) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_managed_room_operators_session
+                ON managed_room_operators(session_id, operator_agent_name)
                 """
             )
             conn.execute(
@@ -1620,6 +1654,95 @@ class SqliteManagedPrincipalStore:
             )
             conn.commit()
             return int(cursor.rowcount or 0) > 0
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _room_operator_from_row(row: sqlite3.Row) -> ManagedRoomOperatorRecord:
+        return ManagedRoomOperatorRecord(
+            operator_id=str(row["operator_id"]),
+            session_id=str(row["session_id"]),
+            workspace_id=str(row["workspace_id"]),
+            principal_email=str(row["principal_email"]),
+            operator_agent_name=str(row["operator_agent_name"]),
+            member_token=str(row["member_token"]),
+            created_at=str(row["created_at"]),
+        )
+
+    def get_room_operator(
+        self,
+        *,
+        session_id: str,
+        principal_email: str,
+    ) -> ManagedRoomOperatorRecord | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT operator_id, session_id, workspace_id, principal_email, operator_agent_name, member_token, created_at
+                FROM managed_room_operators
+                WHERE session_id = ? AND principal_email = ?
+                LIMIT 1
+                """,
+                (session_id, principal_email.strip().lower()),
+            ).fetchone()
+            return None if row is None else self._room_operator_from_row(row)
+        finally:
+            conn.close()
+
+    def upsert_room_operator(
+        self,
+        *,
+        session_id: str,
+        workspace_id: str,
+        principal_email: str,
+        operator_agent_name: str,
+        member_token: str,
+    ) -> ManagedRoomOperatorRecord:
+        normalized_email = principal_email.strip().lower()
+        record = ManagedRoomOperatorRecord(
+            operator_id=str(uuid4()),
+            session_id=session_id,
+            workspace_id=workspace_id,
+            principal_email=normalized_email,
+            operator_agent_name=operator_agent_name.strip(),
+            member_token=member_token,
+            created_at=self._wall_timestamp(),
+        )
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO managed_room_operators(
+                    operator_id,
+                    session_id,
+                    workspace_id,
+                    principal_email,
+                    operator_agent_name,
+                    member_token,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id, principal_email) DO UPDATE SET
+                    operator_agent_name = excluded.operator_agent_name,
+                    member_token = excluded.member_token
+                """,
+                (
+                    record.operator_id,
+                    record.session_id,
+                    record.workspace_id,
+                    record.principal_email,
+                    record.operator_agent_name,
+                    record.member_token,
+                    record.created_at,
+                ),
+            )
+            conn.commit()
+            stored = self.get_room_operator(session_id=session_id, principal_email=normalized_email)
+            if stored is None:
+                raise ValueError("room operator was not stored")
+            return stored
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("room operator references invalid workspace session") from exc
         finally:
             conn.close()
 

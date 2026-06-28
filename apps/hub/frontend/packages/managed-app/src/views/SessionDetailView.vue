@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div>
     <header>
       <ManagedNav />
@@ -62,6 +62,47 @@
 
           <article class="surface-card">
             <div class="section-head">
+              <span class="section-chip section-chip-accent">{{ t('web_operator_section') }}</span>
+              <h2>{{ t('web_operator_title') }}</h2>
+              <p>{{ t('web_operator_help') }}</p>
+            </div>
+
+            <form class="operator-form" @submit.prevent="handleSendOperatorMessage">
+              <label for="operator-to">{{ t('web_operator_to') }}</label>
+              <select id="operator-to" v-model="operatorTo" :disabled="operatorSending">
+                <option value="all">{{ t('web_operator_all') }}</option>
+                <option v-for="member in memberOptions" :key="member.agent_name" :value="member.agent_name">
+                  {{ member.agent_name }}
+                </option>
+              </select>
+
+              <label for="operator-action">{{ t('web_operator_action') }}</label>
+              <select id="operator-action" v-model="operatorAction" :disabled="operatorSending">
+                <option value="TASK">TASK</option>
+                <option value="INFO">INFO</option>
+                <option value="REPLY">REPLY</option>
+              </select>
+
+              <label class="sr-only" for="operator-payload">{{ t('web_operator_payload') }}</label>
+              <textarea
+                id="operator-payload"
+                v-model="operatorPayload"
+                rows="4"
+                :placeholder="t('web_operator_placeholder')"
+                :disabled="operatorSending"
+              ></textarea>
+              <p v-if="lastOperatorName" class="operator-note">
+                {{ t('web_operator_sending_as').replace('{agent}', lastOperatorName) }}
+              </p>
+              <button class="primary-button" type="submit" :disabled="operatorSending || !operatorPayload.trim()">
+                <span v-if="operatorSending" class="spinner" aria-hidden="true"></span>
+                {{ t('web_operator_send') }}
+              </button>
+            </form>
+          </article>
+
+          <article class="surface-card">
+            <div class="section-head">
               <span class="section-chip section-chip-accent">{{ t('room_wall_posts') }}</span>
               <h2>{{ t('room_wall_current') }}</h2>
             </div>
@@ -107,6 +148,7 @@ import {
   deleteSessionWallPost,
   fetchSessionDetail,
   fetchSessionWall,
+  sendSessionOperatorMessage,
   updateSessionWallPost,
   type RoomWallPost,
   type WorkspaceSession,
@@ -118,6 +160,8 @@ import { useToast } from '../composables/useToast'
 import { buildManagedSessionDashboardPath } from '../lib/sessionLive'
 import { relativeTime } from '../lib/time'
 
+type AcpMember = { agent_name: string }
+
 const route = useRoute()
 const { requireAuth } = useManagedAuth()
 const { t } = useManagedI18n()
@@ -128,13 +172,26 @@ const sessionId = computed(() => String(route.params.sessionId || ''))
 
 const loading = ref(true)
 const posting = ref(false)
+const operatorSending = ref(false)
 const mutatingPostId = ref('')
 const session = ref<WorkspaceSession | null>(null)
+const acpSession = ref<any | null>(null)
 const posts = ref<RoomWallPost[]>([])
 const newPostBody = ref('')
 const newPostPinned = ref(false)
+const operatorTo = ref('all')
+const operatorAction = ref<'TASK' | 'INFO' | 'REPLY'>('TASK')
+const operatorPayload = ref('')
+const lastOperatorName = ref('')
 
 const sessionTitle = computed(() => session.value?.title || t('session_detail_title'))
+const memberOptions = computed<AcpMember[]>(() => {
+  const members = acpSession.value?.members
+  if (!Array.isArray(members)) return []
+  return members
+    .filter(member => typeof member?.agent_name === 'string')
+    .filter(member => !String(member.agent_name).startsWith('web-operator-'))
+})
 const livePath = computed(() => {
   if (!session.value) return '/managed/dashboard'
   return buildManagedSessionDashboardPath({
@@ -150,7 +207,15 @@ async function loadDetail() {
     fetchSessionWall(slug.value, sessionId.value),
   ])
   session.value = detail.workspace_session
+  acpSession.value = detail.acp_session
   posts.value = wall.posts
+  const members: AcpMember[] = Array.isArray(detail.acp_session?.members) ? detail.acp_session.members : []
+  const preferred = members.find((member: AcpMember) => (
+    typeof member?.agent_name === 'string'
+    && member.agent_name !== detail.workspace_session.owner_agent_name
+    && !member.agent_name.startsWith('web-operator-')
+  ))
+  operatorTo.value = preferred?.agent_name || 'all'
 }
 
 async function handleCreatePost() {
@@ -170,6 +235,26 @@ async function handleCreatePost() {
     toast.show(getApiErrorMessage(err), 'error')
   } finally {
     posting.value = false
+  }
+}
+
+async function handleSendOperatorMessage() {
+  const body = operatorPayload.value.trim()
+  if (!body) return
+  operatorSending.value = true
+  try {
+    const result = await sendSessionOperatorMessage(slug.value, sessionId.value, {
+      to: operatorTo.value,
+      action: operatorAction.value,
+      payload: body,
+    })
+    lastOperatorName.value = result.operator.agent_name
+    operatorPayload.value = ''
+    toast.show(t('web_operator_sent'), 'success')
+  } catch (err) {
+    toast.show(getApiErrorMessage(err), 'error')
+  } finally {
+    operatorSending.value = false
   }
 }
 
@@ -225,7 +310,8 @@ onMounted(async () => {
 .header-actions,
 .detail-grid,
 .wall-posts,
-.wall-form {
+.wall-form,
+.operator-form {
   display: flex;
   gap: 18px;
 }
@@ -238,7 +324,8 @@ onMounted(async () => {
 .header-actions,
 .detail-grid,
 .wall-posts,
-.wall-form {
+.wall-form,
+.operator-form {
   flex-direction: column;
 }
 .panel-kicker,
@@ -282,9 +369,20 @@ onMounted(async () => {
 .back-link {
   color: var(--text-2);
 }
-textarea {
+textarea,
+select {
   width: 100%;
+}
+textarea {
   resize: vertical;
+}
+.operator-form label {
+  color: var(--text-2);
+  font-weight: 700;
+}
+.operator-note {
+  color: var(--text-2);
+  margin: 0;
 }
 .checkbox-row {
   display: flex;

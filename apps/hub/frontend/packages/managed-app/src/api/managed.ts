@@ -53,6 +53,22 @@ export interface WorkspaceSession {
   status_counts?: Record<string, number>
 }
 
+
+export interface RoomOperator {
+  operator_id: string
+  agent_name: string
+  created: boolean
+}
+
+export interface SendSessionOperatorMessageResult {
+  status: string
+  workspace: Workspace
+  session_id: string
+  operator: RoomOperator
+  message: { id: string; to: string; action: 'TASK' | 'REPLY' | 'INFO' }
+  send_result: Record<string, unknown>
+}
+
 export interface RoomWallPost {
   post_id: string
   session_id: string
@@ -272,6 +288,21 @@ export async function deleteSessionWallPost(slug: string, sessionId: string, pos
   return apiFetch<{ status: string; workspace: Workspace; workspace_session: WorkspaceSession; post_id: string }>(
     `/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/wall/${encodeURIComponent(postId)}`,
     { method: 'DELETE' },
+  )
+}
+
+export async function sendSessionOperatorMessage(
+  slug: string,
+  sessionId: string,
+  data: { to: string; action: 'TASK' | 'REPLY' | 'INFO'; payload: string },
+) {
+  return apiFetch<SendSessionOperatorMessageResult>(
+    `/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/operator/send`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    },
   )
 }
 

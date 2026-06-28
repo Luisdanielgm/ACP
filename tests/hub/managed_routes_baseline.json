@@ -1,6 +1,6 @@
 {
-  "_comment": "A-DETANGLE-00 regression baseline. Frozen route+state surface of acp_managed.create_managed_app(). Regenerate ONLY for intentional API changes. Updated for M3 persistent room wall routes.",
-  "route_count": 98,
+  "_comment": "A-DETANGLE-00 regression baseline. Frozen route+state surface of acp_managed.create_managed_app(). Regenerate ONLY for intentional API changes. Updated for M3 Web operator route.",
+  "route_count": 99,
   "routes": [
     {
       "path": "/",
@@ -432,6 +432,12 @@
       "path": "/managed/workspaces/{slug}/sessions/{session_id}",
       "methods": [
         "GET"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/sessions/{session_id}/operator/send",
+      "methods": [
+        "POST"
       ]
     },
     {

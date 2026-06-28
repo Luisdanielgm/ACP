@@ -14,16 +14,20 @@ A-DETANGLE-07. All dependencies come from the ManagedRouterDeps seam.
 from __future__ import annotations
 
 import urllib.parse
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from fastapi import APIRouter, Cookie, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
+from acp.hub.coordination_service import SessionAccessError, SessionNotFoundError
 from acp_managed.auth.sqlite_store import ManagedWorkspaceSessionRecord
 from acp_managed.contracts import (
     WORKSPACE_TEAM_PRESETS,
     CreateAgentTokenRequest,
     CreateRoomWallPostRequest,
     CreateWorkspacePresetRequest,
+    SendRoomOperatorMessageRequest,
     CreateWorkspaceSessionRequest,
     UpdateRoomWallPostRequest,
 )
@@ -549,6 +553,151 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
                 "workspace": _sanitize_workspace(workspace),
                 "workspace_session": _sanitize_workspace_session(record, include_owner_member_token=True),
                 "post_id": post_id,
+            }
+        )
+
+    def _new_web_operator_agent_name() -> str:
+        return f"web-operator-{uuid4().hex[:12]}"
+
+    async def _active_session_detail_or_404(session_id: str) -> dict[str, object]:
+        try:
+            detail = await runtime.coordination.session_detail(
+                session_id=session_id,
+                include_join_code=True,
+            )
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="managed workspace session is not active") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail="managed workspace session is not active") from exc
+        if not isinstance(detail, dict):
+            raise HTTPException(status_code=404, detail="managed workspace session is not active")
+        return detail
+
+    def _session_has_member(session_detail: dict[str, object], agent_name: str) -> bool:
+        members = session_detail.get("members")
+        if not isinstance(members, list):
+            return False
+        for member in members:
+            if isinstance(member, dict) and member.get("agent_name") == agent_name:
+                return True
+        return False
+
+    async def _join_web_operator(
+        *,
+        session_detail: dict[str, object],
+        agent_name: str,
+    ) -> str:
+        join_code = session_detail.get("join_code")
+        if not isinstance(join_code, str) or not join_code.strip():
+            raise HTTPException(status_code=409, detail="join_code is not available for this session")
+        try:
+            joined = await runtime.coordination.join_session(
+                join_code=join_code,
+                agent_name=agent_name,
+                capabilities=["web_operator"],
+                delivery_mode="attached",
+                provider="managed-web",
+            )
+        except SessionAccessError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        member_token = joined.get("member_token") if isinstance(joined, dict) else None
+        if not isinstance(member_token, str) or not member_token:
+            raise HTTPException(status_code=500, detail="web operator member token was not issued")
+        return member_token
+
+    @router.post("/managed/workspaces/{slug}/sessions/{session_id}/operator/send")
+    async def managed_workspace_session_operator_send(
+        slug: str,
+        session_id: str,
+        payload: SendRoomOperatorMessageRequest,
+        acp_managed_session: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        principal, workspace, record = _require_workspace_session_record(
+            slug=slug,
+            session_id=session_id,
+            acp_managed_session=acp_managed_session,
+        )
+        destination = payload.to.strip()
+        body = payload.payload.strip()
+        if not destination:
+            raise HTTPException(status_code=422, detail="to is required")
+        if not body:
+            raise HTTPException(status_code=422, detail="payload is required")
+
+        session_detail = await _active_session_detail_or_404(record.session_id)
+        operator = principal_store.get_room_operator(
+            session_id=record.session_id,
+            principal_email=principal.email,
+        )
+        created = False
+        if operator is None:
+            operator_agent_name = _new_web_operator_agent_name()
+            member_token = await _join_web_operator(
+                session_detail=session_detail,
+                agent_name=operator_agent_name,
+            )
+            operator = principal_store.upsert_room_operator(
+                session_id=record.session_id,
+                workspace_id=workspace.workspace_id,
+                principal_email=principal.email,
+                operator_agent_name=operator_agent_name,
+                member_token=member_token,
+            )
+            created = True
+        elif not _session_has_member(session_detail, operator.operator_agent_name):
+            member_token = await _join_web_operator(
+                session_detail=session_detail,
+                agent_name=operator.operator_agent_name,
+            )
+            operator = principal_store.upsert_room_operator(
+                session_id=record.session_id,
+                workspace_id=workspace.workspace_id,
+                principal_email=principal.email,
+                operator_agent_name=operator.operator_agent_name,
+                member_token=member_token,
+            )
+
+        message_id = str(uuid4())
+        envelope = {
+            "type": "MSG",
+            "id": message_id,
+            "ts": datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z"),
+            "from": operator.operator_agent_name,
+            "to": destination,
+            "action": payload.action.upper(),
+            "payload": body,
+            "thread_id": None,
+            "in_reply_to": None,
+            "session_id": record.session_id,
+        }
+        try:
+            sent = await runtime.coordination.send_message(
+                session_id=record.session_id,
+                agent_name=operator.operator_agent_name,
+                member_token=operator.member_token,
+                payload=envelope,
+            )
+        except SessionAccessError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="managed workspace session is not active") from exc
+
+        return JSONResponse(
+            {
+                "status": "sent",
+                "workspace": _sanitize_workspace(workspace),
+                "session_id": record.session_id,
+                "operator": {
+                    "operator_id": operator.operator_id,
+                    "agent_name": operator.operator_agent_name,
+                    "created": created,
+                },
+                "message": {
+                    "id": message_id,
+                    "to": destination,
+                    "action": payload.action.upper(),
+                },
+                "send_result": sent,
             }
         )
 

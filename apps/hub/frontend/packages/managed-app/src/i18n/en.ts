@@ -218,6 +218,17 @@ export const en: Record<string, string> = {
   session_created_at: 'Created',
   session_open_live: 'Open live dashboard',
   session_back_to_sessions: 'Back to sessions',
+  web_operator_section: 'Web operator',
+  web_operator_title: 'Send into the room',
+  web_operator_help: 'Operate as a server-side browser member. The browser never receives the hidden member token.',
+  web_operator_to: 'Recipient',
+  web_operator_all: 'All members',
+  web_operator_action: 'Action',
+  web_operator_payload: 'Message',
+  web_operator_placeholder: 'Write a task or note for the agents in this room...',
+  web_operator_sending_as: 'Sending as {agent}',
+  web_operator_send: 'Send message',
+  web_operator_sent: 'Message sent',
 
   // ── Admin Workspaces ──
   admin_kicker: 'VPS Admin',

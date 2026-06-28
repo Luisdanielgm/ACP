@@ -67,6 +67,12 @@ class UpdateRoomWallPostRequest(BaseModel):
     pinned: bool
 
 
+class SendRoomOperatorMessageRequest(BaseModel):
+    to: str = Field(min_length=1, max_length=64)
+    action: str = Field(default="INFO", pattern=r"^(TASK|REPLY|INFO)$")
+    payload: str = Field(min_length=1, max_length=4000)
+
+
 class AcceptWorkspaceInvitationRequest(BaseModel):
     password: str | None = Field(default=None, min_length=8, max_length=128)
 

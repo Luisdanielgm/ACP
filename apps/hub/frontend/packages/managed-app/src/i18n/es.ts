@@ -218,6 +218,17 @@ export const es: Record<string, string> = {
   session_created_at: 'Creada',
   session_open_live: 'Abrir dashboard en vivo',
   session_back_to_sessions: 'Volver a sesiones',
+  web_operator_section: 'Operador web',
+  web_operator_title: 'Enviar a la sala',
+  web_operator_help: 'Opera como un miembro browser del lado servidor. El navegador nunca recibe el member token oculto.',
+  web_operator_to: 'Destinatario',
+  web_operator_all: 'Todos los miembros',
+  web_operator_action: 'Accion',
+  web_operator_payload: 'Mensaje',
+  web_operator_placeholder: 'Escribe una tarea o nota para los agentes de esta sala...',
+  web_operator_sending_as: 'Enviando como {agent}',
+  web_operator_send: 'Enviar mensaje',
+  web_operator_sent: 'Mensaje enviado',
 
   // ── Admin Workspaces ──
   admin_kicker: 'VPS Admin',
