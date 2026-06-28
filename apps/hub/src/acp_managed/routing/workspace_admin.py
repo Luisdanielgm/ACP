@@ -17,8 +17,8 @@ import urllib.parse
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter, Cookie, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, Cookie, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from acp.hub.coordination_service import SessionAccessError, SessionNotFoundError
 from acp_managed.auth.sqlite_store import ManagedWorkspaceSessionRecord
@@ -37,6 +37,7 @@ from acp_managed.routing._helpers import (
     _managed_session_aliases,
     _sanitize_agent_token,
     _sanitize_membership,
+    _sanitize_room_file,
     _sanitize_room_wall_post,
     _sanitize_workspace,
     _sanitize_workspace_admin_invitation,
@@ -44,6 +45,9 @@ from acp_managed.routing._helpers import (
     _session_dashboard_fallback_url,
     _session_dashboard_url,
 )
+
+
+_MAX_ROOM_FILE_BYTES = 256 * 1024
 
 
 def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
@@ -553,6 +557,118 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
                 "workspace": _sanitize_workspace(workspace),
                 "workspace_session": _sanitize_workspace_session(record, include_owner_member_token=True),
                 "post_id": post_id,
+            }
+        )
+
+    async def _read_room_file_upload(file: UploadFile) -> bytes:
+        content = await file.read(_MAX_ROOM_FILE_BYTES + 1)
+        if len(content) > _MAX_ROOM_FILE_BYTES:
+            raise HTTPException(status_code=413, detail="room file exceeds 256 KiB limit")
+        if not content:
+            raise HTTPException(status_code=422, detail="room file must not be empty")
+        return content
+
+    def _room_file_download_response(file_record) -> Response:
+        quoted_name = urllib.parse.quote(file_record.filename, safe="")
+        return Response(
+            content=file_record.content,
+            media_type=file_record.content_type,
+            headers={"content-disposition": f"attachment; filename*=UTF-8''{quoted_name}"},
+        )
+
+    @router.get("/managed/workspaces/{slug}/sessions/{session_id}/files")
+    async def managed_workspace_session_files(
+        slug: str,
+        session_id: str,
+        acp_managed_session: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        _, workspace, record = _require_workspace_session_record(
+            slug=slug,
+            session_id=session_id,
+            acp_managed_session=acp_managed_session,
+        )
+        files = principal_store.list_room_files(session_id=record.session_id)
+        return JSONResponse(
+            {
+                "workspace": _sanitize_workspace(workspace),
+                "workspace_session": _sanitize_workspace_session(record, include_owner_member_token=True),
+                "files": [_sanitize_room_file(item) for item in files],
+                "count": len(files),
+                "total_bytes": sum(item.size_bytes for item in files),
+                "max_file_bytes": _MAX_ROOM_FILE_BYTES,
+            }
+        )
+
+    @router.post("/managed/workspaces/{slug}/sessions/{session_id}/files")
+    async def managed_upload_workspace_session_file(
+        slug: str,
+        session_id: str,
+        file: UploadFile = File(...),
+        acp_managed_session: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        principal, workspace, record = _require_workspace_session_record(
+            slug=slug,
+            session_id=session_id,
+            acp_managed_session=acp_managed_session,
+        )
+        content = await _read_room_file_upload(file)
+        created = principal_store.create_room_file(
+            session_id=record.session_id,
+            workspace_id=workspace.workspace_id,
+            filename=file.filename or "room-file",
+            content_type=file.content_type or "application/octet-stream",
+            content=content,
+            uploaded_by_type="owner",
+            uploaded_by_name=principal.email,
+        )
+        return JSONResponse(
+            {
+                "status": "created",
+                "workspace": _sanitize_workspace(workspace),
+                "workspace_session": _sanitize_workspace_session(record, include_owner_member_token=True),
+                "file": _sanitize_room_file(created),
+            }
+        )
+
+    @router.get("/managed/workspaces/{slug}/sessions/{session_id}/files/{file_id}")
+    async def managed_download_workspace_session_file(
+        slug: str,
+        session_id: str,
+        file_id: str,
+        acp_managed_session: str | None = Cookie(default=None),
+    ) -> Response:
+        _, workspace, record = _require_workspace_session_record(
+            slug=slug,
+            session_id=session_id,
+            acp_managed_session=acp_managed_session,
+        )
+        file_record = principal_store.get_room_file(file_id=file_id)
+        if file_record is None or file_record.session_id != record.session_id or file_record.workspace_id != workspace.workspace_id:
+            raise HTTPException(status_code=404, detail="room file does not exist")
+        return _room_file_download_response(file_record)
+
+    @router.delete("/managed/workspaces/{slug}/sessions/{session_id}/files/{file_id}")
+    async def managed_delete_workspace_session_file(
+        slug: str,
+        session_id: str,
+        file_id: str,
+        acp_managed_session: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        _, workspace, record = _require_workspace_session_record(
+            slug=slug,
+            session_id=session_id,
+            acp_managed_session=acp_managed_session,
+        )
+        file_record = principal_store.get_room_file(file_id=file_id)
+        if file_record is None or file_record.session_id != record.session_id or file_record.workspace_id != workspace.workspace_id:
+            raise HTTPException(status_code=404, detail="room file does not exist")
+        deleted = principal_store.delete_room_file(file_id=file_id)
+        return JSONResponse(
+            {
+                "status": "deleted" if deleted else "not_found",
+                "workspace": _sanitize_workspace(workspace),
+                "workspace_session": _sanitize_workspace_session(record, include_owner_member_token=True),
+                "file_id": file_id,
             }
         )
 

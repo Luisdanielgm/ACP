@@ -1,6 +1,6 @@
 {
-  "_comment": "A-DETANGLE-00 regression baseline. Frozen route+state surface of acp_managed.create_managed_app(). Regenerate ONLY for intentional API changes. Updated for M3 Web operator route.",
-  "route_count": 99,
+  "_comment": "A-DETANGLE-00 regression baseline. Frozen route+state surface of acp_managed.create_managed_app(). Regenerate ONLY for intentional API changes. Updated for M4 room files route.",
+  "route_count": 107,
   "routes": [
     {
       "path": "/",
@@ -209,6 +209,18 @@
       ]
     },
     {
+      "path": "/managed/agent/sessions/{session_id}/files",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/agent/sessions/{session_id}/files/{file_id}",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
       "path": "/managed/agent/sessions/{session_id}/join",
       "methods": [
         "POST"
@@ -254,6 +266,18 @@
       "path": "/managed/agent/workspaces/{slug}/sessions/{session_id}/close",
       "methods": [
         "POST"
+      ]
+    },
+    {
+      "path": "/managed/agent/workspaces/{slug}/sessions/{session_id}/files",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/agent/workspaces/{slug}/sessions/{session_id}/files/{file_id}",
+      "methods": [
+        "GET"
       ]
     },
     {
@@ -430,6 +454,30 @@
     },
     {
       "path": "/managed/workspaces/{slug}/sessions/{session_id}",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/sessions/{session_id}/files",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/sessions/{session_id}/files",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/sessions/{session_id}/files/{file_id}",
+      "methods": [
+        "DELETE"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/sessions/{session_id}/files/{file_id}",
       "methods": [
         "GET"
       ]

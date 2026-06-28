@@ -12,7 +12,7 @@ See [OPEN_CORE_MODEL.md](OPEN_CORE_MODEL.md) for the open-core model and
 ## 📍 Current state (update me)
 
 - **Milestones reached:** ★ M1 (clean engine) · ★ M2 (open source — this repo is public).
-- **In progress:** M3 follow-up polish and DX client automation.
+- **In progress:** M3 follow-up polish, M4 storage backend, and DX client automation.
   - ✅ Broadcast (one-to-all) — already in `coordination_service.send_message`.
   - ✅ Room prompt (session instructions) — backend + dashboard. Owner sets it on
     session create; agents receive it on join/detail. (`test_room_prompt.py`)
@@ -45,7 +45,7 @@ the room from the managed dashboard without exposing pseudo-member credentials t
 | M1 | Clean engine | De-tangled managed app (routers + `ManagedRouterDeps` seam), at-least-once message idempotency | ✅ done |
 | M2 | Open source | This repo public; AGPL server + Apache client; CLA; CI | ✅ done |
 | M3 | Rooms (Salas) | Room prompt, persistent wall, web operator (Option B) | core slices done; polish follow-up |
-| M4 | Storage | Per-room files/instructions, quotas | ⬜ |
+| M4 | Storage | Per-room files/instructions, quotas | 🔄 first backend slice |
 | DX | **Client automation** (parallel track) | Deterministic connect/coordinate commands so the agent stops re-reasoning + mis-assembling token commands | 🔄 first slice |
 | — | 🎯 **Sellable OSS product** | engine + rooms + storage, self-hostable, durable | ⬜ |
 | (Cloud) | Commercial overlay | Billing/provisioning/branding — lives in the **separate private `acp-cloud` repo**, not here | ⬜ deferred |

@@ -68,6 +68,20 @@ class ManagedRoomOperatorRecord:
 
 
 @dataclass(frozen=True)
+class ManagedRoomFileRecord:
+    file_id: str
+    session_id: str
+    workspace_id: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    content: bytes
+    uploaded_by_type: str
+    uploaded_by_name: str
+    created_at: str
+
+
+@dataclass(frozen=True)
 class ManagedBrowserSessionRecord:
     session_id: str
     email: str
@@ -294,6 +308,30 @@ class SqliteManagedPrincipalStore:
                 """
                 CREATE INDEX IF NOT EXISTS idx_managed_room_operators_session
                 ON managed_room_operators(session_id, operator_agent_name)
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS managed_room_files (
+                    file_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL,
+                    filename TEXT NOT NULL,
+                    content_type TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    content BLOB NOT NULL,
+                    uploaded_by_type TEXT NOT NULL,
+                    uploaded_by_name TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES managed_workspace_sessions(session_id) ON DELETE CASCADE,
+                    FOREIGN KEY (workspace_id) REFERENCES managed_workspaces(workspace_id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_managed_room_files_session_order
+                ON managed_room_files(session_id, created_at ASC, file_id ASC)
                 """
             )
             conn.execute(
@@ -1743,6 +1781,138 @@ class SqliteManagedPrincipalStore:
             return stored
         except sqlite3.IntegrityError as exc:
             raise ValueError("room operator references invalid workspace session") from exc
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _room_file_from_row(row: sqlite3.Row) -> ManagedRoomFileRecord:
+        content = row["content"]
+        return ManagedRoomFileRecord(
+            file_id=str(row["file_id"]),
+            session_id=str(row["session_id"]),
+            workspace_id=str(row["workspace_id"]),
+            filename=str(row["filename"]),
+            content_type=str(row["content_type"]),
+            size_bytes=int(row["size_bytes"]),
+            content=bytes(content) if content is not None else b"",
+            uploaded_by_type=str(row["uploaded_by_type"]),
+            uploaded_by_name=str(row["uploaded_by_name"]),
+            created_at=str(row["created_at"]),
+        )
+
+    def create_room_file(
+        self,
+        *,
+        session_id: str,
+        workspace_id: str,
+        filename: str,
+        content_type: str,
+        content: bytes,
+        uploaded_by_type: str,
+        uploaded_by_name: str,
+    ) -> ManagedRoomFileRecord:
+        normalized_filename = filename.replace("\\", "/").split("/")[-1].strip() if isinstance(filename, str) else ""
+        if not normalized_filename:
+            normalized_filename = "room-file"
+        normalized_content_type = content_type.strip() if isinstance(content_type, str) and content_type.strip() else "application/octet-stream"
+        if uploaded_by_type not in {"owner", "agent"}:
+            raise ValueError("room file uploaded_by_type must be owner or agent")
+        normalized_uploader = uploaded_by_name.strip() if isinstance(uploaded_by_name, str) else ""
+        if not normalized_uploader:
+            raise ValueError("room file uploaded_by_name is required")
+        record = ManagedRoomFileRecord(
+            file_id=str(uuid4()),
+            session_id=session_id,
+            workspace_id=workspace_id,
+            filename=normalized_filename,
+            content_type=normalized_content_type,
+            size_bytes=len(content),
+            content=bytes(content),
+            uploaded_by_type=uploaded_by_type,
+            uploaded_by_name=normalized_uploader,
+            created_at=self._wall_timestamp(),
+        )
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO managed_room_files(
+                    file_id,
+                    session_id,
+                    workspace_id,
+                    filename,
+                    content_type,
+                    size_bytes,
+                    content,
+                    uploaded_by_type,
+                    uploaded_by_name,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.file_id,
+                    record.session_id,
+                    record.workspace_id,
+                    record.filename,
+                    record.content_type,
+                    record.size_bytes,
+                    record.content,
+                    record.uploaded_by_type,
+                    record.uploaded_by_name,
+                    record.created_at,
+                ),
+            )
+            conn.commit()
+            return record
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("room file references invalid workspace session") from exc
+        finally:
+            conn.close()
+
+    def list_room_files(self, *, session_id: str) -> list[ManagedRoomFileRecord]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT file_id, session_id, workspace_id, filename, content_type, size_bytes, content, uploaded_by_type, uploaded_by_name, created_at
+                FROM managed_room_files
+                WHERE session_id = ?
+                ORDER BY created_at ASC, file_id ASC
+                """,
+                (session_id,),
+            ).fetchall()
+            return [self._room_file_from_row(row) for row in rows]
+        finally:
+            conn.close()
+
+    def get_room_file(self, *, file_id: str) -> ManagedRoomFileRecord | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT file_id, session_id, workspace_id, filename, content_type, size_bytes, content, uploaded_by_type, uploaded_by_name, created_at
+                FROM managed_room_files
+                WHERE file_id = ?
+                LIMIT 1
+                """,
+                (file_id,),
+            ).fetchone()
+            return None if row is None else self._room_file_from_row(row)
+        finally:
+            conn.close()
+
+    def delete_room_file(self, *, file_id: str) -> bool:
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                """
+                DELETE FROM managed_room_files
+                WHERE file_id = ?
+                """,
+                (file_id,),
+            )
+            conn.commit()
+            return int(cursor.rowcount or 0) > 0
         finally:
             conn.close()
 

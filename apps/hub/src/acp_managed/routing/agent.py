@@ -15,9 +15,10 @@ All dependencies come from the ManagedRouterDeps seam.
 from __future__ import annotations
 
 import re
+import urllib.parse
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from acp.hub.coordination_service import SessionAccessError
 
@@ -33,6 +34,7 @@ from acp_managed.routing._helpers import (
     _managed_agent_bootstrap_payload,
     _managed_session_aliases,
     _sanitize_agent_token,
+    _sanitize_room_file,
     _sanitize_room_wall_post,
     _sanitize_workspace,
     _sanitize_workspace_session,
@@ -242,6 +244,56 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
                 "count": len(posts),
             }
         )
+
+    def _room_file_download_response(file_record) -> Response:
+        quoted_name = urllib.parse.quote(file_record.filename, safe="")
+        return Response(
+            content=file_record.content,
+            media_type=file_record.content_type,
+            headers={"content-disposition": f"attachment; filename*=UTF-8''{quoted_name}"},
+        )
+
+    async def _managed_agent_workspace_session_files_response(
+        *,
+        request: Request,
+        session_id: str,
+        slug: str | None = None,
+    ) -> JSONResponse:
+        token_record, workspace = current_agent_token(request=request, slug=slug)
+        record = principal_store.get_workspace_session(session_id=session_id)
+        if record is None or record.workspace_id != workspace.workspace_id:
+            raise HTTPException(status_code=404, detail="managed workspace session does not exist")
+        files = principal_store.list_room_files(session_id=record.session_id)
+        return JSONResponse(
+            {
+                "workspace": _sanitize_workspace(workspace),
+                "agent_token": _sanitize_agent_token(token_record),
+                "workspace_session": _sanitize_workspace_session(record),
+                "files": [_sanitize_room_file(item) for item in files],
+                "count": len(files),
+                "total_bytes": sum(item.size_bytes for item in files),
+            }
+        )
+
+    async def _managed_agent_workspace_session_file_download_response(
+        *,
+        request: Request,
+        session_id: str,
+        file_id: str,
+        slug: str | None = None,
+    ) -> Response:
+        _, workspace = current_agent_token(request=request, slug=slug)
+        record = principal_store.get_workspace_session(session_id=session_id)
+        if record is None or record.workspace_id != workspace.workspace_id:
+            raise HTTPException(status_code=404, detail="managed workspace session does not exist")
+        file_record = principal_store.get_room_file(file_id=file_id)
+        if (
+            file_record is None
+            or file_record.session_id != record.session_id
+            or file_record.workspace_id != workspace.workspace_id
+        ):
+            raise HTTPException(status_code=404, detail="room file does not exist")
+        return _room_file_download_response(file_record)
 
     async def _managed_agent_create_workspace_session_wall_post_response(
         *,
@@ -467,6 +519,47 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
             request=request,
             session_id=session_id,
             payload=payload,
+            slug=slug,
+        )
+
+    @router.get("/managed/agent/sessions/{session_id}/files")
+    async def managed_agent_workspace_session_files_auto(
+        session_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        return await _managed_agent_workspace_session_files_response(request=request, session_id=session_id)
+
+    @router.get("/managed/agent/workspaces/{slug}/sessions/{session_id}/files")
+    async def managed_agent_workspace_session_files(
+        slug: str,
+        session_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        return await _managed_agent_workspace_session_files_response(request=request, session_id=session_id, slug=slug)
+
+    @router.get("/managed/agent/sessions/{session_id}/files/{file_id}")
+    async def managed_agent_workspace_session_file_download_auto(
+        session_id: str,
+        file_id: str,
+        request: Request,
+    ) -> Response:
+        return await _managed_agent_workspace_session_file_download_response(
+            request=request,
+            session_id=session_id,
+            file_id=file_id,
+        )
+
+    @router.get("/managed/agent/workspaces/{slug}/sessions/{session_id}/files/{file_id}")
+    async def managed_agent_workspace_session_file_download(
+        slug: str,
+        session_id: str,
+        file_id: str,
+        request: Request,
+    ) -> Response:
+        return await _managed_agent_workspace_session_file_download_response(
+            request=request,
+            session_id=session_id,
+            file_id=file_id,
             slug=slug,
         )
 

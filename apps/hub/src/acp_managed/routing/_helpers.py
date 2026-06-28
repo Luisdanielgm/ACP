@@ -17,6 +17,7 @@ from fastapi import Request
 
 from acp_managed.auth.sqlite_store import (
     ManagedAgentTokenRecord,
+    ManagedRoomFileRecord,
     ManagedRoomWallPostRecord,
     ManagedWorkspace,
     ManagedWorkspaceAdminInvitationRecord,
@@ -88,6 +89,20 @@ def _sanitize_room_wall_post(record: ManagedRoomWallPostRecord) -> dict[str, str
         "author_name": record.author_name,
         "body": record.body,
         "pinned": record.pinned,
+        "created_at": record.created_at,
+    }
+
+
+def _sanitize_room_file(record: ManagedRoomFileRecord) -> dict[str, str | int]:
+    return {
+        "file_id": record.file_id,
+        "session_id": record.session_id,
+        "workspace_id": record.workspace_id,
+        "filename": record.filename,
+        "content_type": record.content_type,
+        "size_bytes": record.size_bytes,
+        "uploaded_by_type": record.uploaded_by_type,
+        "uploaded_by_name": record.uploaded_by_name,
         "created_at": record.created_at,
     }
 
