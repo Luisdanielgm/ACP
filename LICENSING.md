@@ -37,5 +37,5 @@ not licensed for use in a competing hosted service. See [`NOTICE`](NOTICE).
 ---
 
 > Not legal advice. The direction is locked, but a legal review is warranted
-> before the first public release (M2) — in particular the copyright-holder
-> identity and the final CLA text.
+> before accepting outside contributions at scale or launching a commercial
+> hosted tier - in particular the copyright-holder identity and final CLA text.

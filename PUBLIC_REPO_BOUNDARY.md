@@ -3,12 +3,10 @@
 > **Updated 2026-06-19 — Option Y.** The open-core line moved: the **workspace
 > layer is now open source**, not private. The single source of truth for the
 > model is [OPEN_CORE_MODEL.md](OPEN_CORE_MODEL.md). This file applies that
-> decision to the public-extraction boundary.
+> decision to the public repository boundary.
 
-This repository is currently the private canonical source used to deploy the
-hosted offering. The public open-source product (ACP Client + ACP Manager) is
-extracted from it as a filtered subset; only the **ACP Cloud** overlay stays
-private.
+This repository is the public open-source product: **ACP Client + ACP Manager**.
+Only the separate **ACP Cloud** overlay stays private.
 
 ## Included in the public repo (ACP Client + ACP Manager)
 
@@ -50,9 +48,7 @@ overlay imports the public **ACP Manager** package and mounts its routes on top
 
 ## Enforcement
 
-`tests/hub/test_public_repo_hygiene.py` validates the public extraction set.
-Under Option Y the extractable set widens to include the workspace layer; the
-guarantee is that **branding, the payment page, billing, and hosted defaults**
-must not leak into the public extraction, or CI fails. (The hygiene test needs
-updating to the new line when the de-tangle lands — see
-[OPEN_CORE_MODEL.md](OPEN_CORE_MODEL.md) → sequence.)
+`tests/hub/test_public_repo_hygiene.py` validates the public repository
+surface, including the workspace layer. The guarantee is that **branding, the
+payment page, billing, and hosted defaults** must not leak into this repo, or CI
+fails.

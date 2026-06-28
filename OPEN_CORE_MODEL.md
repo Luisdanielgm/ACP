@@ -96,9 +96,7 @@ The public side must **never** import the private side. Private may import publi
 
 ## Licensing (decided 2026-06-24)
 
-Split license tuned to the open-core model. Applied at the repo split (M2); until
-then the repo stays private (no external distribution, so the legal files can wait,
-but the decision is locked).
+Split license tuned to the open-core model and applied in the public repo.
 
 | Component | License | Why |
 | --- | --- | --- |
@@ -122,18 +120,16 @@ not a formality:
 **Trademark** the product name separately — the license frees the code, not the
 brand. Nobody should offer a competing hosted service under the ACP name.
 
-> Not legal advice. This sets the direction; a quick legal review is warranted
-> before the first public release (M2).
+> Not legal advice. The direction is locked; a legal review is still warranted
+> before accepting outside contributions at scale or launching a commercial hosted tier.
 
-## Sequence to get there
+## Current implementation state
 
-1. ✅ Decide the open-core line (Option Y) and the Client/Manager/Cloud model.
-2. Update the boundary docs to this model (this document + pointers).
-3. De-tangle `apps/hub/src/acp_managed/app.py` (2,056 lines, 58 routes) into
-   `routes/` + `services/` + `ui/`, separating the open workspace surfaces from
-   the private Cloud surfaces. (Large; do under an SDD plan.)
-4. Extract repos along the now-clean seams: `acp` (client + manager) and the
-   private `acp-cloud`.
+1. [done] Open-core line decided: Option Y, with Client / Manager / Cloud split.
+2. [done] Public repo ships ACP Client + ACP Manager, including the workspace layer.
+3. [done] Managed routes use `build_*_router(deps)` factories around `ManagedRouterDeps`.
+4. [todo] Remaining public-product work lives in [ROADMAP.md](ROADMAP.md), especially storage, DX automation, and release polish.
+5. [todo] The separate private `acp-cloud` repo owns billing, provisioning, hosted defaults, and branding.
 
 See also: [ARCHITECTURE_SIMPLIFIED.md](ARCHITECTURE_SIMPLIFIED.md) (layer model),
 [MODULAR_BOUNDARIES.md](MODULAR_BOUNDARIES.md) (dependency direction).

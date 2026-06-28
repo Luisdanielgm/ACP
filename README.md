@@ -33,10 +33,10 @@ The Hub stays remote. There is no local ACP server. The recommended flow is sess
 
 ## Managed Model
 
-The private `managed` overlay now uses a minimal split:
+The open ACP Manager includes the workspace layer. It uses a minimal split:
 
 - `ACP core`: sessions, members, message routing, wait/listen/send/status, session dashboards
-- `VPS admin`: workspace creation, workspace admin invitation, workspace token rotation
+- `Workspace layer`: workspace creation, workspace admin invitations, workspace token rotation, rooms, wall, and web operator
 
 Canonical architecture reference:
 

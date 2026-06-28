@@ -1,4 +1,4 @@
-"""Persistent browser session helpers for the managed overlay."""
+"""Persistent browser session helpers for the managed workspace layer."""
 
 from __future__ import annotations
 

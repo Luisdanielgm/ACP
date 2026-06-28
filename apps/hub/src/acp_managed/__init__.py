@@ -1,1 +1,1 @@
-"""Private managed overlay for ACP deployments."""
+"""Managed workspace layer for ACP Manager deployments."""

@@ -1,4 +1,4 @@
-"""Routing package for the managed overlay (extracted from app.py)."""
+"""Routing package for the managed workspace layer (extracted from app.py)."""
 
 from __future__ import annotations
 

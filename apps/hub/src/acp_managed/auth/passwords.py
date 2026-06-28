@@ -1,4 +1,4 @@
-"""Password helpers for the managed overlay."""
+"""Password helpers for the managed workspace layer."""
 
 from __future__ import annotations
 

@@ -155,7 +155,7 @@ def test_overlay_example_can_mount_private_routes_on_top_of_core() -> None:
         runtime = client.get("/runtime")
 
     assert root.status_code == 200
-    assert "ACP Managed Overlay" in root.text
+    assert "ACP Cloud Overlay Example" in root.text
     assert downloads.status_code == 200
     assert "Managed Downloads" in downloads.text
     assert auth_mode.status_code == 200

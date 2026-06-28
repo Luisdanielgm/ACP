@@ -1,4 +1,4 @@
-"""Sqlite-backed managed principal store for the managed overlay."""
+"""Sqlite-backed managed principal store for the managed workspace layer."""
 
 from __future__ import annotations
 

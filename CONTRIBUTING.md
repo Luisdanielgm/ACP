@@ -56,7 +56,7 @@ A push is aborted if the suite is red. Override only in emergencies with
 - Use **Conventional Commits** (`feat:`, `fix:`, `refactor:`, `chore:`, `docs:`,
   `test:`).
 - Keep PRs focused and reasonably small; describe the intent and how you verified.
-- Sign off your commits per the CLA (`Signed-off-by: Name <email>`).
+- Sign off your commits per the CLA (`Signed-off-by: Name <email>`) and add the one-time PR acknowledgement described in [`CLA.md`](CLA.md).
 
 ## Reporting bugs and proposing features
 

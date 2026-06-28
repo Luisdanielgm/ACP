@@ -1,4 +1,4 @@
-"""Whitelist parsing helpers for the managed overlay."""
+"""Whitelist parsing helpers for the managed workspace layer."""
 
 from __future__ import annotations
 

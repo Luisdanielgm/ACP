@@ -1,1 +1,1 @@
-"""Authentication helpers for the private managed overlay."""
+"""Authentication helpers for the managed workspace layer."""

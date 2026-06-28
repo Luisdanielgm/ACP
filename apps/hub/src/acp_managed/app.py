@@ -1,4 +1,4 @@
-"""Private managed overlay mounted on top of the public ACP core."""
+"""Managed workspace layer mounted on top of the ACP core."""
 
 from __future__ import annotations
 

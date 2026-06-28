@@ -60,4 +60,4 @@ contributor adding a `Signed-off-by: Name <email>` line to each commit
 (Developer Certificate of Origin style) **and** a one-time acknowledgement on
 their first pull request stating: "I have read and agree to the CLA."
 
-> The exact signing mechanism (CLA bot vs. DCO) will be finalized at M2.
+> A CLA bot can replace this manual process later; until then, the PR acknowledgement plus `Signed-off-by` lines are the recorded signal.
