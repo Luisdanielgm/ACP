@@ -12,7 +12,7 @@ See [OPEN_CORE_MODEL.md](OPEN_CORE_MODEL.md) for the open-core model and
 ## 📍 Current state (update me)
 
 - **Milestones reached:** ★ M1 (clean engine) · ★ M2 (open source — this repo is public).
-- **In progress:** M3 follow-up polish, DX client automation, and release/product polish.
+- **In progress:** M3 follow-up polish and release/product polish.
   - ✅ Broadcast (one-to-all) — already in `coordination_service.send_message`.
   - ✅ Room prompt (session instructions) — backend + dashboard. Owner sets it on
     session create; agents receive it on join/detail. (`test_room_prompt.py`)
@@ -20,10 +20,7 @@ See [OPEN_CORE_MODEL.md](OPEN_CORE_MODEL.md) for the open-core model and
   - [done] Web operator (Option B: server-side pseudo-member) - browser admin can send into the room without exposing pseudo-member credentials. (`test_web_operator.py`)
 - **Tests:** `python -m pytest tests/ -q` → all green (a few skip when internal
   `.planning`/`.codex` artifacts are absent, which is normal in this public repo).
-- **DX client automation:** first deterministic turn-based worker entrypoint exists:
-  `python ACP_AGENT/acp.py coordinate ...` wraps managed connect/onboard and waits
-  for exactly one message, so agents do not hand-assemble session/member-token
-  commands for the initial turn.
+- **DX client automation:** deterministic `connect`/`coordinate`/`onboard`/`chief`/`runner` surfaces exist, and the bundled ACP skill is now a short command router instead of a long reasoning recipe.
 
 ### Persistent room wall - DESIGN DECISION
 Implemented as a separate durable wall store, not as replay/event history.
@@ -46,7 +43,7 @@ the room from the managed dashboard without exposing pseudo-member credentials t
 | M2 | Open source | This repo public; AGPL server + Apache client; CLA; CI | ✅ done |
 | M3 | Rooms (Salas) | Room prompt, persistent wall, web operator (Option B) | core slices done; polish follow-up |
 | M4 | Storage | Per-room files/instructions, quotas | ✅ done |
-| DX | **Client automation** (parallel track) | Deterministic connect/coordinate commands so the agent stops re-reasoning + mis-assembling token commands | 🔄 first slice |
+| DX | **Client automation** (parallel track) | Deterministic connect/coordinate/onboard/chief/runner commands; slim skill guardrail | ✅ done |
 | — | 🎯 **Sellable OSS product** | engine + rooms + storage, self-hostable, durable | 🔄 polish |
 | (Cloud) | Commercial overlay | Billing/provisioning/branding — lives in the **separate private `acp-cloud` repo**, not here | ⬜ deferred |
 
@@ -69,25 +66,16 @@ open-source product, and the commercial overlay lives in `acp-cloud` (private).
 
 ## 🤖 Client DX / agent automation (parallel track — `ACP_AGENT/`)
 
-**Problem:** to connect & coordinate, an agent today reads ~449 lines of
+**Problem solved:** to connect & coordinate, an agent used to read ~449 lines of
 `ACP_AGENT/skills/acp-session-coordinator/SKILL.md`, calls several tools, reasons
 multiple times, and frequently **mis-assembles commands and substitutes tokens
 wrong** — wasted tokens + real errors.
 
-**Goal:** make the common flows **deterministic and pre-packaged** so the agent
+**Result:** the common flows are **deterministic and pre-packaged** so the agent
 runs one command instead of reasoning through a multi-step recipe. Especially the
 **connect/join flow** (token handling is the error-prone part).
 
-**Approach (decide during design):**
-- High-level `acp.py` subcommands that encapsulate multi-step flows (e.g. a single
-  connect/join that resolves config + token internally; a `work-loop`; a chief run).
-- And/or shipped recipe scripts the agent just invokes.
-- Then slim the SKILL.md to point at those canned commands instead of explaining
-  the reasoning.
-
-**Done when:** an agent connects and runs a turn loop without hand-assembling
-token commands; SKILL.md shrinks; fewer tokens + fewer mistakes per session.
-This is independent of M3 (rooms) and can run in parallel.
+**Done:** `connect`, `coordinate`, `onboard`, `chief`, and `runner` are available; the bundled skill is capped by test at 180 lines and currently routes agents to canned commands instead of re-explaining the protocol.
 
 ## 🤝 Parallel work
 - One agent per repo is the clean pattern (`acp-public` engine vs. `acp-cloud`

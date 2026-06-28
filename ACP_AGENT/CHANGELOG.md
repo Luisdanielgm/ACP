@@ -2,6 +2,10 @@
 
 ## 0.3.10 - 2026-05-30
 
+- EN: Slimmed the bundled ACP session coordinator skill into a short command router with a test guardrail, so agents use `connect`/`coordinate`/`onboard`/`chief`/`runner` instead of re-reasoning through a long recipe.
+- ES: Se redujo la skill bundleada del coordinador ACP a un router corto de comandos con guardrail de test, para que los agentes usen `connect`/`coordinate`/`onboard`/`chief`/`runner` en lugar de re-razonar una receta larga.
+- EN: Fixed isolated `ACP_AGENT/acp.py` imports by adding the bundle root to `sys.path` before local helper imports.
+- ES: Se corrigieron imports aislados de `ACP_AGENT/acp.py` agregando la raiz del bundle a `sys.path` antes de importar helpers locales.
 - EN: Added safe release-channel update support for connected agents: `acp.py update-check`, `acp.py self-update --auto-when-idle`, release manifest `agent_update` metadata, and listen-time update policy hooks.
 - ES: Se agrego soporte seguro de actualizacion por release channel para agentes conectados: `acp.py update-check`, `acp.py self-update --auto-when-idle`, metadata `agent_update` en el manifest y hooks de politica de update durante `listen`.
 - EN: Autonomous updates are blocked by default when `ACP_AGENT/` files are tracked by git, preventing ACP from silently mutating a user's project repository while still allowing ignored/private installs to update when idle.

@@ -21,6 +21,10 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+ACP_ROOT = Path(__file__).resolve().parent
+if str(ACP_ROOT) not in sys.path:
+    sys.path.insert(0, str(ACP_ROOT))
+
 import websockets
 from runner_support import (
     build_reply_payload,
@@ -32,10 +36,6 @@ from runner_support import (
     save_runner_entry,
     utc_now_iso as runner_utc_now_iso,
 )
-
-ACP_ROOT = Path(__file__).resolve().parent
-if str(ACP_ROOT) not in sys.path:
-    sys.path.insert(0, str(ACP_ROOT))
 
 from acp_distribution import AgentDistribution, load_distribution
 

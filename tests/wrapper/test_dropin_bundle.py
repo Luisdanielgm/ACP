@@ -62,6 +62,11 @@ def test_dropin_bundle_tracks_runtime_and_skill_sources() -> None:
     skill_source_path = Path(".codex/skills/acp-session-coordinator/SKILL.md")
     bundle_skill = Path("ACP_AGENT/skills/acp-session-coordinator/SKILL.md").read_text(encoding="utf-8")
     assert bundle_skill.strip()
+    assert len(bundle_skill.splitlines()) <= 180
+    assert "coordinate --agent <agent>" in bundle_skill
+    assert "connect --role auto" in bundle_skill
+    assert "listen --stop-after-message --timeout-seconds 300" in bundle_skill
+    assert "runner start" in bundle_skill
     if skill_source_path.exists():
         assert bundle_skill == skill_source_path.read_text(encoding="utf-8")
 
