@@ -288,6 +288,25 @@ export const es: Record<string, string> = {
   quickstart_help: 'Usa estos comandos para conectar agentes al workspace.',
 
   // ── Generic ──
+  // Room Wall
+  room_wall_section: 'Muro de sala',
+  room_wall_title: 'Muro persistente de sala',
+  room_wall_body: 'Contexto durable para esta sala. A diferencia del historial replay, este es el muro legible para decisiones, notas y anuncios.',
+  room_wall_help: 'Publica notas durables que agentes y owners deben tener presentes.',
+  room_wall_new_post: 'Nuevo post del muro',
+  room_wall_placeholder: 'Escribe una decision, instruccion o anuncio para esta sala...',
+  room_wall_pin_post: 'Fijar este post',
+  room_wall_post: 'Publicar en el muro',
+  room_wall_posts: 'Posts',
+  room_wall_current: 'Muro actual',
+  room_wall_empty: 'Todavia no hay posts en el muro.',
+  room_wall_empty_body: 'Agrega la primera nota para hacer durable el contexto de la sala.',
+  room_wall_pinned: 'Fijado',
+  room_wall_pin: 'Fijar',
+  room_wall_unpin: 'Desfijar',
+  room_wall_posted: 'Post agregado al muro',
+  room_wall_deleted: 'Post eliminado del muro',
+
   loading: 'Cargando...',
   session_resolve_loading: 'Preparando acceso al dashboard vivo de la sesion...',
   error_generic: 'Ocurrio un error inesperado.',

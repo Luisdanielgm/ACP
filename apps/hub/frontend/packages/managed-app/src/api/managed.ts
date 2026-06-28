@@ -53,6 +53,17 @@ export interface WorkspaceSession {
   status_counts?: Record<string, number>
 }
 
+export interface RoomWallPost {
+  post_id: string
+  session_id: string
+  workspace_id: string
+  author_type: 'owner' | 'agent'
+  author_name: string
+  body: string
+  pinned: boolean
+  created_at: string
+}
+
 export interface Invitation {
   invitation_id: string
   email: string
@@ -227,6 +238,41 @@ export async function createWorkspaceSession(slug: string, data: { agent_name: s
 
 export async function fetchSessionDetail(slug: string, sessionId: string) {
   return apiFetch<{ workspace: Workspace; workspace_session: WorkspaceSession; acp_session: any | null }>(`/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}`)
+}
+
+export async function fetchSessionWall(slug: string, sessionId: string) {
+  return apiFetch<{ workspace: Workspace; workspace_session: WorkspaceSession; posts: RoomWallPost[]; count: number }>(
+    `/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/wall`,
+  )
+}
+
+export async function createSessionWallPost(slug: string, sessionId: string, data: { body: string; pinned?: boolean }) {
+  return apiFetch<{ status: string; workspace: Workspace; workspace_session: WorkspaceSession; post: RoomWallPost }>(
+    `/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/wall`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+export async function updateSessionWallPost(slug: string, sessionId: string, postId: string, data: { pinned: boolean }) {
+  return apiFetch<{ status: string; workspace: Workspace; workspace_session: WorkspaceSession; post: RoomWallPost }>(
+    `/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/wall/${encodeURIComponent(postId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+export async function deleteSessionWallPost(slug: string, sessionId: string, postId: string) {
+  return apiFetch<{ status: string; workspace: Workspace; workspace_session: WorkspaceSession; post_id: string }>(
+    `/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/wall/${encodeURIComponent(postId)}`,
+    { method: 'DELETE' },
+  )
 }
 
 // ── Invitations ──

@@ -62,13 +62,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/managed/ui/workspaces/:slug/sessions/:sessionId',
     name: 'session-detail',
-    redirect: to => ({
-      name: 'session-live',
-      params: {
-        slug: String(to.params.slug ?? ''),
-        sessionId: String(to.params.sessionId ?? ''),
-      },
-    }),
+    component: () => import('../views/SessionDetailView.vue'),
   },
   {
     path: '/managed/ui/workspaces/:slug/sessions/:sessionId/live',

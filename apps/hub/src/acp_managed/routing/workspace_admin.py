@@ -22,8 +22,10 @@ from acp_managed.auth.sqlite_store import ManagedWorkspaceSessionRecord
 from acp_managed.contracts import (
     WORKSPACE_TEAM_PRESETS,
     CreateAgentTokenRequest,
+    CreateRoomWallPostRequest,
     CreateWorkspacePresetRequest,
     CreateWorkspaceSessionRequest,
+    UpdateRoomWallPostRequest,
 )
 from acp_managed.routing import ManagedRouterDeps
 from acp_managed.routing._helpers import (
@@ -31,6 +33,7 @@ from acp_managed.routing._helpers import (
     _managed_session_aliases,
     _sanitize_agent_token,
     _sanitize_membership,
+    _sanitize_room_wall_post,
     _sanitize_workspace,
     _sanitize_workspace_admin_invitation,
     _sanitize_workspace_session,
@@ -433,6 +436,119 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
                     record=record,
                     acp_session=session_detail if isinstance(session_detail, dict) else None,
                 ),
+            }
+        )
+
+    def _require_workspace_session_record(
+        *,
+        slug: str,
+        session_id: str,
+        acp_managed_session: str | None,
+    ) -> tuple[object, object, ManagedWorkspaceSessionRecord]:
+        principal, workspace, _ = require_workspace_admin_access(slug=slug, acp_managed_session=acp_managed_session)
+        record = principal_store.get_workspace_session(session_id=session_id)
+        if record is None or record.workspace_id != workspace.workspace_id:
+            raise HTTPException(status_code=404, detail="managed workspace session does not exist")
+        return principal, workspace, record
+
+    @router.get("/managed/workspaces/{slug}/sessions/{session_id}/wall")
+    async def managed_workspace_session_wall(
+        slug: str,
+        session_id: str,
+        acp_managed_session: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        _, workspace, record = _require_workspace_session_record(
+            slug=slug,
+            session_id=session_id,
+            acp_managed_session=acp_managed_session,
+        )
+        posts = principal_store.list_room_wall_posts(session_id=record.session_id)
+        return JSONResponse(
+            {
+                "workspace": _sanitize_workspace(workspace),
+                "workspace_session": _sanitize_workspace_session(record, include_owner_member_token=True),
+                "posts": [_sanitize_room_wall_post(item) for item in posts],
+                "count": len(posts),
+            }
+        )
+
+    @router.post("/managed/workspaces/{slug}/sessions/{session_id}/wall")
+    async def managed_create_workspace_session_wall_post(
+        slug: str,
+        session_id: str,
+        payload: CreateRoomWallPostRequest,
+        acp_managed_session: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        principal, workspace, record = _require_workspace_session_record(
+            slug=slug,
+            session_id=session_id,
+            acp_managed_session=acp_managed_session,
+        )
+        post = principal_store.create_room_wall_post(
+            session_id=record.session_id,
+            workspace_id=workspace.workspace_id,
+            author_type="owner",
+            author_name=principal.email,
+            body=payload.body,
+            pinned=payload.pinned,
+        )
+        return JSONResponse(
+            {
+                "status": "created",
+                "workspace": _sanitize_workspace(workspace),
+                "workspace_session": _sanitize_workspace_session(record, include_owner_member_token=True),
+                "post": _sanitize_room_wall_post(post),
+            }
+        )
+
+    @router.patch("/managed/workspaces/{slug}/sessions/{session_id}/wall/{post_id}")
+    async def managed_pin_workspace_session_wall_post(
+        slug: str,
+        session_id: str,
+        post_id: str,
+        payload: UpdateRoomWallPostRequest,
+        acp_managed_session: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        _, workspace, record = _require_workspace_session_record(
+            slug=slug,
+            session_id=session_id,
+            acp_managed_session=acp_managed_session,
+        )
+        existing = principal_store.get_room_wall_post(post_id=post_id)
+        if existing is None or existing.session_id != record.session_id or existing.workspace_id != workspace.workspace_id:
+            raise HTTPException(status_code=404, detail="wall post does not exist")
+        post = principal_store.set_room_wall_post_pinned(post_id=post_id, pinned=payload.pinned)
+        return JSONResponse(
+            {
+                "status": "updated",
+                "workspace": _sanitize_workspace(workspace),
+                "workspace_session": _sanitize_workspace_session(record, include_owner_member_token=True),
+                "post": _sanitize_room_wall_post(post),
+            }
+        )
+
+    @router.delete("/managed/workspaces/{slug}/sessions/{session_id}/wall/{post_id}")
+    async def managed_delete_workspace_session_wall_post(
+        slug: str,
+        session_id: str,
+        post_id: str,
+        acp_managed_session: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        _, workspace, record = _require_workspace_session_record(
+            slug=slug,
+            session_id=session_id,
+            acp_managed_session=acp_managed_session,
+        )
+        existing = principal_store.get_room_wall_post(post_id=post_id)
+        if existing is None or existing.session_id != record.session_id or existing.workspace_id != workspace.workspace_id:
+            raise HTTPException(status_code=404, detail="wall post does not exist")
+        deleted = principal_store.delete_room_wall_post(post_id=post_id)
+        return JSONResponse(
+            {
+                "status": "deleted" if deleted else "not_found",
+                "workspace": _sanitize_workspace(workspace),
+                "workspace_session": _sanitize_workspace_session(record, include_owner_member_token=True),
+                "post_id": post_id,
             }
         )
 

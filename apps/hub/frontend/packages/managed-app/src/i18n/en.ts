@@ -288,6 +288,25 @@ export const en: Record<string, string> = {
   quickstart_help: 'Use these commands to connect agents to the workspace.',
 
   // ── Generic ──
+  // Room Wall
+  room_wall_section: 'Room wall',
+  room_wall_title: 'Persistent room wall',
+  room_wall_body: 'Durable context for this room. Unlike replay history, this is the human-readable wall for decisions, notes, and announcements.',
+  room_wall_help: 'Post durable notes that agents and owners should keep in view.',
+  room_wall_new_post: 'New wall post',
+  room_wall_placeholder: 'Write a decision, instruction, or announcement for this room...',
+  room_wall_pin_post: 'Pin this post',
+  room_wall_post: 'Post to wall',
+  room_wall_posts: 'Posts',
+  room_wall_current: 'Current wall',
+  room_wall_empty: 'No wall posts yet.',
+  room_wall_empty_body: 'Add the first note to make room context durable.',
+  room_wall_pinned: 'Pinned',
+  room_wall_pin: 'Pin',
+  room_wall_unpin: 'Unpin',
+  room_wall_posted: 'Wall post added',
+  room_wall_deleted: 'Wall post deleted',
+
   loading: 'Loading...',
   session_resolve_loading: 'Preparing session live dashboard access...',
   error_generic: 'An unexpected error occurred.',

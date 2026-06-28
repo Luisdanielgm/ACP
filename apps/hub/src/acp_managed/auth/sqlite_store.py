@@ -5,7 +5,9 @@ from __future__ import annotations
 import sqlite3
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 from acp.hub.sqlite_support import connect
 from acp_managed.auth.passwords import verify_password
@@ -40,6 +42,18 @@ class ManagedWorkspaceSessionRecord:
     project: str | None
     created_at: str
     prompt: str | None = None
+
+
+@dataclass(frozen=True)
+class ManagedRoomWallPostRecord:
+    post_id: str
+    session_id: str
+    workspace_id: str
+    author_type: str
+    author_name: str
+    body: str
+    pinned: bool
+    created_at: str
 
 
 @dataclass(frozen=True)
@@ -226,6 +240,28 @@ class SqliteManagedPrincipalStore:
                     ADD COLUMN prompt TEXT NULL
                     """
                 )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS managed_room_wall_posts (
+                    post_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL,
+                    author_type TEXT NOT NULL,
+                    author_name TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    pinned INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES managed_workspace_sessions(session_id) ON DELETE CASCADE,
+                    FOREIGN KEY (workspace_id) REFERENCES managed_workspaces(workspace_id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_managed_room_wall_posts_session_order
+                ON managed_room_wall_posts(session_id, pinned DESC, created_at ASC, post_id ASC)
+                """
+            )
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS managed_audit_log (
@@ -1418,6 +1454,169 @@ class SqliteManagedPrincipalStore:
                 WHERE session_id = ?
                 """,
                 (session_id,),
+            )
+            conn.commit()
+            return int(cursor.rowcount or 0) > 0
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _wall_timestamp() -> str:
+        return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+    @staticmethod
+    def _wall_post_from_row(row: sqlite3.Row) -> ManagedRoomWallPostRecord:
+        return ManagedRoomWallPostRecord(
+            post_id=str(row["post_id"]),
+            session_id=str(row["session_id"]),
+            workspace_id=str(row["workspace_id"]),
+            author_type=str(row["author_type"]),
+            author_name=str(row["author_name"]),
+            body=str(row["body"]),
+            pinned=bool(int(row["pinned"])),
+            created_at=str(row["created_at"]),
+        )
+
+    def create_room_wall_post(
+        self,
+        *,
+        session_id: str,
+        workspace_id: str,
+        author_type: str,
+        author_name: str,
+        body: str,
+        pinned: bool = False,
+    ) -> ManagedRoomWallPostRecord:
+        normalized_body = body.strip() if isinstance(body, str) else ""
+        if not normalized_body:
+            raise ValueError("wall post body is required")
+        if author_type not in {"owner", "agent"}:
+            raise ValueError("wall post author_type must be owner or agent")
+        normalized_author = author_name.strip() if isinstance(author_name, str) else ""
+        if not normalized_author:
+            raise ValueError("wall post author_name is required")
+        record = ManagedRoomWallPostRecord(
+            post_id=str(uuid4()),
+            session_id=session_id,
+            workspace_id=workspace_id,
+            author_type=author_type,
+            author_name=normalized_author,
+            body=normalized_body,
+            pinned=bool(pinned),
+            created_at=self._wall_timestamp(),
+        )
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO managed_room_wall_posts(
+                    post_id,
+                    session_id,
+                    workspace_id,
+                    author_type,
+                    author_name,
+                    body,
+                    pinned,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.post_id,
+                    record.session_id,
+                    record.workspace_id,
+                    record.author_type,
+                    record.author_name,
+                    record.body,
+                    1 if record.pinned else 0,
+                    record.created_at,
+                ),
+            )
+            conn.commit()
+            return record
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("wall post references invalid workspace session") from exc
+        finally:
+            conn.close()
+
+    def list_room_wall_posts(self, *, session_id: str) -> list[ManagedRoomWallPostRecord]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                """
+                SELECT post_id, session_id, workspace_id, author_type, author_name, body, pinned, created_at
+                FROM managed_room_wall_posts
+                WHERE session_id = ?
+                ORDER BY pinned DESC, created_at ASC, post_id ASC
+                """,
+                (session_id,),
+            ).fetchall()
+            return [self._wall_post_from_row(row) for row in rows]
+        finally:
+            conn.close()
+
+    def get_room_wall_post(self, *, post_id: str) -> ManagedRoomWallPostRecord | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT post_id, session_id, workspace_id, author_type, author_name, body, pinned, created_at
+                FROM managed_room_wall_posts
+                WHERE post_id = ?
+                LIMIT 1
+                """,
+                (post_id,),
+            ).fetchone()
+            return None if row is None else self._wall_post_from_row(row)
+        finally:
+            conn.close()
+
+    def set_room_wall_post_pinned(self, *, post_id: str, pinned: bool) -> ManagedRoomWallPostRecord:
+        conn = self._connect()
+        try:
+            existing = conn.execute(
+                """
+                SELECT post_id, session_id, workspace_id, author_type, author_name, body, pinned, created_at
+                FROM managed_room_wall_posts
+                WHERE post_id = ?
+                LIMIT 1
+                """,
+                (post_id,),
+            ).fetchone()
+            if existing is None:
+                raise ValueError("wall post does not exist")
+            conn.execute(
+                """
+                UPDATE managed_room_wall_posts
+                SET pinned = ?
+                WHERE post_id = ?
+                """,
+                (1 if pinned else 0, post_id),
+            )
+            conn.commit()
+            updated = dict(existing)
+            updated["pinned"] = 1 if pinned else 0
+            return ManagedRoomWallPostRecord(
+                post_id=str(updated["post_id"]),
+                session_id=str(updated["session_id"]),
+                workspace_id=str(updated["workspace_id"]),
+                author_type=str(updated["author_type"]),
+                author_name=str(updated["author_name"]),
+                body=str(updated["body"]),
+                pinned=bool(int(updated["pinned"])),
+                created_at=str(updated["created_at"]),
+            )
+        finally:
+            conn.close()
+
+    def delete_room_wall_post(self, *, post_id: str) -> bool:
+        conn = self._connect()
+        try:
+            cursor = conn.execute(
+                """
+                DELETE FROM managed_room_wall_posts
+                WHERE post_id = ?
+                """,
+                (post_id,),
             )
             conn.commit()
             return int(cursor.rowcount or 0) > 0

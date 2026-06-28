@@ -1,19 +1,6 @@
 {
-  "_comment": "A-DETANGLE-00 regression baseline. Frozen route+state surface of acp_managed.create_managed_app(). The de-tangle (slice 2/3) must preserve this exactly. Regenerate ONLY for intentional API changes.",
-  "route_count": 90,
-  "state_keys": [
-    "managed_access_service",
-    "managed_agent_token_manager",
-    "managed_auth_rate_limiter",
-    "managed_principal_store",
-    "managed_router_deps",
-    "managed_runtime",
-    "managed_session_manager",
-    "managed_workspace_invitation_service",
-    "managed_workspace_session_service",
-    "managed_workspace_token_service",
-    "runtime"
-  ],
+  "_comment": "A-DETANGLE-00 regression baseline. Frozen route+state surface of acp_managed.create_managed_app(). Regenerate ONLY for intentional API changes. Updated for M3 persistent room wall routes.",
+  "route_count": 98,
   "routes": [
     {
       "path": "/",
@@ -234,6 +221,18 @@
       ]
     },
     {
+      "path": "/managed/agent/sessions/{session_id}/wall",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/agent/sessions/{session_id}/wall",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
       "path": "/managed/agent/workspaces/{slug}/sessions",
       "methods": [
         "GET"
@@ -267,6 +266,18 @@
       "path": "/managed/agent/workspaces/{slug}/sessions/{session_id}/replay",
       "methods": [
         "GET"
+      ]
+    },
+    {
+      "path": "/managed/agent/workspaces/{slug}/sessions/{session_id}/wall",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/agent/workspaces/{slug}/sessions/{session_id}/wall",
+      "methods": [
+        "POST"
       ]
     },
     {
@@ -424,6 +435,30 @@
       ]
     },
     {
+      "path": "/managed/workspaces/{slug}/sessions/{session_id}/wall",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/sessions/{session_id}/wall",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/sessions/{session_id}/wall/{post_id}",
+      "methods": [
+        "DELETE"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/sessions/{session_id}/wall/{post_id}",
+      "methods": [
+        "PATCH"
+      ]
+    },
+    {
       "path": "/managed/workspaces/{slug}/token/revoke",
       "methods": [
         "POST"
@@ -555,5 +590,18 @@
       "path": "/ws",
       "methods": []
     }
+  ],
+  "state_keys": [
+    "managed_access_service",
+    "managed_agent_token_manager",
+    "managed_auth_rate_limiter",
+    "managed_principal_store",
+    "managed_router_deps",
+    "managed_runtime",
+    "managed_session_manager",
+    "managed_workspace_invitation_service",
+    "managed_workspace_session_service",
+    "managed_workspace_token_service",
+    "runtime"
   ]
 }

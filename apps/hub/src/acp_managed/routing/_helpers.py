@@ -17,6 +17,7 @@ from fastapi import Request
 
 from acp_managed.auth.sqlite_store import (
     ManagedAgentTokenRecord,
+    ManagedRoomWallPostRecord,
     ManagedWorkspace,
     ManagedWorkspaceAdminInvitationRecord,
     ManagedWorkspaceMembership,
@@ -76,6 +77,19 @@ def _sanitize_workspace_session(
     if include_owner_member_token:
         payload["owner_member_token"] = record.owner_member_token
     return payload
+
+
+def _sanitize_room_wall_post(record: ManagedRoomWallPostRecord) -> dict[str, str | bool]:
+    return {
+        "post_id": record.post_id,
+        "session_id": record.session_id,
+        "workspace_id": record.workspace_id,
+        "author_type": record.author_type,
+        "author_name": record.author_name,
+        "body": record.body,
+        "pinned": record.pinned,
+        "created_at": record.created_at,
+    }
 
 
 def _managed_session_aliases(

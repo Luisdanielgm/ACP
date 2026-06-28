@@ -130,9 +130,9 @@
                 <RouterLink
                   v-for="s in sessions"
                   :key="s.session_id"
-                  :to="livePath(s)"
+                  :to="sessionDetailPath(s)"
                   class="session-card"
-                  :aria-label="`${s.owner_agent_name} — ${s.title || t('untitled_session')} — ${t('open_live_dashboard')}`"
+                  :aria-label="`${s.owner_agent_name} — ${s.title || t('untitled_session')} — ${t('open_session_detail')}`"
                 >
                   <div class="session-card-main">
                     <div class="session-card-agent">{{ s.owner_agent_name }}</div>
@@ -154,7 +154,7 @@
                       <time class="session-time" :datetime="s.created_at" :title="formatAbsolute(s.created_at)">{{ relativeTime(s.created_at) }}</time>
                     </div>
                   </div>
-                  <span class="session-card-action">{{ t('open_live_dashboard') }} &rarr;</span>
+                  <span class="session-card-action">{{ t('open_session_detail') }} &rarr;</span>
                 </RouterLink>
               </div>
             </article>
@@ -365,6 +365,10 @@ function livePath(session: WorkspaceSession) {
     agentName: session.owner_agent_name,
     memberToken: session.owner_member_token,
   })
+}
+
+function sessionDetailPath(session: WorkspaceSession) {
+  return `/managed/ui/workspaces/${encodeURIComponent(slug.value)}/sessions/${encodeURIComponent(session.session_id)}`
 }
 
 async function loadData() {

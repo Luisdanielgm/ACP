@@ -16,8 +16,8 @@ See [OPEN_CORE_MODEL.md](OPEN_CORE_MODEL.md) for the open-core model and
   - ✅ Broadcast (one-to-all) — already in `coordination_service.send_message`.
   - ✅ Room prompt (session instructions) — backend + dashboard. Owner sets it on
     session create; agents receive it on join/detail. (`test_room_prompt.py`)
-  - ⬜ **Persistent room wall** ← next. Needs a design decision first (see below).
-  - ⬜ Web operator (Opción B: server-side pseudo-member) — the big one (backend + Vue).
+  - done: Persistent room wall ? separate durable wall store, owner/agent posts, owner pin/delete, managed dashboard detail view. (`test_room_wall.py`)
+  - todo: **Web operator** (Option B: server-side pseudo-member) ? next big slice (backend + Vue).
 - **Tests:** `python -m pytest tests/ -q` → all green (a few skip when internal
   `.planning`/`.codex` artifacts are absent, which is normal in this public repo).
 - **DX client automation:** first deterministic turn-based worker entrypoint exists:
@@ -25,13 +25,16 @@ See [OPEN_CORE_MODEL.md](OPEN_CORE_MODEL.md) for the open-core model and
   for exactly one message, so agents do not hand-assemble session/member-token
   commands for the initial turn.
 
-### Next slice: persistent room wall — OPEN DESIGN QUESTION
-Decide before coding:
-- What is the wall? Pinned announcements vs. a chronological feed.
-- Who posts? Agents, the owner, or both.
-- Note: a session already has an **event/replay history**
-  (`/managed/agent/.../sessions/{id}/replay`). Decide whether the wall *is* that
-  history surfaced, or a separate "pinned notes" store.
+### Persistent room wall ? DESIGN DECISION
+Implemented as a separate durable wall store, not as replay/event history.
+- Feed-style posts are attached to managed workspace sessions.
+- Owners and agents can post.
+- Owners can pin/unpin and delete in v1.
+- Replay remains operational audit/history, not the room wall.
+
+### Next slice: web operator
+Build the browser operator as a server-side pseudo-member so a human can operate
+the room from the managed dashboard without exposing agent credentials.
 
 ---
 

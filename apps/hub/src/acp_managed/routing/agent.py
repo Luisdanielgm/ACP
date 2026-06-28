@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 from acp.hub.coordination_service import SessionAccessError
 
 from acp_managed.contracts import (
+    CreateAgentRoomWallPostRequest,
     CloseWorkspaceSessionRequest,
     CreateWorkspaceSessionRequest,
     JoinWorkspaceSessionRequest,
@@ -32,6 +33,7 @@ from acp_managed.routing._helpers import (
     _managed_agent_bootstrap_payload,
     _managed_session_aliases,
     _sanitize_agent_token,
+    _sanitize_room_wall_post,
     _sanitize_workspace,
     _sanitize_workspace_session,
 )
@@ -220,6 +222,63 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
             }
         )
 
+    async def _managed_agent_workspace_session_wall_response(
+        *,
+        request: Request,
+        session_id: str,
+        slug: str | None = None,
+    ) -> JSONResponse:
+        token_record, workspace = current_agent_token(request=request, slug=slug)
+        record = principal_store.get_workspace_session(session_id=session_id)
+        if record is None or record.workspace_id != workspace.workspace_id:
+            raise HTTPException(status_code=404, detail="managed workspace session does not exist")
+        posts = principal_store.list_room_wall_posts(session_id=record.session_id)
+        return JSONResponse(
+            {
+                "workspace": _sanitize_workspace(workspace),
+                "agent_token": _sanitize_agent_token(token_record),
+                "workspace_session": _sanitize_workspace_session(record),
+                "posts": [_sanitize_room_wall_post(item) for item in posts],
+                "count": len(posts),
+            }
+        )
+
+    async def _managed_agent_create_workspace_session_wall_post_response(
+        *,
+        request: Request,
+        session_id: str,
+        payload: CreateAgentRoomWallPostRequest,
+        slug: str | None = None,
+    ) -> JSONResponse:
+        requested_agent_name = payload.agent_name.strip()
+        if not requested_agent_name:
+            raise HTTPException(status_code=422, detail="agent_name is required")
+        token_record, workspace = current_agent_token(
+            request=request,
+            slug=slug,
+            requested_agent_name=requested_agent_name,
+        )
+        record = principal_store.get_workspace_session(session_id=session_id)
+        if record is None or record.workspace_id != workspace.workspace_id:
+            raise HTTPException(status_code=404, detail="managed workspace session does not exist")
+        post = principal_store.create_room_wall_post(
+            session_id=record.session_id,
+            workspace_id=workspace.workspace_id,
+            author_type="agent",
+            author_name=requested_agent_name,
+            body=payload.body,
+            pinned=False,
+        )
+        return JSONResponse(
+            {
+                "status": "created",
+                "workspace": _sanitize_workspace(workspace),
+                "agent_token": _sanitize_agent_token(token_record),
+                "workspace_session": _sanitize_workspace_session(record),
+                "post": _sanitize_room_wall_post(post),
+            }
+        )
+
     async def _managed_agent_join_workspace_session_response(
         *,
         request: Request,
@@ -369,6 +428,47 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
         request: Request,
     ) -> JSONResponse:
         return await _managed_agent_workspace_session_replay_response(request=request, session_id=session_id, slug=slug)
+
+    @router.get("/managed/agent/sessions/{session_id}/wall")
+    async def managed_agent_workspace_session_wall_auto(
+        session_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        return await _managed_agent_workspace_session_wall_response(request=request, session_id=session_id)
+
+    @router.get("/managed/agent/workspaces/{slug}/sessions/{session_id}/wall")
+    async def managed_agent_workspace_session_wall(
+        slug: str,
+        session_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        return await _managed_agent_workspace_session_wall_response(request=request, session_id=session_id, slug=slug)
+
+    @router.post("/managed/agent/sessions/{session_id}/wall")
+    async def managed_agent_create_workspace_session_wall_post_auto(
+        session_id: str,
+        payload: CreateAgentRoomWallPostRequest,
+        request: Request,
+    ) -> JSONResponse:
+        return await _managed_agent_create_workspace_session_wall_post_response(
+            request=request,
+            session_id=session_id,
+            payload=payload,
+        )
+
+    @router.post("/managed/agent/workspaces/{slug}/sessions/{session_id}/wall")
+    async def managed_agent_create_workspace_session_wall_post(
+        slug: str,
+        session_id: str,
+        payload: CreateAgentRoomWallPostRequest,
+        request: Request,
+    ) -> JSONResponse:
+        return await _managed_agent_create_workspace_session_wall_post_response(
+            request=request,
+            session_id=session_id,
+            payload=payload,
+            slug=slug,
+        )
 
     @router.post("/managed/agent/sessions/{session_id}/join")
     async def managed_agent_join_workspace_session_auto(

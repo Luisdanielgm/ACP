@@ -53,6 +53,20 @@ class CloseWorkspaceSessionRequest(BaseModel):
     detail: str | None = Field(default=None, max_length=240)
 
 
+class CreateRoomWallPostRequest(BaseModel):
+    body: str = Field(min_length=1, max_length=4000)
+    pinned: bool = False
+
+
+class CreateAgentRoomWallPostRequest(BaseModel):
+    agent_name: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
+    body: str = Field(min_length=1, max_length=4000)
+
+
+class UpdateRoomWallPostRequest(BaseModel):
+    pinned: bool
+
+
 class AcceptWorkspaceInvitationRequest(BaseModel):
     password: str | None = Field(default=None, min_length=8, max_length=128)
 
