@@ -2,10 +2,10 @@
 
 ACP is a coordination layer for coding agents.
 
-- `apps/hub`: remote Hub runtime
+- `apps/hub`: remote/self-hosted Hub + ACP Manager runtime
 - `ACP_AGENT`: one portable folder copied into each project
 
-The Hub owns routing, sessions, and dashboards. `ACP_AGENT/acp.py` is the local bridge an agent uses inside a project.
+The Hub owns routing, sessions, workspaces, rooms, storage, and dashboards. `ACP_AGENT/acp.py` is the local bridge an agent uses inside a project. See [PRODUCT_WALKTHROUGH.md](PRODUCT_WALKTHROUGH.md) for the end-to-end product path.
 
 ## Repository Layout
 
@@ -36,7 +36,7 @@ The Hub stays remote. There is no local ACP server. The recommended flow is sess
 The open ACP Manager includes the workspace layer. It uses a minimal split:
 
 - `ACP core`: sessions, members, message routing, wait/listen/send/status, session dashboards
-- `Workspace layer`: workspace creation, workspace admin invitations, workspace token rotation, rooms, wall, and web operator
+- `Workspace layer`: workspace creation, workspace admin invitations, workspace token rotation, rooms, room prompts, persistent wall, room files/instructions with quotas, and web operator
 
 Canonical architecture reference:
 
@@ -83,8 +83,8 @@ Canonical architecture reference:
 6. Sessions are created:
    - from the workspace dashboard, or
    - from ACP client with the workspace token
-7. Other agents join the session with `join_code`.
-8. Once inside, ACP core continues with normal `member_token` semantics.
+7. Other agents can join with `join_code`, or use deterministic managed commands such as `coordinate` / `connect` with the workspace token.
+8. Once inside, the room keeps durable context through the prompt, wall posts, and room files/instructions. ACP core continues with normal `member_token` semantics.
 
 ## Prerequisites
 
@@ -154,18 +154,40 @@ Dashboard:
 
 ## Recommended Agent Flow
 
-Session-based flow:
+Managed workspace worker, turn-based 90% path:
+
+```powershell
+python ACP_AGENT/acp.py coordinate --agent worker-1 --agent-token TOKEN --hub-http https://YOUR_HUB --project PROJECT_ID
+# work on the received message, then reply
+python ACP_AGENT/acp.py reply --to codex-chief --task-id t-1 --payload-file ACP_AGENT/outbox/result.json
+python ACP_AGENT/acp.py status --state waiting --text "ready for next task"
+```
+
+Unsure whether the agent is chief or worker:
+
+```powershell
+python ACP_AGENT/acp.py connect --role auto --agent worker-1 --agent-token TOKEN --hub-http https://YOUR_HUB --project PROJECT_ID
+```
+
+Always-on operation:
+
+```powershell
+python ACP_AGENT/acp.py runner start --config ACP_AGENT/agents/worker-1.json --provider claude_local --workspace C:\\path\\to\\project
+python ACP_AGENT/acp.py chief start --config ACP_AGENT/agents/codex-chief.json --backlog-dir coord/backlog --provider claude_local --workspace C:\\path\\to\\project
+```
+
+Core session-based compatibility flow still exists:
 
 ```powershell
 python ACP_AGENT/acp.py create-session --config ACP_AGENT/agents/codex-chief.json --title "Auth Refactor"
 python ACP_AGENT/acp.py join-session --config ACP_AGENT/agents/claude-review.json --code ABC123
-python ACP_AGENT/acp.py listen --config ACP_AGENT/agents/claude-review.json
+python ACP_AGENT/acp.py listen --config ACP_AGENT/agents/claude-review.json --stop-after-message --timeout-seconds 300
 python ACP_AGENT/acp.py send --config ACP_AGENT/agents/codex-chief.json --to claude-review --action TASK --payload "Revisa auth"
 python ACP_AGENT/acp.py status --config ACP_AGENT/agents/claude-review.json --state busy --text "Tomando ownership de auth"
 python ACP_AGENT/acp.py leave-session --config ACP_AGENT/agents/claude-review.json
 ```
 
-Simplified human-friendly flow:
+Simplified human-friendly core flow:
 
 ```powershell
 python ACP_AGENT/acp.py init --agent codex-chief --agent claude-review --hub-mode custom --hub-http https://YOUR_HUB --hub-ws wss://YOUR_HUB/ws --force
@@ -179,11 +201,10 @@ If there is only one config in `ACP_AGENT/agents/`, most commands can omit `--co
 
 Operational policy:
 
-- Keep `listen` running as the default background listener.
-- Publish `waiting` while the agent is available and listening.
+- Turn-based LLM agents should receive with `coordinate` or `listen --stop-after-message --timeout-seconds 300`, not foreground persistent `listen`.
+- Publish `waiting` while the agent is available.
 - Reserve `idle` for true detach/teardown states only.
-- If immediate follow-up is likely, or local work is done and the next step depends on external instructions, hold a foreground active-wait window of up to 20 minutes.
-- Prefer the built-in helper: `python ACP_AGENT/acp.py wait-window --config ACP_AGENT/agents/<agent>.json --window-minutes 20`
+- If immediate follow-up is likely, hold a foreground active-wait window of up to 20 minutes with `python ACP_AGENT/acp.py wait-window --config ACP_AGENT/agents/<agent>.json --window-minutes 20`.
 
 Compatibility mode:
 
@@ -253,7 +274,7 @@ Use the bridge directly from the copied project folder:
 python ACP_AGENT/acp.py send --config ACP_AGENT/agents/codex-chief.json --to claude-review --action TASK --payload "Revisa el modulo auth"
 ```
 
-ACP stays limited to coordination. It does not own how the coding agent reasons or edits code.
+ACP stays limited to coordination. It does not own how the coding agent reasons or edits code. Durable room context lives in the room prompt, wall, and room files; code execution and verification remain with the agent.
 
 When a chief creates a session, the expected handoff is no longer just the `join_code`. The agent should share the access block returned by `create-session`, especially:
 

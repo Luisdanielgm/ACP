@@ -12,7 +12,7 @@ See [OPEN_CORE_MODEL.md](OPEN_CORE_MODEL.md) for the open-core model and
 ## 📍 Current state (update me)
 
 - **Milestones reached:** ★ M1 (clean engine) · ★ M2 (open source — this repo is public).
-- **In progress:** M3 follow-up polish and release/product polish.
+- **Public product state:** self-hostable ACP Manager is feature-complete for the current OSS milestone; Cloud remains deferred/private.
   - ✅ Broadcast (one-to-all) — already in `coordination_service.send_message`.
   - ✅ Room prompt (session instructions) — backend + dashboard. Owner sets it on
     session create; agents receive it on join/detail. (`test_room_prompt.py`)
@@ -41,11 +41,11 @@ the room from the managed dashboard without exposing pseudo-member credentials t
 |---|---|---|---|
 | M1 | Clean engine | De-tangled managed app (routers + `ManagedRouterDeps` seam), at-least-once message idempotency | ✅ done |
 | M2 | Open source | This repo public; AGPL server + Apache client; CLA; CI | ✅ done |
-| M3 | Rooms (Salas) | Room prompt, persistent wall, web operator (Option B) | core slices done; polish follow-up |
+| M3 | Rooms (Salas) | Room prompt, persistent wall, web operator (Option B) | ✅ done |
 | M4 | Storage | Per-room files/instructions, quotas | ✅ done |
 | DX | **Client automation** (parallel track) | Deterministic connect/coordinate/onboard/chief/runner commands; slim skill guardrail | ✅ done |
-| — | 🎯 **Sellable OSS product** | engine + rooms + storage, self-hostable, durable | 🔄 polish |
-| (Cloud) | Commercial overlay | Billing/provisioning/branding — lives in the **separate private `acp-cloud` repo**, not here | ⬜ deferred |
+| — | 🎯 **Sellable OSS product** | engine + rooms + storage, self-hostable, durable | ✅ done |
+| (Cloud) | Commercial overlay | Billing/provisioning/branding — lives in the **separate private `acp-cloud` repo**, not here | deferred/private |
 
 Cloud/billing, HA, and the pilot are intentionally **last** — they don't block the
 open-source product, and the commercial overlay lives in `acp-cloud` (private).

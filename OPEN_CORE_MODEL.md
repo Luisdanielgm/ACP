@@ -128,8 +128,8 @@ brand. Nobody should offer a competing hosted service under the ACP name.
 1. [done] Open-core line decided: Option Y, with Client / Manager / Cloud split.
 2. [done] Public repo ships ACP Client + ACP Manager, including the workspace layer.
 3. [done] Managed routes use `build_*_router(deps)` factories around `ManagedRouterDeps`.
-4. [todo] Remaining public-product work lives in [ROADMAP.md](ROADMAP.md), especially storage, DX automation, and release polish.
-5. [todo] The separate private `acp-cloud` repo owns billing, provisioning, hosted defaults, and branding.
+4. [done] Public-product core is sellable/self-hostable: rooms, storage, quotas, DX automation, and release guidance are documented in [ROADMAP.md](ROADMAP.md) and [PRODUCT_WALKTHROUGH.md](PRODUCT_WALKTHROUGH.md).
+5. [deferred/private] The separate private `acp-cloud` repo owns billing, provisioning, hosted defaults, and branding.
 
 See also: [ARCHITECTURE_SIMPLIFIED.md](ARCHITECTURE_SIMPLIFIED.md) (layer model),
 [MODULAR_BOUNDARIES.md](MODULAR_BOUNDARIES.md) (dependency direction).

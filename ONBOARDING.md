@@ -2,7 +2,7 @@
 
 You are working on the **public** ACP repo: the engine (core hub + managed
 workspace layer) and the portable client. Read this before touching anything,
-then see [ROADMAP.md](ROADMAP.md) for the plan and current state.
+then see [ROADMAP.md](ROADMAP.md) for current state and [PRODUCT_WALKTHROUGH.md](PRODUCT_WALKTHROUGH.md) for the end-to-end product path.
 
 ## What this repo is
 
@@ -67,4 +67,5 @@ git config core.hooksPath scripts/hooks
 ## Where the plan lives
 
 - This repo: [ROADMAP.md](ROADMAP.md) (plan + current state).
+- Product walkthrough: [PRODUCT_WALKTHROUGH.md](PRODUCT_WALKTHROUGH.md) (workspace -> room -> agents -> durable context).
 - Cross-repo big picture: the owner's Obsidian vault (not in any repo).
