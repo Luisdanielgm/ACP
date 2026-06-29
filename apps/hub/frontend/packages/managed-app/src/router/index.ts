@@ -29,6 +29,12 @@ const routes: RouteRecordRaw[] = [
         if (!me) {
           return next()
         }
+        if (me.deployment_mode === 'single_workspace' && me.default_workspace?.slug) {
+          return next({
+            path: `/managed/ui/workspaces/${encodeURIComponent(me.default_workspace.slug)}`,
+            replace: true,
+          })
+        }
         if (me.role === 'instance_admin') {
           return next({ path: '/managed/admin/workspaces/ui', replace: true })
         }

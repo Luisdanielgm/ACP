@@ -8,6 +8,9 @@ export interface ManagedUser {
   status: string
   expires_at?: number
   authenticated?: boolean
+  deployment_mode?: 'single_workspace' | 'operator' | (string & {})
+  default_workspace?: Workspace | null
+  redirect_url?: string
 }
 
 export interface Workspace {
@@ -125,8 +128,18 @@ export interface ManagedAgentBootstrap {
 
 // ── Auth ──
 
+export interface ManagedLoginResponse {
+  status: string
+  email: string
+  role: string
+  expires_at: number
+  deployment_mode?: ManagedUser['deployment_mode']
+  default_workspace?: Workspace | null
+  redirect_url?: string
+}
+
 export async function login(email: string, password: string) {
-  return apiFetch<{ status: string; email: string; role: string; expires_at: number }>('/managed/auth/login', {
+  return apiFetch<ManagedLoginResponse>('/managed/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),

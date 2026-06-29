@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import os
 import re
+from dataclasses import dataclass
 
 from acp_managed.auth.sqlite_store import SqliteManagedPrincipalStore
 from acp_managed.auth.whitelist import build_principals_from_env
+
+_DEPLOYMENT_MODES = {"single_workspace", "operator"}
 
 _INSECURE_SECRET_VALUES = {
     "changeme",
@@ -39,6 +42,44 @@ def public_web_enabled() -> bool:
     return configured.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def managed_deployment_mode() -> str:
+    configured = os.getenv("ACP_DEPLOYMENT_MODE", "single_workspace").strip().lower()
+    if configured not in _DEPLOYMENT_MODES:
+        raise ValueError(
+            "ACP_DEPLOYMENT_MODE must be one of: "
+            + ", ".join(sorted(_DEPLOYMENT_MODES))
+        )
+    return configured
+
+
+def operator_mode_enabled() -> bool:
+    return managed_deployment_mode() == "operator"
+
+
+@dataclass(frozen=True)
+class SingleWorkspaceSettings:
+    slug: str
+    name: str
+    admin_email: str
+    admin_password_hash: str
+
+
+def _required_env(name: str) -> str:
+    configured = os.getenv(name)
+    if not isinstance(configured, str) or not configured.strip():
+        raise ValueError(f"{name} is required in single_workspace mode for first boot")
+    return configured.strip()
+
+
+def single_workspace_settings() -> SingleWorkspaceSettings:
+    return SingleWorkspaceSettings(
+        slug=_required_env("ACP_WORKSPACE_SLUG"),
+        name=_required_env("ACP_WORKSPACE_NAME"),
+        admin_email=_required_env("ACP_WORKSPACE_ADMIN_EMAIL").lower(),
+        admin_password_hash=_required_env("ACP_WORKSPACE_ADMIN_PASSWORD_HASH"),
+    )
+
+
 def managed_auth_sqlite_path() -> str:
     configured = os.getenv("ACP_MANAGED_AUTH_SQLITE_PATH")
     if not isinstance(configured, str) or not configured.strip():
@@ -48,7 +89,8 @@ def managed_auth_sqlite_path() -> str:
 
 def managed_principal_store() -> SqliteManagedPrincipalStore:
     store = SqliteManagedPrincipalStore(sqlite_path=managed_auth_sqlite_path())
-    store.bootstrap_if_empty(build_principals_from_env(os.getenv("ACP_MANAGED_WHITELIST")))
+    if operator_mode_enabled():
+        store.bootstrap_if_empty(build_principals_from_env(os.getenv("ACP_MANAGED_WHITELIST")))
     return store
 
 

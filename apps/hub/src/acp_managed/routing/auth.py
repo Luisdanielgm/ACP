@@ -87,8 +87,23 @@ def build_auth_router(deps: ManagedRouterDeps) -> APIRouter:
                 headers={"Retry-After": str(decision.retry_after)},
             )
 
+    def _managed_home_context(request: Request) -> dict[str, object]:
+        deployment_mode = getattr(request.app.state, "managed_deployment_mode", "single_workspace")
+        default_workspace = None
+        redirect_url = "/managed/dashboard"
+        workspace = getattr(request.app.state, "single_workspace", None)
+        if deployment_mode == "single_workspace" and workspace is not None:
+            default_workspace = _sanitize_workspace(workspace)
+            redirect_url = f"/managed/ui/workspaces/{urllib.parse.quote(workspace.slug, safe='')}"
+        return {
+            "deployment_mode": deployment_mode,
+            "default_workspace": default_workspace,
+            "redirect_url": redirect_url,
+        }
+
     @router.get("/managed/dashboard/auth/session")
     async def managed_session_dashboard_auth_session(
+        request: Request,
         acp_managed_session: str | None = Cookie(default=None),
     ) -> JSONResponse:
         try:
@@ -102,6 +117,7 @@ def build_auth_router(deps: ManagedRouterDeps) -> APIRouter:
                         "status": "anonymous",
                         "authenticated": False,
                         "token_required": getattr(runtime, "required_token", None) is not None,
+                        **_managed_home_context(request),
                     },
                 )
             raise
@@ -111,6 +127,7 @@ def build_auth_router(deps: ManagedRouterDeps) -> APIRouter:
                 "status": "ok",
                 "authenticated": True,
                 "token_required": getattr(runtime, "required_token", None) is not None,
+                **_managed_home_context(request),
                 "managed_session": {
                     "session_id": session.session_id,
                     "email": principal.email,
@@ -149,7 +166,7 @@ def build_auth_router(deps: ManagedRouterDeps) -> APIRouter:
                 expires_at=session.expires_at,
             )
         )
-        response = RedirectResponse(url="/managed/dashboard", status_code=303)
+        response = RedirectResponse(url=str(_managed_home_context(request)["redirect_url"]), status_code=303)
         response.set_cookie(
             key="acp_managed_session",
             value=session_token,
@@ -195,6 +212,7 @@ def build_auth_router(deps: ManagedRouterDeps) -> APIRouter:
                 "email": principal.email,
                 "role": principal.role,
                 "expires_at": session.expires_at,
+                **_managed_home_context(request),
             }
         )
         response.set_cookie(
@@ -364,7 +382,7 @@ def build_auth_router(deps: ManagedRouterDeps) -> APIRouter:
         return form_response
 
     @router.get("/managed/auth/me")
-    async def managed_me(acp_managed_session: str | None = Cookie(default=None)) -> JSONResponse:
+    async def managed_me(request: Request, acp_managed_session: str | None = Cookie(default=None)) -> JSONResponse:
         try:
             session = current_session_from_cookie(acp_managed_session)
             principal = current_principal_from_cookie(acp_managed_session)
@@ -374,6 +392,7 @@ def build_auth_router(deps: ManagedRouterDeps) -> APIRouter:
                     {
                         "authenticated": False,
                         "status": "anonymous",
+                        **_managed_home_context(request),
                     }
                 )
             raise
@@ -384,6 +403,7 @@ def build_auth_router(deps: ManagedRouterDeps) -> APIRouter:
                 "role": principal.role,
                 "status": principal.status,
                 "expires_at": session.expires_at,
+                **_managed_home_context(request),
             }
         )
 

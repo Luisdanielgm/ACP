@@ -45,7 +45,7 @@ import { ApiError } from '../api/client'
 
 const route = useRoute()
 const router = useRouter()
-const { login, checkSession } = useManagedAuth()
+const { login, checkSession, managedHomePathFor } = useManagedAuth()
 const { t } = useManagedI18n()
 
 const email = ref('')
@@ -53,10 +53,10 @@ const password = ref('')
 const error = ref('')
 const loading = ref(false)
 
-function resolveRedirectPath(): string {
+function resolveRedirectPath(fallback = '/managed/dashboard'): string {
   const redirect = String(route.query.redirect ?? '').trim()
   if (!redirect || !redirect.startsWith('/') || redirect.startsWith('//')) {
-    return '/managed/dashboard'
+    return fallback
   }
   return redirect
 }
@@ -75,15 +75,15 @@ onMounted(async () => {
     error.value = mapQueryError(queryError)
   }
   const user = await checkSession(true)
-  if (user) router.replace(resolveRedirectPath())
+  if (user) router.replace(resolveRedirectPath(managedHomePathFor(user)))
 })
 
 async function handleLogin() {
   error.value = ''
   loading.value = true
   try {
-    await login(email.value, password.value)
-    router.push(resolveRedirectPath())
+    const result = await login(email.value, password.value)
+    router.push(resolveRedirectPath(result.redirect_url ?? managedHomePathFor(result)))
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) {
       error.value = t('login_error')

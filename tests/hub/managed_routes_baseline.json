@@ -649,6 +649,7 @@
     "managed_access_service",
     "managed_agent_token_manager",
     "managed_auth_rate_limiter",
+    "managed_deployment_mode",
     "managed_principal_store",
     "managed_router_deps",
     "managed_runtime",

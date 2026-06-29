@@ -9,6 +9,7 @@ from acp.hub.app import create_app, create_runtime_from_env
 from acp_managed.auth.session import AgentTokenManager, SessionTokenManager
 from acp_managed.ui.spa import _register_managed_vue_spa
 from acp_managed.config import (
+    managed_deployment_mode as _managed_deployment_mode,
     managed_agent_token_secret as _managed_agent_token_secret,
     managed_invitation_ttl_seconds as _managed_invitation_ttl_seconds,
     managed_principal_store as _managed_principal_store,
@@ -26,6 +27,7 @@ from acp_managed.services import (
     ManagedWorkspaceSessionService,
     ManagedWorkspaceTokenService,
 )
+from acp_managed.services.single_workspace import ensure_single_workspace_bootstrap
 
 
 
@@ -44,21 +46,27 @@ from acp_managed.routing._helpers import (
 
 
 def create_managed_app() -> FastAPI:
+    deployment_mode = _managed_deployment_mode()
     runtime = create_runtime_from_env()
     runtime.public_web_enabled = _public_web_enabled()
     runtime.legacy_dashboard_enabled = False
     app = create_app(runtime=runtime)
     principal_store = _managed_principal_store()
+    session_secret = _managed_session_secret()
+    agent_token_secret = _managed_agent_token_secret()
+    if deployment_mode == "single_workspace":
+        app.state.single_workspace = ensure_single_workspace_bootstrap(principal_store)
     session_manager = SessionTokenManager(
-        secret=_managed_session_secret(),
+        secret=session_secret,
         ttl_seconds=_managed_session_ttl_seconds(),
     )
-    agent_token_manager = AgentTokenManager(secret=_managed_agent_token_secret())
+    agent_token_manager = AgentTokenManager(secret=agent_token_secret)
     invitation_ttl_seconds = _managed_invitation_ttl_seconds()
     app.state.managed_principal_store = principal_store
     app.state.managed_session_manager = session_manager
     app.state.managed_agent_token_manager = agent_token_manager
     app.state.managed_runtime = runtime
+    app.state.managed_deployment_mode = deployment_mode
     access_service = ManagedAccessService(
         principal_store=principal_store,
         session_manager=session_manager,
@@ -148,7 +156,8 @@ def create_managed_app() -> FastAPI:
     runtime.managed_session_authorizer = authorize_managed_session_dashboard_access
 
     app.include_router(build_auth_router(deps))
-    app.include_router(build_instance_admin_router(deps))
+    if deployment_mode == "operator":
+        app.include_router(build_instance_admin_router(deps))
     app.include_router(build_workspace_admin_router(deps))
     app.include_router(build_agent_router(deps))
 
