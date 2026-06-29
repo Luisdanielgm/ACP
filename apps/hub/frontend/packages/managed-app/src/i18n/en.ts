@@ -29,7 +29,7 @@ export const en: Record<string, string> = {
   // ── Login ──
   login_title: 'ACP Managed',
   login_kicker: 'VPS Access',
-  login_body: 'Sign in with your managed user to administer workspaces, issue agent tokens, and operate ACP sessions from this domain without exposing the global system technical token.',
+  login_body: 'Sign in with your workspace user to issue agent tokens and operate ACP sessions from this domain without exposing the global system technical token.',
   login_email: 'Email',
   login_password: 'Password',
   login_submit: 'Sign in',

@@ -29,7 +29,7 @@ export const es: Record<string, string> = {
   // ── Login ──
   login_title: 'ACP Managed',
   login_kicker: 'Acceso VPS',
-  login_body: 'Inicia sesion con tu usuario managed para administrar workspaces, emitir agent tokens y operar sesiones ACP desde este dominio sin exponer el token tecnico global del sistema.',
+  login_body: 'Inicia sesion con tu usuario del workspace para emitir agent tokens y operar sesiones ACP desde este dominio sin exponer el token tecnico global del sistema.',
   login_email: 'Email',
   login_password: 'Contrasena',
   login_submit: 'Entrar',
