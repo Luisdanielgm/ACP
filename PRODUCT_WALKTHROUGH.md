@@ -1,15 +1,15 @@
-﻿# ACP Product Walkthrough
+# ACP Product Walkthrough
 
-ACP is now a self-hostable coordination product: a human creates a workspace, opens a room, gives agents a deterministic entrypoint, and keeps durable context in the room.
+ACP is a self-hostable coordination product: one human admin gets one workspace, creates rooms, gives agents a deterministic entrypoint, and keeps durable context in the room.
 
-## Happy path
+## Public self-host happy path
 
-1. **Run ACP Manager** locally or on a VPS.
-2. **Create a workspace** as `instance_admin`.
-3. **Invite the workspace admin** and let them accept the link.
+1. **Run ACP Manager** locally or on a VPS in `single_workspace` mode.
+2. **Bootstrap one workspace and one admin** from setup/env values.
+3. **Log in as the workspace admin**.
 4. **Rotate the workspace token** from the workspace dashboard.
 5. **Create a room/session** with title, project, and optional room instructions.
-6. **Give an agent the token** and the project id. The agent runs one command:
+6. **Give an agent the token** and project id. The agent runs one command:
 
    ```powershell
    python ACP_AGENT/acp.py coordinate --agent worker-1 --agent-token TOKEN --hub-http https://YOUR_HUB --project PROJECT_ID
@@ -31,16 +31,19 @@ ACP is now a self-hostable coordination product: a human creates a workspace, op
 | Area | Status | Notes |
 | --- | --- | --- |
 | Core sessions | Done | create/join/send/wait/listen/status/replay. |
-| Managed workspaces | Done | auth, invitations, workspace tokens, dashboard. |
+| Single workspace | In progress | Public default is moving to one workspace/one admin. |
 | Rooms | Done | room prompt, persistent wall, web operator. |
 | Storage | Done | per-room files, instruction/artifact purpose, count/bytes quotas. |
 | Agent DX | Done | `connect`, `coordinate`, `onboard`, `chief`, `runner`; slim skill guardrail. |
-| Cloud | Deferred/private | Billing, provisioning, hosted defaults, and branding live in `acp-cloud`. |
+| Cloud/operator | Private | Billing, provisioning, hosted defaults, branding, and multi-workspace operator UX live in `acp-cloud`. |
 
 ## Release readiness checklist
 
 Before tagging or promoting a public build:
 
+- [ ] Public default is `ACP_DEPLOYMENT_MODE=single_workspace`.
+- [ ] Single mode has exactly one workspace and one workspace admin.
+- [ ] Global multi-workspace admin routes/UI are unavailable in single mode.
 - [ ] `python -m pytest tests/ -q` passes.
 - [ ] `npm run build --workspace=packages/managed-app` passes from `apps/hub/frontend`.
 - [ ] `git push` passes the pre-push safety net.
@@ -51,4 +54,4 @@ Before tagging or promoting a public build:
 
 ## Commercial boundary
 
-The public repo is the complete self-hostable Manager. Customers pay for the hosted operation, not for hidden room/workspace features. The private `acp-cloud` overlay owns billing, hosted provisioning, branded defaults, and operational policy.
+The public repo is the complete self-hostable one-workspace Manager. Customers pay for hosted operation and provisioning, not for hidden room/session features. The private `acp-cloud` overlay owns billing, hosted provisioning, official downloads, branding, and operator policy.

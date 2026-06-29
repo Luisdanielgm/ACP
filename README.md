@@ -5,7 +5,7 @@ ACP is a coordination layer for coding agents.
 - `apps/hub`: remote/self-hosted Hub + ACP Manager runtime
 - `ACP_AGENT`: one portable folder copied into each project
 
-The Hub owns routing, sessions, workspaces, rooms, storage, and dashboards. `ACP_AGENT/acp.py` is the local bridge an agent uses inside a project. See [PRODUCT_WALKTHROUGH.md](PRODUCT_WALKTHROUGH.md) for the end-to-end product path.
+The Hub owns routing, sessions, the self-host workspace, rooms, storage, and dashboards. `ACP_AGENT/acp.py` is the local bridge an agent uses inside a project. See [PRODUCT_WALKTHROUGH.md](PRODUCT_WALKTHROUGH.md) for the end-to-end product path.
 
 ## Repository Layout
 
@@ -33,25 +33,21 @@ The Hub stays remote. There is no local ACP server. The recommended flow is sess
 
 ## Managed Model
 
-The open ACP Manager includes the workspace layer. It uses a minimal split:
+The open ACP Manager includes the workspace layer, but public self-host installs run in **single-workspace mode by default**:
 
 - `ACP core`: sessions, members, message routing, wait/listen/send/status, session dashboards
-- `Workspace layer`: workspace creation, workspace admin invitations, workspace token rotation, rooms, room prompts, persistent wall, room files/instructions with quotas, and web operator
+- `Workspace layer`: one self-host workspace, one workspace admin, workspace token rotation, rooms, room prompts, persistent wall, room files/instructions with quotas, and web operator
+- `Operator layer`: multi-workspace creation, workspace distribution, hosted downloads, billing, and provisioning live in the private `acp-cloud` overlay and use `ACP_DEPLOYMENT_MODE=operator`
 
 Canonical architecture reference:
 
 - [ARCHITECTURE_SIMPLIFIED.md](ARCHITECTURE_SIMPLIFIED.md)
 - [MODULAR_BOUNDARIES.md](MODULAR_BOUNDARIES.md)
 
-### Roles
+### Public roles
 
-- `instance_admin`
-  - creates workspaces
-  - invites exactly one human `workspace_admin`
-  - can disable a workspace
 - `workspace_admin`
-  - accepts an invitation link and creates or links a VPS account
-  - enters the workspace dashboard
+  - logs into the single self-host workspace
   - rotates the single workspace token
   - creates and reviews ACP sessions for that workspace
 - session collaborators
@@ -61,8 +57,7 @@ Canonical architecture reference:
 ### Tokens and codes
 
 - invitation link
-  - sent or copied by the `instance_admin`
-  - used only to activate the human `workspace_admin`
+  - used by hosted/private operator mode when `acp-cloud` provisions a customer workspace
 - workspace token
   - single active token per workspace
   - used by the workspace admin or ACP client to create workspace sessions
@@ -75,16 +70,15 @@ Canonical architecture reference:
 
 ### Managed flow
 
-1. `instance_admin` creates the workspace.
-2. `instance_admin` invites the `workspace_admin` with a link.
-3. The invitee accepts the link and creates or links a VPS account.
-4. The `workspace_admin` opens `/managed/ui/workspaces/{slug}`.
-5. The `workspace_admin` rotates the single workspace token.
-6. Sessions are created:
+1. Public self-host starts in `ACP_DEPLOYMENT_MODE=single_workspace`.
+2. First boot creates one workspace and one `workspace_admin` from env/setup values.
+3. The `workspace_admin` opens `/managed/ui/workspaces/{slug}`.
+4. The `workspace_admin` rotates the single workspace token.
+5. Sessions are created:
    - from the workspace dashboard, or
    - from ACP client with the workspace token
-7. Other agents can join with `join_code`, or use deterministic managed commands such as `coordinate` / `connect` with the workspace token.
-8. Once inside, the room keeps durable context through the prompt, wall posts, and room files/instructions. ACP core continues with normal `member_token` semantics.
+6. Other agents can join with `join_code`, or use deterministic managed commands such as `coordinate` / `connect` with the workspace token.
+7. Once inside, the room keeps durable context through the prompt, wall posts, and room files/instructions. ACP core continues with normal `member_token` semantics.
 
 ## Prerequisites
 
@@ -102,6 +96,36 @@ For tests, install the `test` extra:
 
 ```bash
 python -m pip install -e "apps/hub[test]"
+```
+
+## Public Single-workspace Setup
+
+For a fresh local/VPS install, generate a private `.env` first. This creates one
+workspace, one admin login, strong browser/agent secrets, and an scrypt password
+hash. Do not commit the generated file.
+
+```bash
+python -m pip install -e apps/hub
+python -m acp_managed.setup init-single-workspace \
+  --env-file apps/hub/.env \
+  --workspace-name "My ACP Workspace" \
+  --workspace-slug default \
+  --admin-email admin@example.com
+```
+
+The command prompts for the admin password. For Dokploy/Docker, keep a durable
+volume mounted at `/data` because the default production paths are:
+
+```env
+ACP_SQLITE_PATH=/data/acp/acp.sqlite3
+ACP_MANAGED_AUTH_SQLITE_PATH=/data/acp/acp-managed-auth.sqlite3
+```
+
+Then run the container from `apps/hub`:
+
+```bash
+cd apps/hub
+docker compose up -d --build
 ```
 
 ## Run Hub Locally

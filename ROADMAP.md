@@ -12,7 +12,7 @@ See [OPEN_CORE_MODEL.md](OPEN_CORE_MODEL.md) for the open-core model and
 ## 📍 Current state (update me)
 
 - **Milestones reached:** ★ M1 (clean engine) · ★ M2 (open source — this repo is public).
-- **Public product state:** self-hostable ACP Manager is feature-complete for the current OSS milestone; Cloud remains deferred/private.
+- **Public product state:** self-hostable ACP Manager is moving to `single_workspace` by default: one admin, one workspace, many rooms/sessions. Cloud/operator remains private.
   - ✅ Broadcast (one-to-all) — already in `coordination_service.send_message`.
   - ✅ Room prompt (session instructions) — backend + dashboard. Owner sets it on
     session create; agents receive it on join/detail. (`test_room_prompt.py`)
@@ -43,6 +43,7 @@ the room from the managed dashboard without exposing pseudo-member credentials t
 | M2 | Open source | This repo public; AGPL server + Apache client; CLA; CI | ✅ done |
 | M3 | Rooms (Salas) | Room prompt, persistent wall, web operator (Option B) | ✅ done |
 | M4 | Storage | Per-room files/instructions, quotas | ✅ done |
+| M5 | Single-workspace public mode | Public self-host defaults to one workspace/one admin; private `acp-cloud` owns operator multi-workspace mode | in progress |
 | DX | **Client automation** (parallel track) | Deterministic connect/coordinate/onboard/chief/runner commands; slim skill guardrail | ✅ done |
 | — | 🎯 **Sellable OSS product** | engine + rooms + storage, self-hostable, durable | ✅ done |
 | (Cloud) | Commercial overlay | Billing/provisioning/branding — lives in the **separate private `acp-cloud` repo**, not here | deferred/private |
@@ -53,7 +54,7 @@ open-source product, and the commercial overlay lives in `acp-cloud` (private).
 ## 🏛️ Architecture (orient fast)
 
 - `apps/hub/src/acp/hub/` — the **core** ACP hub (sessions, coordination, routing, persistence).
-- `apps/hub/src/acp_managed/` — the **managed workspace layer** (auth, workspaces, agent tokens).
+- `apps/hub/src/acp_managed/` — the **managed workspace layer** (auth, single-workspace public mode, agent tokens; operator mode is for private/cloud).
   Routes live in `acp_managed/routing/*` as `build_*_router(deps)` factories that
   consume the `ManagedRouterDeps` seam; `app.py` is thin composition.
 - `ACP_AGENT/` — the portable **client** (Apache-2.0).

@@ -13,6 +13,11 @@ then see [ROADMAP.md](ROADMAP.md) for current state and [PRODUCT_WALKTHROUGH.md]
 - `ACP_AGENT/` — portable client (Apache-2.0). The rest is AGPL-3.0. See LICENSING.md.
 - `apps/hub/frontend/packages/managed-app/` — dashboard (Vue 3 + Vite, i18n en/es).
 
+Public self-host installs default to `ACP_DEPLOYMENT_MODE=single_workspace`: one
+workspace, one workspace admin, many rooms/sessions. The private `acp-cloud`
+overlay owns `operator` mode, multi-workspace provisioning, billing, landing,
+and hosted download distribution. Do not drift those boundaries.
+
 ## Dev setup
 
 Python 3.11–3.12 (CI pins those; newer interpreters may fail to build native deps).
@@ -33,6 +38,21 @@ python -m pytest tests/ -q
 # 4. Enable the free local CI gate (runs the suite + import-direction check on push)
 git config core.hooksPath scripts/hooks
 ```
+
+## Public self-host smoke setup
+
+For a fresh local/VPS `.env`, use the setup helper instead of hand-writing
+secrets or password hashes:
+
+```bash
+python -m acp_managed.setup init-single-workspace \
+  --env-file apps/hub/.env \
+  --workspace-name "My ACP Workspace" \
+  --workspace-slug default \
+  --admin-email admin@example.com
+```
+
+The generated `.env` is private and must not be committed.
 
 ## How we work (conventions)
 
