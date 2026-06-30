@@ -1,7 +1,7 @@
 <template>
   <div class="login-page">
     <section class="topbar">
-      <div class="brand"><span class="mark"></span><span>ACP Managed</span></div>
+      <div class="brand"><span class="mark"></span><span>{{ t('login_title') }}</span></div>
       <div class="nav-links">
         <a href="/">{{ t('nav_landing') }}</a>
         <a href="/downloads">{{ t('nav_downloads') }}</a>

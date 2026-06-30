@@ -29,6 +29,7 @@ export function useManagedAuth() {
   const isAuthenticated = computed(() => user.value !== null)
   const isInstanceAdmin = computed(() => user.value?.role === 'instance_admin')
   const isWorkspaceAdmin = computed(() => user.value?.role === 'workspace_admin')
+  const isSingleWorkspace = computed(() => user.value?.deployment_mode === 'single_workspace')
 
   async function checkSession(force = false): Promise<ManagedUser | null> {
     if (checked.value && !force) return user.value
@@ -117,6 +118,7 @@ export function useManagedAuth() {
     isAuthenticated,
     isInstanceAdmin,
     isWorkspaceAdmin,
+    isSingleWorkspace,
     checkSession,
     login,
     logout,

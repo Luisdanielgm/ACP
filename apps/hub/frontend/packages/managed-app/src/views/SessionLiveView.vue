@@ -1,7 +1,7 @@
 <template>
   <div v-if="resolving" class="live-resolve">
     <div class="live-resolve-card">
-      <div class="live-resolve-kicker">ACP Managed</div>
+      <div class="live-resolve-kicker">{{ t('login_title') }}</div>
       <h1 class="live-resolve-title">{{ t('loading') }}</h1>
       <p class="live-resolve-copy">
         {{ resolveMessage }}

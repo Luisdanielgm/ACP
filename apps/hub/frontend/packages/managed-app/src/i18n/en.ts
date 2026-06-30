@@ -2,6 +2,7 @@ export const en: Record<string, string> = {
   // ── Nav ──
   nav_dashboard: 'Dashboard',
   nav_workspaces: 'Workspaces',
+  nav_workspace: 'Workspace',
   nav_admin: 'Admin',
   nav_landing: 'Landing',
   nav_login: 'Login',
@@ -27,7 +28,7 @@ export const en: Record<string, string> = {
   status_accepted: 'Accepted',
 
   // ── Login ──
-  login_title: 'ACP Managed',
+  login_title: 'ACP Workspace',
   login_kicker: 'VPS Access',
   login_body: 'Sign in with your workspace user to issue agent tokens and operate ACP sessions from this domain without exposing the global system technical token.',
   login_email: 'Email',
@@ -38,6 +39,9 @@ export const en: Record<string, string> = {
   login_loading: 'Authenticating...',
 
   // ── Dashboard ──
+  app_brand_workspace: 'ACP Workspace',
+  app_brand_managed: 'ACP Managed',
+  workspace_control_kicker: 'Workspace Control',
   dash_kicker: 'VPS Control',
   dash_instance_title: 'VPS Instance Panel',
   dash_workspace_title: 'Workspace Admin Panel',

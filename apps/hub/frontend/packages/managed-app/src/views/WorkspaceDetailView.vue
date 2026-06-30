@@ -40,7 +40,7 @@
               </span>
             </div>
           </div>
-          <RouterLink to="/managed/ui/workspaces" class="back-link">&larr; {{ t('nav_workspaces') }}</RouterLink>
+          <RouterLink v-if="!isSingleWorkspace" to="/managed/ui/workspaces" class="back-link">&larr; {{ t('nav_workspaces') }}</RouterLink>
         </div>
 
         <div v-if="pageBanner" class="page-banner" role="status" aria-live="polite">
@@ -297,7 +297,7 @@ import { buildManagedSessionDashboardPath } from '../lib/sessionLive'
 
 const route = useRoute()
 const router = useRouter()
-const { requireAuth, user } = useManagedAuth()
+const { requireAuth, isSingleWorkspace, user } = useManagedAuth()
 const { t } = useManagedI18n()
 const toast = useToast()
 

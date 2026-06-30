@@ -30,7 +30,7 @@ interface Crumb {
 }
 
 const route = useRoute()
-const { isInstanceAdmin } = useManagedAuth()
+const { isInstanceAdmin, isSingleWorkspace, user } = useManagedAuth()
 const { t } = useManagedI18n()
 
 function formatSlug(value: string): string {
@@ -47,9 +47,16 @@ const crumbs = computed<Crumb[]>(() => {
   const sessionId = String(route.params.sessionId ?? '').trim()
 
   // Root crumb depends on the user's primary surface.
-  const root: Crumb = isInstanceAdmin.value
-    ? { label: t('nav_admin'), to: '/managed/admin/workspaces/ui' }
-    : { label: t('nav_workspaces'), to: '/managed/ui/workspaces' }
+  const root: Crumb = isSingleWorkspace.value
+    ? {
+        label: t('nav_workspace'),
+        to: user.value?.default_workspace?.slug
+          ? `/managed/ui/workspaces/${encodeURIComponent(user.value.default_workspace.slug)}`
+          : '/managed/ui/workspaces',
+      }
+    : isInstanceAdmin.value
+      ? { label: t('nav_admin'), to: '/managed/admin/workspaces/ui' }
+      : { label: t('nav_workspaces'), to: '/managed/ui/workspaces' }
 
   // Routes where breadcrumbs are not meaningful or are self-evident.
   if (!name || name === 'login' || name === 'landing' || name === 'invitation') {
@@ -61,7 +68,7 @@ const crumbs = computed<Crumb[]>(() => {
   }
 
   if (name === 'workspace-detail') {
-    if (!slug) return [root]
+    if (!slug || isSingleWorkspace.value) return []
     return [root, { label: formatSlug(slug) }]
   }
 

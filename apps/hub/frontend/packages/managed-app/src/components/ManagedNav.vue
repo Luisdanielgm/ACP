@@ -14,8 +14,8 @@
       <RouterLink to="/managed/ui/workspaces" class="brand">
         <span class="mark" aria-hidden="true"></span>
         <span class="brand-copy">
-          <strong class="brand-title">ACP Managed</strong>
-          <span class="brand-sub">{{ t('dash_kicker') }}</span>
+          <strong class="brand-title">{{ brandTitle }}</strong>
+          <span class="brand-sub">{{ brandSub }}</span>
         </span>
       </RouterLink>
       <button class="sidebar-close" type="button" :aria-label="t('nav_close_menu')" @click="closeSidebar">
@@ -40,7 +40,7 @@
       </nav>
     </div>
 
-    <div v-if="workspaceContext" class="sidebar-section sidebar-context">
+    <div v-if="workspaceContext && !isSingleWorkspace" class="sidebar-section sidebar-context">
       <p class="sidebar-label">{{ t('nav_current_workspace') }}</p>
       <RouterLink
         :to="workspaceContext.to"
@@ -103,37 +103,50 @@ type NavItem = {
 }
 
 const route = useRoute()
-const { isInstanceAdmin, user, logout } = useManagedAuth()
+const { isInstanceAdmin, isSingleWorkspace, user, logout } = useManagedAuth()
 const { t } = useManagedI18n()
 
 const routeAnnouncement = ref('')
 const sidebarOpen = ref(false)
+
+const singleWorkspaceHomePath = computed(() => {
+  const slug = user.value?.default_workspace?.slug
+  return slug ? `/managed/ui/workspaces/${encodeURIComponent(slug)}` : '/managed/ui/workspaces'
+})
+
+const brandTitle = computed(() => t(isSingleWorkspace.value ? 'app_brand_workspace' : 'app_brand_managed'))
+const brandSub = computed(() => t(isSingleWorkspace.value ? 'workspace_control_kicker' : 'dash_kicker'))
 
 const navItems = computed<NavItem[]>(() =>
   [
     // D1: For instance_admin, "Admin" is the single canonical surface (it
     // contains create + list + search). The standalone "Dashboard" entry was
     // removed because it duplicated the same content.
-    { to: '/managed/ui/workspaces', label: t('nav_workspaces'), icon: '01', visible: true },
-    { to: '/managed/admin/workspaces/ui', label: t('nav_admin'), icon: '02', visible: isInstanceAdmin.value },
+    {
+      to: singleWorkspaceHomePath.value,
+      label: t(isSingleWorkspace.value ? 'nav_workspace' : 'nav_workspaces'),
+      icon: '01',
+      visible: true,
+    },
+    { to: '/managed/admin/workspaces/ui', label: t('nav_admin'), icon: '02', visible: !isSingleWorkspace.value && isInstanceAdmin.value },
   ].filter(item => item.visible),
 )
 
 const pageTitle = computed(() => {
   const name = String(route.name ?? '')
-  if (name === 'workspace-detail') return formatSlug(String(route.params.slug ?? '')) || t('nav_workspaces')
+  if (name === 'workspace-detail') return formatSlug(String(route.params.slug ?? '')) || t('nav_workspace')
   if (name === 'admin-workspaces') return t('nav_admin')
   if (name === 'dashboard') return t(isInstanceAdmin.value ? 'dash_instance_title' : 'dash_workspace_title')
   if (name === 'workspaces') return t('my_workspaces_page_title')
-  return t('nav_workspaces')
+  return t(isSingleWorkspace.value ? 'nav_workspace' : 'nav_workspaces')
 })
 
 const pageKicker = computed(() => {
   const name = String(route.name ?? '')
   if (name === 'workspace-detail') return t('workspace_kicker')
   if (name === 'admin-workspaces') return t('admin_kicker')
-  if (name === 'dashboard') return t('dash_kicker')
-  return t('workspace_surface_kicker')
+  if (name === 'dashboard') return t(isSingleWorkspace.value ? 'workspace_control_kicker' : 'dash_kicker')
+  return t(isSingleWorkspace.value ? 'workspace_kicker' : 'workspace_surface_kicker')
 })
 
 const workspaceContext = computed(() => {
