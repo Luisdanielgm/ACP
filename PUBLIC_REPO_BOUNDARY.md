@@ -13,15 +13,11 @@ Only the separate **ACP Cloud** overlay stays private.
 - `ACP_AGENT/` community bundle — **ACP Client**
 - `apps/hub/src/acp/hub/` — core hub runtime
 - `apps/hub/src/acp/protocol/` — protocol models and validators
-- the **workspace layer** (today inside `apps/hub/src/acp_managed/`, to be
-  de-tangled): human auth/login mechanism, whitelist mechanism, workspaces,
-  invitations, workspace tokens, workspace→session bridge, workspace admin
-  routes and UI
+- the **single-workspace layer** (inside `apps/hub/src/acp_managed/`): human auth/login mechanism, one bootstrap workspace, workspace token rotation, workspace-to-session bridge, workspace admin routes and UI
 - `tests/` for public contracts
 - `README.md`, `protocol.md`
 
-Together these are **ACP Manager**: a complete, self-hostable server (VPS or
-local). A self-hoster needs nothing else.
+Together these are **ACP Manager**: a complete, self-hostable server (VPS or local). A self-hoster gets one workspace, one admin, and many rooms/sessions. A self-hoster needs nothing else.
 
 ## Must stay out of the public repo (ACP Cloud only)
 
@@ -42,13 +38,9 @@ local). A self-hoster needs nothing else.
 
 ## Dependency rule
 
-The public side must never import the private side. The private **ACP Cloud**
-overlay imports the public **ACP Manager** package and mounts its routes on top
-(see [OPEN_CORE_MODEL.md](OPEN_CORE_MODEL.md) → "How a workspace connects").
+The public side must never import the private side. The private **ACP Cloud** control plane tracks customers and generates provisioning data for separate public ACP services; customer rooms do not run inside `cloud.nefila.group`.
 
 ## Enforcement
 
 `tests/hub/test_public_repo_hygiene.py` validates the public repository
-surface, including the workspace layer. The guarantee is that **branding, the
-payment page, billing, and hosted defaults** must not leak into this repo, or CI
-fails.
+surface, including the workspace layer. The guarantee is that **private branding, payment, billing, customer provisioning, and hosted defaults** must not leak into this repo, or CI fails.

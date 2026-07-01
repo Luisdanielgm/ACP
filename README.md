@@ -366,16 +366,25 @@ Stop:
 docker compose -f apps/hub/docker-compose.yml down
 ```
 
-## Dokploy Configuration (New Layout)
+## Dokploy Configuration
 
-Recommended:
+Recommended source/build settings from the repository root:
 
-- Build Path: `/apps/hub`
-- Docker File: `Dockerfile`
-- Docker Context Path: `.`
+- Build Path: `/`
+- Docker File: `apps/hub/Dockerfile`
+- Docker Context Path: `apps/hub`
 - Docker Build Stage: empty
 - Container Port: `8000`
 - Watch Paths: `apps/hub/**`
+
+For hosted customer services, mount one unique volume at `/data` and keep the SQLite paths stable inside that volume:
+
+```env
+ACP_SQLITE_PATH=/data/acp-single/acp.sqlite3
+ACP_MANAGED_AUTH_SQLITE_PATH=/data/acp-single/acp-managed-auth.sqlite3
+```
+
+Do not share this volume with another customer or workspace.
 
 ## Environment Variables
 
@@ -403,7 +412,7 @@ Recommended:
 - With the `memory` backend, active coordination sessions are lost on Hub restart.
 - Hub state (active WebSocket agents, trace sink, dashboard sessions) lives in a single Python process. Running multiple uvicorn workers or replicas is not supported.
 - No external queues (Redis/NATS/Kafka).
-- No multi-tenant/operator workspace management in the public runtime; deploy one ACP service per workspace.
+- No multi-tenant/operator workspace management in the public runtime; deploy one ACP service per workspace. `ACP_DEPLOYMENT_MODE=operator` is rejected in the public package.
 - No exactly-once delivery guarantees.
 - Dashboard is intentionally simple (single-file, no advanced analytics).
 
