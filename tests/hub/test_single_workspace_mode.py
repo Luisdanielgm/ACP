@@ -41,6 +41,7 @@ def _single_workspace_env(monkeypatch, tmp_path) -> None:
 def _operator_env(monkeypatch, tmp_path) -> None:
     _base_env(monkeypatch, tmp_path)
     monkeypatch.setenv("ACP_DEPLOYMENT_MODE", "operator")
+    monkeypatch.setenv("ACP_PRIVATE_OPERATOR_ENABLED", "true")
     monkeypatch.setenv(
         "ACP_MANAGED_WHITELIST",
         f"admin@example.com={_password_hash()}:instance_admin,active",
@@ -120,6 +121,15 @@ def test_single_workspace_mode_fails_fast_for_multi_workspace_database(monkeypat
     )
 
     with pytest.raises(RuntimeError, match="multiple workspaces"):
+        _load_managed_app()
+
+
+def test_operator_mode_requires_private_overlay_flag(monkeypatch, tmp_path) -> None:
+    _base_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("ACP_DEPLOYMENT_MODE", "operator")
+    monkeypatch.delenv("ACP_PRIVATE_OPERATOR_ENABLED", raising=False)
+
+    with pytest.raises(ValueError, match="reserved for private overlays"):
         _load_managed_app()
 
 

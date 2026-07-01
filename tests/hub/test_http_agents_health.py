@@ -146,7 +146,7 @@ def test_runtime_can_disable_public_web_surface() -> None:
     assert runtime.json()["runtime"]["public_web_enabled"] is False
 
 
-def test_overlay_example_can_mount_private_routes_on_top_of_core() -> None:
+def test_overlay_example_can_mount_custom_routes_on_top_of_core() -> None:
     app = create_overlay_example_app()
     with TestClient(app) as client:
         root = client.get("/")
@@ -155,7 +155,7 @@ def test_overlay_example_can_mount_private_routes_on_top_of_core() -> None:
         runtime = client.get("/runtime")
 
     assert root.status_code == 200
-    assert "ACP Cloud Overlay Example" in root.text
+    assert "Custom Overlay Example" in root.text
     assert downloads.status_code == 200
     assert "Managed Downloads" in downloads.text
     assert auth_mode.status_code == 200

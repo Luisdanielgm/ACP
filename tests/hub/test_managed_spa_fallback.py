@@ -18,6 +18,7 @@ def _bootstrap_env(monkeypatch, tmp_path) -> str:
     monkeypatch.setenv("ACP_MANAGED_SESSION_SECRET", "test-secret")
     monkeypatch.setenv("ACP_MANAGED_AGENT_TOKEN_SECRET", "agent-secret")
     monkeypatch.setenv("ACP_DEPLOYMENT_MODE", "operator")
+    monkeypatch.setenv("ACP_PRIVATE_OPERATOR_ENABLED", "true")
     monkeypatch.setenv("ACP_PUBLIC_WEB_ENABLED", "false")
     monkeypatch.setenv("ACP_PERSISTENCE_BACKEND", "sqlite")
     monkeypatch.setenv("ACP_SQLITE_PATH", str(tmp_path / "acp.sqlite3"))

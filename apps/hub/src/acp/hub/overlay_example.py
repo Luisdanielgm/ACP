@@ -1,4 +1,4 @@
-"""Generic example of mounting a private overlay on top of the public ACP core."""
+"""Generic example of mounting a custom extension over the public ACP core."""
 
 from __future__ import annotations
 
@@ -83,14 +83,14 @@ _OVERLAY_I18N_SCRIPT = (
     "<script>"
     "const I18N={es:{nav_home:'Inicio',nav_downloads:'Descargas',nav_auth:'Modo Auth',"
     "theme_dark:'Oscuro',theme_light:'Claro',theme_system:'Auto',"
-    "overlay_title:'ACP Cloud Overlay Example',overlay_body:'Esta ruta es servida por el overlay privado de Cloud, no por el nucleo publico.',"
-    "downloads_title:'Descargas Gestionadas',downloads_body:'El repo privado serviria descargas de paquetes branded aqui.',"
-    "page_overlay:'ACP Cloud | Overlay',page_downloads:'ACP Cloud | Descargas'},"
+    "overlay_title:'Custom Overlay Example',overlay_body:'Esta ruta es servida por un overlay de extension personalizado, no por la superficie publica predeterminada.',"
+    "downloads_title:'Descargas Gestionadas',downloads_body:'Una extension personalizada podria servir descargas de paquetes branded aqui.',"
+    "page_overlay:'Custom Overlay | Example',page_downloads:'Custom Overlay | Descargas'},"
     "en:{nav_home:'Home',nav_downloads:'Downloads',nav_auth:'Auth Mode',"
     "theme_dark:'Dark',theme_light:'Light',theme_system:'Auto',"
-    "overlay_title:'ACP Cloud Overlay Example',overlay_body:'This route is served by the private Cloud overlay, not the public core.',"
-    "downloads_title:'Managed Downloads',downloads_body:'Private repo would serve branded bundle downloads here.',"
-    "page_overlay:'ACP Cloud | Overlay',page_downloads:'ACP Cloud | Downloads'}};"
+    "overlay_title:'Custom Overlay Example',overlay_body:'This route is served by a custom extension overlay, not the default public web surface.',"
+    "downloads_title:'Managed Downloads',downloads_body:'A custom extension could serve branded bundle downloads here.',"
+    "page_overlay:'Custom Overlay | Example',page_downloads:'Custom Overlay | Downloads'}};"
     "let curLang=localStorage.getItem('acp_overlay_lang')||'es';"
     "let curTheme=localStorage.getItem('acp_overlay_theme')||'system';"
     "function t(k){return(I18N[curLang]&&I18N[curLang][k])||I18N.es[k]||k;}"
@@ -144,7 +144,7 @@ def create_overlay_example_app() -> FastAPI:
                 "<head>"
                 '<meta charset="utf-8" />'
                 '<meta name="viewport" content="width=device-width, initial-scale=1" />'
-                "<title>ACP Cloud Overlay Example</title>"
+                "<title>Custom Overlay Example</title>"
                 '<link rel="preconnect" href="https://fonts.googleapis.com" />'
                 '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />'
                 '<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />'
@@ -165,8 +165,8 @@ def create_overlay_example_app() -> FastAPI:
                 "</div>"
                 "</header>"
                 '<div class="panel">'
-                '<h1 data-i18n="overlay_title">ACP Cloud Overlay Example</h1>'
-                '<p data-i18n="overlay_body">Esta ruta es servida por el overlay privado de Cloud, no por el nucleo publico.</p>'
+                '<h1 data-i18n="overlay_title">Custom Overlay Example</h1>'
+                '<p data-i18n="overlay_body">Esta ruta es servida por un overlay de extension personalizado, no por la superficie publica predeterminada.</p>'
                 "</div>"
                 "</div>"
                 f"{_OVERLAY_I18N_SCRIPT}"
@@ -205,7 +205,7 @@ def create_overlay_example_app() -> FastAPI:
                 "</header>"
                 '<div class="panel">'
                 '<h1 data-i18n="downloads_title">Descargas Gestionadas</h1>'
-                '<p data-i18n="downloads_body">El repo privado serviria descargas de paquetes branded aqui.</p>'
+                '<p data-i18n="downloads_body">Una extension personalizada podria servir descargas de paquetes branded aqui.</p>'
                 "</div>"
                 "</div>"
                 f"{_OVERLAY_I18N_SCRIPT}"

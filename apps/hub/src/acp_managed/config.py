@@ -8,6 +8,7 @@ from acp_managed.auth.sqlite_store import SqliteManagedPrincipalStore
 from acp_managed.auth.whitelist import build_principals_from_env
 
 _DEPLOYMENT_MODES = {"single_workspace", "operator"}
+_TRUTHY = {"1", "true", "yes", "on"}
 
 _INSECURE_SECRET_VALUES = {
     "changeme",
@@ -39,7 +40,14 @@ def public_web_enabled() -> bool:
     configured = os.getenv("ACP_PUBLIC_WEB_ENABLED")
     if configured is None:
         return False
-    return configured.strip().lower() in {"1", "true", "yes", "on"}
+    return configured.strip().lower() in _TRUTHY
+
+
+def private_operator_enabled() -> bool:
+    configured = os.getenv("ACP_PRIVATE_OPERATOR_ENABLED")
+    if configured is None:
+        return False
+    return configured.strip().lower() in _TRUTHY
 
 
 def managed_deployment_mode() -> str:
@@ -48,6 +56,11 @@ def managed_deployment_mode() -> str:
         raise ValueError(
             "ACP_DEPLOYMENT_MODE must be one of: "
             + ", ".join(sorted(_DEPLOYMENT_MODES))
+        )
+    if configured == "operator" and not private_operator_enabled():
+        raise ValueError(
+            "ACP_DEPLOYMENT_MODE=operator is reserved for private overlays; "
+            "set ACP_PRIVATE_OPERATOR_ENABLED=true only in the private control plane"
         )
     return configured
 
