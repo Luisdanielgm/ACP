@@ -5,9 +5,8 @@ import re
 from dataclasses import dataclass
 
 from acp_managed.auth.sqlite_store import SqliteManagedPrincipalStore
-from acp_managed.auth.whitelist import build_principals_from_env
 
-_DEPLOYMENT_MODES = {"single_workspace", "operator"}
+_DEPLOYMENT_MODE = "single_workspace"
 _TRUTHY = {"1", "true", "yes", "on"}
 
 _INSECURE_SECRET_VALUES = {
@@ -43,30 +42,15 @@ def public_web_enabled() -> bool:
     return configured.strip().lower() in _TRUTHY
 
 
-def private_operator_enabled() -> bool:
-    configured = os.getenv("ACP_PRIVATE_OPERATOR_ENABLED")
-    if configured is None:
-        return False
-    return configured.strip().lower() in _TRUTHY
-
 
 def managed_deployment_mode() -> str:
     configured = os.getenv("ACP_DEPLOYMENT_MODE", "single_workspace").strip().lower()
-    if configured not in _DEPLOYMENT_MODES:
+    if configured != _DEPLOYMENT_MODE:
         raise ValueError(
-            "ACP_DEPLOYMENT_MODE must be one of: "
-            + ", ".join(sorted(_DEPLOYMENT_MODES))
+            "ACP_DEPLOYMENT_MODE=operator was removed from the public ACP runtime; "
+            "deploy one ACP service per workspace and use acp-cloud as the private control plane"
         )
-    if configured == "operator" and not private_operator_enabled():
-        raise ValueError(
-            "ACP_DEPLOYMENT_MODE=operator is reserved for private overlays; "
-            "set ACP_PRIVATE_OPERATOR_ENABLED=true only in the private control plane"
-        )
-    return configured
-
-
-def operator_mode_enabled() -> bool:
-    return managed_deployment_mode() == "operator"
+    return _DEPLOYMENT_MODE
 
 
 @dataclass(frozen=True)
@@ -101,10 +85,7 @@ def managed_auth_sqlite_path() -> str:
 
 
 def managed_principal_store() -> SqliteManagedPrincipalStore:
-    store = SqliteManagedPrincipalStore(sqlite_path=managed_auth_sqlite_path())
-    if operator_mode_enabled():
-        store.bootstrap_if_empty(build_principals_from_env(os.getenv("ACP_MANAGED_WHITELIST")))
-    return store
+    return SqliteManagedPrincipalStore(sqlite_path=managed_auth_sqlite_path())
 
 
 def managed_session_secret() -> str:

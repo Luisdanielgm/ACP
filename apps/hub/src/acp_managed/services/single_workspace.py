@@ -32,7 +32,7 @@ def ensure_single_workspace_bootstrap(
     if len(workspaces) > 1:
         raise SingleWorkspaceBootstrapError(
             "single_workspace mode found multiple workspaces; use "
-            "ACP_DEPLOYMENT_MODE=operator or start with a clean auth database"
+            "a clean auth database or a separate ACP service per workspace"
         )
     if len(workspaces) == 1:
         return workspaces[0]

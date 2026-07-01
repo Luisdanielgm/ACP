@@ -8,7 +8,7 @@ export interface ManagedUser {
   status: string
   expires_at?: number
   authenticated?: boolean
-  deployment_mode?: 'single_workspace' | 'operator' | (string & {})
+  deployment_mode?: 'single_workspace' | (string & {})
   default_workspace?: Workspace | null
   redirect_url?: string
 }
@@ -177,67 +177,14 @@ export async function fetchWorkspaceDetail(slug: string) {
   }>(`/managed/workspaces/${encodeURIComponent(slug)}`)
 }
 
-// ── Workspaces (admin) ──
-
-export async function fetchAdminWorkspaces() {
-  return apiFetch<{
-    workspaces: { workspace: Workspace; workspace_admin: WorkspaceMembership | null; invitations: Invitation[] }[]
-    count: number
-  }>('/managed/admin/workspaces')
-}
-
-export async function createWorkspace(payload: string | { name: string; slug?: string; status?: string; admin_email?: string }) {
-  const body = typeof payload === 'string' ? { name: payload } : payload
-  return apiFetch<{
-    status: string
-    workspace: Workspace
-    workspace_admin: WorkspaceMembership | null
-    invitation: Invitation | null
-    invitation_url: string | null
-    admin_assignment: 'self_assigned' | 'invited' | 'unassigned'
-  }>('/managed/admin/workspaces', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-}
-
-export async function updateWorkspace(slug: string, data: { name?: string; status?: string }) {
-  return apiFetch<{ status: string; workspace: Workspace }>(`/managed/admin/workspaces/${encodeURIComponent(slug)}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-}
-
-export async function deleteWorkspace(slug: string) {
-  return apiFetch<{ status: string; workspace_id: string; slug: string }>(`/managed/admin/workspaces/${encodeURIComponent(slug)}`, {
-    method: 'DELETE',
-  })
-}
-
-export async function disableWorkspace(slug: string) {
-  return apiFetch<{ status: string; workspace: Workspace }>(`/managed/admin/workspaces/${encodeURIComponent(slug)}/disable`, {
-    method: 'POST',
-  })
-}
-
-export async function inviteWorkspaceAdmin(slug: string, email: string) {
-  return apiFetch<{ status: string; workspace: Workspace; invitation: Invitation; invitation_url: string }>(`/managed/admin/workspaces/${encodeURIComponent(slug)}/invite-admin`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
-  })
-}
-
-// ── Agent Tokens ──
+// Agent Tokens
 
 export async function fetchAgentTokens(slug: string) {
-  return apiFetch<{ workspace: Workspace; agent_tokens: AgentToken[]; count: number }>(`/managed/admin/workspaces/${encodeURIComponent(slug)}/agent-tokens`)
+  return apiFetch<{ workspace: Workspace; agent_tokens: AgentToken[]; count: number }>(`/managed/workspaces/${encodeURIComponent(slug)}/agent-tokens`)
 }
 
 export async function createAgentToken(slug: string, agentName: string) {
-  return apiFetch<{ status: string; workspace: Workspace; agent_token: AgentToken; raw_token: string; bootstrap: ManagedAgentBootstrap }>(`/managed/admin/workspaces/${encodeURIComponent(slug)}/agent-tokens`, {
+  return apiFetch<{ status: string; workspace: Workspace; agent_token: AgentToken; raw_token: string; bootstrap: ManagedAgentBootstrap }>(`/managed/workspaces/${encodeURIComponent(slug)}/agent-tokens`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ agent_name: agentName }),
@@ -245,7 +192,7 @@ export async function createAgentToken(slug: string, agentName: string) {
 }
 
 export async function revokeAgentToken(slug: string, tokenId: string) {
-  return apiFetch<{ status: string; workspace: Workspace; agent_token: AgentToken }>(`/managed/admin/workspaces/${encodeURIComponent(slug)}/agent-tokens/${encodeURIComponent(tokenId)}`, {
+  return apiFetch<{ status: string; workspace: Workspace; agent_token: AgentToken }>(`/managed/workspaces/${encodeURIComponent(slug)}/agent-tokens/${encodeURIComponent(tokenId)}`, {
     method: 'DELETE',
   })
 }
@@ -401,7 +348,7 @@ export async function acceptInvitation(token: string, password?: string) {
 // ── Presets ──
 
 export async function createTeamPreset(slug: string, presetId: string) {
-  return apiFetch<any>(`/managed/admin/workspaces/${encodeURIComponent(slug)}/presets/create`, {
+  return apiFetch<any>(`/managed/workspaces/${encodeURIComponent(slug)}/presets/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ preset_id: presetId }),

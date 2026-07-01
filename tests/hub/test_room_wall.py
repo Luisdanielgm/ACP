@@ -1,4 +1,4 @@
-"""Persistent room wall — M3 slice 2.
+﻿"""Persistent room wall â€” M3 slice 2.
 
 The room wall is product context, not replay/audit history. It is persisted as
 separate posts attached to a managed workspace session. Owners and agents can
@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from test_managed_app_smoke import (
-    _accept_workspace_admin_invitation,
+    _login_workspace_admin,
     _bootstrap_env,
     _create_managed_app_with_spa,
     _load_managed_app,
@@ -23,22 +23,8 @@ def _owner_with_session(monkeypatch, tmp_path) -> tuple[object, TestClient, str]
     app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
 
     admin = TestClient(app)
-    assert admin.post(
-        "/managed/auth/login",
-        json={"email": "admin@example.com", "password": password},
-    ).status_code == 200
-    assert admin.post(
-        "/managed/admin/workspaces",
-        json={"slug": "team-one", "name": "Team One", "status": "active"},
-    ).status_code == 200
-    invite = admin.post(
-        "/managed/admin/workspaces/team-one/invite-admin",
-        json={"email": "owner@example.com"},
-    )
-    assert invite.status_code == 200
-
     owner = TestClient(app)
-    _accept_workspace_admin_invitation(owner, invite.json()["invitation_url"], password="owner-pass-123")
+    _login_workspace_admin(owner, password)
 
     created = owner.post(
         "/managed/workspaces/team-one/sessions",
@@ -58,7 +44,7 @@ def test_room_wall_is_separate_persistent_context_for_owner_and_agents(monkeypat
     assert owner_post.status_code == 200, owner_post.text
     owner_item = owner_post.json()["post"]
     assert owner_item["author_type"] == "owner"
-    assert owner_item["author_name"] == "owner@example.com"
+    assert owner_item["author_name"] == "admin@example.com"
     assert owner_item["pinned"] is True
 
     token = owner.post("/managed/workspaces/team-one/token/rotate").json()["raw_token"]

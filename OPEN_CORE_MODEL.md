@@ -10,7 +10,7 @@ ACP has one public engine and one private operator overlay.
 | --- | --- | --- |
 | **ACP Client** | Open | The bridge an agent runs to participate (`ACP_AGENT`). It connects agents to any ACP Manager, local or remote. |
 | **ACP Manager** | Open | The self-host server: ACP core plus a **single-workspace** UI/API by default. One admin, one workspace, many rooms/sessions. |
-| **ACP Cloud** | Private | The hosted commercial operator product: landing, signup, billing, official downloads, provisioning, branding, plan limits, and multi-workspace operator dashboard. |
+| **ACP Cloud** | Private | The hosted commercial control plane: landing, signup, billing, official downloads, customer registry, provisioning runbooks/automation, branding, plan limits, and links to each hosted ACP service. |
 
 ## The open-core line
 
@@ -19,14 +19,16 @@ ACP has one public engine and one private operator overlay.
 
 Public ACP must be useful without private code, but it should not expose the full operator business surface by default.
 
-## Deployment modes
+## Deployment model
 
-| Mode | Repo | Behavior |
+Public ACP has one runtime shape: **one ACP service equals one workspace**.
+
+| Runtime | Repo | Behavior |
 | --- | --- | --- |
-| `single_workspace` | public `ACP` | Default. Bootstraps exactly one workspace and one workspace admin. Disables global multi-workspace admin routes/UI. |
-| `operator` | private `acp-cloud` | Enables multi-workspace operator/admin behavior for hosted provisioning and billing. |
+| Public ACP service | public `ACP` | Bootstraps exactly one workspace and one workspace admin. Rejects `ACP_DEPLOYMENT_MODE=operator`. |
+| ACP Cloud admin | private `acp-cloud` | Tracks customers and provisioning state. It does not host customer rooms inside its own process. |
 
-The public side must never import private `acp_cloud`. The private side may import and compose the public Manager.
+The public side must never import private `acp_cloud`. The private side creates or tracks separate public ACP deployments per customer/workspace.
 
 ## What customers pay for
 
@@ -43,16 +45,14 @@ Customers do not pay for hidden room/workspace features. They pay for hosted ope
 
 ## Composition model
 
-There is no network bridge between public and private code.
+There is no shared SQLite database and no customer workspace living inside `cloud.nefila.group`.
 
 ```text
-ACP Client ---> ACP Manager public engine
-                     ^
-                     |
-             acp-cloud private overlay
+Customer agents ---> customer ACP service (public repo, one workspace)
+Operator/admin ---> ACP Cloud (private repo, customer registry + provisioning)
 ```
 
-`acp-cloud` composes/imports the public Manager inside the same app process and uses one database/volume. Do **not** run two containers sharing the same SQLite database.
+A hosted customer receives their own ACP service/container/domain/volume. ACP Cloud stores the commercial/admin record and points to that customer URL. Automation can be added later, but the architectural boundary remains the same.
 
 ## What stays private
 
@@ -80,6 +80,6 @@ owner's ability to dual-license the public Manager inside the proprietary
 ## Current implementation status
 
 1. Public repo already ships core sessions, rooms, storage, and agent DX.
-2. Public repo is being moved from multi-workspace default to `single_workspace` default.
-3. Private `acp-cloud` owns `operator` mode and all hosted/commercial surfaces.
+2. Public repo rejects `ACP_DEPLOYMENT_MODE=operator` and no longer mounts global workspace admin routes.
+3. Private `acp-cloud` owns hosted/commercial admin surfaces and tracks customer ACP services.
 4. Future docs and tests must describe public self-host as one workspace, not a global VPS operator dashboard.

@@ -9,7 +9,7 @@
           <div>
             <span class="panel-kicker">{{ t('workspace_surface_kicker') }}</span>
             <h1 class="panel-title">{{ t('my_workspaces_page_title') }}</h1>
-            <p class="panel-sub">{{ isInstanceAdmin ? t('my_workspaces_instance_body') : t('my_workspaces_page_body') }}</p>
+            <p class="panel-sub">{{ t('my_workspaces_page_body') }}</p>
           </div>
         </div>
 
@@ -32,119 +32,7 @@
           </div>
         </div>
 
-        <template v-else-if="isInstanceAdmin">
-          <div class="workspace-summary">
-            <article class="summary-card summary-card-accent">
-              <span class="summary-label">{{ t('dash_stat_ready') }}</span>
-              <strong class="summary-value">{{ sortedOwnWorkspaces.length }}</strong>
-              <span class="summary-note">{{ t('dash_stat_ready_body') }}</span>
-            </article>
-            <article class="summary-card">
-              <span class="summary-label">{{ t('dash_stat_global') }}</span>
-              <strong class="summary-value">{{ otherWorkspaces.length }}</strong>
-              <span class="summary-note">{{ t('dash_stat_global_body') }}</span>
-            </article>
-          </div>
-
-          <div class="workspace-columns">
-            <section class="workspace-column primary-column" aria-labelledby="my-ws-heading">
-              <div class="section-head">
-                <span class="section-chip section-chip-accent">{{ t('dash_primary_section') }}</span>
-                <h2 id="my-ws-heading">{{ t('dash_my_workspaces') }}</h2>
-                <p>{{ t('dash_my_workspaces_body') }}</p>
-              </div>
-
-              <div v-if="sortedOwnWorkspaces.length === 0" class="empty-state">
-                <div class="empty-icon" aria-hidden="true">
-                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
-                </div>
-                <p class="empty-title">{{ t('dash_my_workspaces_empty') }}</p>
-                <p class="empty-body">{{ isInstanceAdmin ? t('dash_my_workspaces_admin_cta') : t('dash_my_workspaces_empty_hint') }}</p>
-                <RouterLink v-if="isInstanceAdmin" to="/managed/admin/workspaces/ui" class="secondary-button">{{ t('admin_create_workspace') }}</RouterLink>
-              </div>
-
-              <div v-else class="workspace-list">
-                <RouterLink
-                  v-for="item in sortedOwnWorkspaces"
-                  :key="item.workspace.workspace_id"
-                  :to="`/managed/ui/workspaces/${encodeURIComponent(item.workspace.slug)}`"
-                  class="workspace-card workspace-card-link"
-                >
-                  <div class="workspace-card-head">
-                    <div>
-                      <div class="workspace-card-title">{{ item.workspace.name }}</div>
-                      <div class="workspace-card-meta">
-                        <span class="pill">{{ t('ws_slug') }}: <strong>{{ item.workspace.slug }}</strong></span>
-                        <span class="pill">{{ t('ws_role') }}: <strong>{{ t('role_' + item.membership.role) }}</strong></span>
-                        <span class="pill" :class="'pill-status-' + item.workspace.status"><span class="pill-icon" aria-hidden="true">{{ item.workspace.status === 'active' ? '&#10003;' : item.workspace.status === 'disabled' ? '&#10005;' : '&#8230;' }}</span> {{ t('status_' + item.workspace.status) }}</span>
-                        <span class="pill" :class="item.sessions.length > 0 ? 'pill-sessions-active' : 'pill-sessions-none'">{{ t('ws_sessions') }}: <strong>{{ item.sessions.length }}</strong></span>
-                      </div>
-                    </div>
-                    <span class="card-arrow" aria-hidden="true">&rarr;</span>
-                  </div>
-                </RouterLink>
-              </div>
-            </section>
-
-            <section class="workspace-column secondary-column" aria-labelledby="other-ws-heading">
-              <div class="section-head">
-                <span class="section-chip">{{ t('dash_secondary_section') }}</span>
-                <h2 id="other-ws-heading">{{ t('dash_other_workspaces') }}</h2>
-                <p>{{ t('dash_other_workspaces_body') }}</p>
-              </div>
-
-              <div v-if="otherWorkspaces.length === 0" class="empty-state compact">
-                <p class="empty-title">{{ t('dash_other_workspaces_empty') }}</p>
-              </div>
-
-              <div v-else class="secondary-overview">
-                <p>
-                  <strong>{{ otherWorkspaces.length }}</strong>
-                  {{ t('dash_other_collapsed_summary') }}
-                </p>
-                <button
-                  class="secondary-toggle"
-                  @click="showOtherWorkspaces = !showOtherWorkspaces"
-                  :aria-expanded="showOtherWorkspaces"
-                  aria-controls="other-ws-list"
-                >
-                  {{ showOtherWorkspaces ? t('dash_other_hide') : t('dash_other_show') }}
-                </button>
-              </div>
-
-              <div
-                v-if="otherWorkspaces.length > 0 && showOtherWorkspaces"
-                id="other-ws-list"
-                class="workspace-list"
-                role="region"
-                :aria-label="t('dash_other_workspaces')"
-              >
-                <article
-                  v-for="item in otherWorkspaces"
-                  :key="item.workspace.workspace_id"
-                  class="workspace-card secondary-card"
-                  tabindex="0"
-                  role="region"
-                  :aria-label="item.workspace.name"
-                >
-                  <div class="workspace-card-head">
-                    <div>
-                      <div class="workspace-card-title">{{ item.workspace.name }}</div>
-                      <div class="workspace-card-meta">
-                        <span class="pill">{{ t('ws_slug') }}: <strong>{{ item.workspace.slug }}</strong></span>
-                        <span class="pill" :class="'pill-status-' + item.workspace.status"><span class="pill-icon" aria-hidden="true">{{ item.workspace.status === 'active' ? '&#10003;' : item.workspace.status === 'disabled' ? '&#10005;' : '&#8230;' }}</span> {{ t('status_' + item.workspace.status) }}</span>
-                        <span class="pill">{{ t('ws_admin') }}: <strong>{{ item.workspace_admin?.email ?? t('ws_admin_pending') }}</strong></span>
-                      </div>
-                    </div>
-                    <span class="workspace-note">{{ t('dash_other_workspace_note') }}</span>
-                  </div>
-                </article>
-              </div>
-            </section>
-          </div>
-        </template>
-
-        <div v-else-if="sortedOwnWorkspaces.length === 0" class="empty-state large">
+        <div v-if="sortedOwnWorkspaces.length === 0" class="empty-state large">
           <div class="empty-icon" aria-hidden="true">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
           </div>
@@ -186,9 +74,7 @@ import SkeletonBlock from '../components/SkeletonBlock.vue'
 import { useManagedAuth } from '../composables/useManagedAuth'
 import { useManagedI18n } from '../i18n'
 import {
-  fetchAdminWorkspaces,
   fetchMyWorkspaces,
-  type Invitation,
   type Workspace,
   type WorkspaceMembership,
   type WorkspaceSession,
@@ -200,30 +86,15 @@ interface MyWorkspaceItem {
   sessions: WorkspaceSession[]
 }
 
-interface AdminWorkspaceItem {
-  workspace: Workspace
-  workspace_admin: WorkspaceMembership | null
-  invitations: Invitation[]
-}
-
-const { isInstanceAdmin, requireAuth } = useManagedAuth()
+const { requireAuth } = useManagedAuth()
 const { t } = useManagedI18n()
 const router = useRouter()
 
 const loading = ref(true)
 const ownWorkspaces = ref<MyWorkspaceItem[]>([])
-const adminWorkspaces = ref<AdminWorkspaceItem[]>([])
-const showOtherWorkspaces = ref(false)
 
 const sortedOwnWorkspaces = computed(() =>
   ownWorkspaces.value
-    .slice()
-    .sort((left, right) => left.workspace.name.localeCompare(right.workspace.name)),
-)
-const ownWorkspaceIds = computed(() => new Set(sortedOwnWorkspaces.value.map(item => item.workspace.workspace_id)))
-const otherWorkspaces = computed(() =>
-  adminWorkspaces.value
-    .filter(item => !ownWorkspaceIds.value.has(item.workspace.workspace_id))
     .slice()
     .sort((left, right) => left.workspace.name.localeCompare(right.workspace.name)),
 )
@@ -234,13 +105,9 @@ onMounted(async () => {
   try {
     const myData = await fetchMyWorkspaces()
     ownWorkspaces.value = myData.workspaces
-    if (!isInstanceAdmin.value && myData.workspaces.length === 1) {
+    if (myData.workspaces.length === 1) {
       await router.replace(`/managed/ui/workspaces/${encodeURIComponent(myData.workspaces[0].workspace.slug)}`)
       return
-    }
-    if (isInstanceAdmin.value) {
-      const adminData = await fetchAdminWorkspaces()
-      adminWorkspaces.value = adminData.workspaces
     }
   } finally {
     loading.value = false

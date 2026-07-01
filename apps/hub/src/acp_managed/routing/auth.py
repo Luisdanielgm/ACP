@@ -298,7 +298,7 @@ def build_auth_router(deps: ManagedRouterDeps) -> APIRouter:
                 is None
             ):
                 raise HTTPException(status_code=401, detail="incorrect password for the invited account")
-            if principal.role not in {"instance_admin", "workspace_admin"}:
+            if principal.role != "workspace_admin":
                 principal = principal_store.update_role_status(email=principal.email, role="workspace_admin")
 
         principal_store.add_workspace_membership(

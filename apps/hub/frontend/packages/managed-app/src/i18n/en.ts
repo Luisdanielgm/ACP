@@ -15,7 +15,6 @@ export const en: Record<string, string> = {
   skip_to_content: 'Skip to main content',
 
   // ── Roles ──
-  role_instance_admin: 'Instance admin',
   role_workspace_admin: 'Workspace admin',
   role_workspace_member: 'Workspace member',
   role_member: 'Member',

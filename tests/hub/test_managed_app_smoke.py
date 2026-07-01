@@ -23,16 +23,17 @@ def _bootstrap_env(monkeypatch, tmp_path) -> str:
     password_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
     monkeypatch.setenv("ACP_MANAGED_SESSION_SECRET", "test-secret")
     monkeypatch.setenv("ACP_MANAGED_AGENT_TOKEN_SECRET", "agent-secret")
-    monkeypatch.setenv("ACP_DEPLOYMENT_MODE", "operator")
-    monkeypatch.setenv("ACP_PRIVATE_OPERATOR_ENABLED", "true")
+    monkeypatch.delenv("ACP_DEPLOYMENT_MODE", raising=False)
+    monkeypatch.delenv("ACP_PRIVATE_OPERATOR_ENABLED", raising=False)
+    monkeypatch.delenv("ACP_MANAGED_WHITELIST", raising=False)
     monkeypatch.setenv("ACP_PUBLIC_WEB_ENABLED", "false")
     monkeypatch.setenv("ACP_PERSISTENCE_BACKEND", "sqlite")
     monkeypatch.setenv("ACP_SQLITE_PATH", str(tmp_path / "acp.sqlite3"))
     monkeypatch.setenv("ACP_MANAGED_AUTH_SQLITE_PATH", str(tmp_path / "acp-managed-auth.sqlite3"))
-    monkeypatch.setenv(
-        "ACP_MANAGED_WHITELIST",
-        f"admin@example.com={password_hash}:instance_admin,active",
-    )
+    monkeypatch.setenv("ACP_WORKSPACE_SLUG", "team-one")
+    monkeypatch.setenv("ACP_WORKSPACE_NAME", "Team One")
+    monkeypatch.setenv("ACP_WORKSPACE_ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("ACP_WORKSPACE_ADMIN_PASSWORD_HASH", password_hash)
     return password
 
 
@@ -57,6 +58,15 @@ def _accept_workspace_admin_invitation(client: TestClient, invitation_url: str, 
     response = client.post(
         f"{path}/accept",
         json={"password": password},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def _login_workspace_admin(client: TestClient, password: str = "admin-pass") -> dict[str, object]:
+    response = client.post(
+        "/managed/auth/login",
+        json={"email": "admin@example.com", "password": password},
     )
     assert response.status_code == 200
     return response.json()
@@ -87,97 +97,6 @@ def test_managed_overlay_mounts_private_surface(monkeypatch, tmp_path) -> None:
         json={"email": "admin@example.com", "password": password},
     )
     assert login.status_code == 200
-
-
-def test_instance_admin_invites_workspace_admin_and_accepts_link(monkeypatch, tmp_path) -> None:
-    password = _bootstrap_env(monkeypatch, tmp_path)
-    module = _load_managed_app()
-    app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
-    admin_client = TestClient(app)
-
-    login = admin_client.post(
-        "/managed/auth/login",
-        json={"email": "admin@example.com", "password": password},
-    )
-    assert login.status_code == 200
-
-    create_workspace = admin_client.post(
-        "/managed/admin/workspaces",
-        json={"slug": "team-one", "name": "Team One", "status": "active"},
-    )
-    assert create_workspace.status_code == 200
-
-    invite = admin_client.post(
-        "/managed/admin/workspaces/team-one/invite-admin",
-        json={"email": "owner@example.com"},
-    )
-    assert invite.status_code == 200
-    invite_payload = invite.json()
-    assert invite_payload["status"] == "invited"
-    assert invite_payload["invitation"]["email"] == "owner@example.com"
-    assert "/managed/invitations/" in invite_payload["invitation_url"]
-
-    workspace_client = TestClient(app)
-    invitation_page = workspace_client.get(urlparse(invite_payload["invitation_url"]).path)
-    assert invitation_page.status_code == 200
-    assert "/managed/assets/app.js" in invitation_page.text
-
-    accepted = _accept_workspace_admin_invitation(
-        workspace_client,
-        invite_payload["invitation_url"],
-        password="owner-pass-123",
-    )
-    assert accepted["status"] == "accepted"
-    assert accepted["workspace"]["slug"] == "team-one"
-    assert accepted["principal"]["email"] == "owner@example.com"
-
-    workspace_dashboard = workspace_client.get("/managed/ui/workspaces/team-one")
-    assert workspace_dashboard.status_code == 200
-    assert "/managed/assets/app.js" in workspace_dashboard.text
-
-    second_invite = admin_client.post(
-        "/managed/admin/workspaces/team-one/invite-admin",
-        json={"email": "second@example.com"},
-    )
-    assert second_invite.status_code == 409
-
-
-def test_instance_admin_can_create_workspace_and_self_assign_admin(monkeypatch, tmp_path) -> None:
-    password = _bootstrap_env(monkeypatch, tmp_path)
-    module = _load_managed_app()
-    app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
-    admin_client = TestClient(app)
-
-    login = admin_client.post(
-        "/managed/auth/login",
-        json={"email": "admin@example.com", "password": password},
-    )
-    assert login.status_code == 200
-
-    create_workspace = admin_client.post(
-        "/managed/admin/workspaces",
-        json={
-            "slug": "solo-admin",
-            "name": "Solo Admin",
-            "status": "active",
-            "admin_email": "admin@example.com",
-        },
-    )
-    assert create_workspace.status_code == 200
-    payload = create_workspace.json()
-    assert payload["admin_assignment"] == "self_assigned"
-    assert payload["workspace_admin"]["email"] == "admin@example.com"
-    assert payload["invitation"] is None
-    assert payload["invitation_url"] is None
-
-    my_workspaces = admin_client.get("/managed/workspaces")
-    assert my_workspaces.status_code == 200
-    slugs = [item["workspace"]["slug"] for item in my_workspaces.json()["workspaces"]]
-    assert "solo-admin" in slugs
-
-    workspace_dashboard = admin_client.get("/managed/workspaces/solo-admin")
-    assert workspace_dashboard.status_code == 200
-    assert workspace_dashboard.json()["workspace_admin"]["email"] == "admin@example.com"
 
 
 def test_managed_downloads_surface_exposes_bundle_guide_and_skill(monkeypatch, tmp_path) -> None:
@@ -239,27 +158,8 @@ def test_workspace_admin_rotates_single_token_and_agent_uses_it(monkeypatch, tmp
     module = _load_managed_app()
     app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
     admin_client = TestClient(app)
-
-    assert admin_client.post(
-        "/managed/auth/login",
-        json={"email": "admin@example.com", "password": password},
-    ).status_code == 200
-    assert admin_client.post(
-        "/managed/admin/workspaces",
-        json={"slug": "team-one", "name": "Team One", "status": "active"},
-    ).status_code == 200
-    invite = admin_client.post(
-        "/managed/admin/workspaces/team-one/invite-admin",
-        json={"email": "owner@example.com"},
-    )
-    assert invite.status_code == 200
-
     workspace_client = TestClient(app)
-    _accept_workspace_admin_invitation(
-        workspace_client,
-        invite.json()["invitation_url"],
-        password="owner-pass-123",
-    )
+    _login_workspace_admin(workspace_client, password)
 
     rotate_one = workspace_client.post("/managed/workspaces/team-one/token/rotate")
     assert rotate_one.status_code == 200
@@ -316,27 +216,8 @@ def test_workspace_token_creates_session_and_guest_joins_via_join_code(monkeypat
     module = _load_managed_app()
     app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
     admin_client = TestClient(app)
-
-    assert admin_client.post(
-        "/managed/auth/login",
-        json={"email": "admin@example.com", "password": password},
-    ).status_code == 200
-    assert admin_client.post(
-        "/managed/admin/workspaces",
-        json={"slug": "team-one", "name": "Team One", "status": "active"},
-    ).status_code == 200
-    invite = admin_client.post(
-        "/managed/admin/workspaces/team-one/invite-admin",
-        json={"email": "owner@example.com"},
-    )
-    assert invite.status_code == 200
-
     workspace_client = TestClient(app)
-    _accept_workspace_admin_invitation(
-        workspace_client,
-        invite.json()["invitation_url"],
-        password="owner-pass-123",
-    )
+    _login_workspace_admin(workspace_client, password)
     token_payload = workspace_client.post("/managed/workspaces/team-one/token/rotate").json()
     raw_token = token_payload["raw_token"]
     share_prompt = token_payload["bootstrap"]["share_prompt"]
@@ -429,27 +310,8 @@ def test_managed_agent_replay_exposes_session_history(monkeypatch, tmp_path) -> 
     module = _load_managed_app()
     app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
     admin_client = TestClient(app)
-
-    assert admin_client.post(
-        "/managed/auth/login",
-        json={"email": "admin@example.com", "password": password},
-    ).status_code == 200
-    assert admin_client.post(
-        "/managed/admin/workspaces",
-        json={"slug": "team-one", "name": "Team One", "status": "active"},
-    ).status_code == 200
-    invite = admin_client.post(
-        "/managed/admin/workspaces/team-one/invite-admin",
-        json={"email": "owner@example.com"},
-    )
-    assert invite.status_code == 200
-
     workspace_client = TestClient(app)
-    _accept_workspace_admin_invitation(
-        workspace_client,
-        invite.json()["invitation_url"],
-        password="owner-pass-123",
-    )
+    _login_workspace_admin(workspace_client, password)
     raw_token = workspace_client.post("/managed/workspaces/team-one/token/rotate").json()["raw_token"]
 
     create_session = admin_client.post(
@@ -519,27 +381,8 @@ def test_owner_member_token_exposed_to_admin_but_never_to_agent_tokens(monkeypat
     module = _load_managed_app()
     app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
     admin_client = TestClient(app)
-
-    assert admin_client.post(
-        "/managed/auth/login",
-        json={"email": "admin@example.com", "password": password},
-    ).status_code == 200
-    assert admin_client.post(
-        "/managed/admin/workspaces",
-        json={"slug": "team-one", "name": "Team One", "status": "active"},
-    ).status_code == 200
-    invite = admin_client.post(
-        "/managed/admin/workspaces/team-one/invite-admin",
-        json={"email": "owner@example.com"},
-    )
-    assert invite.status_code == 200
-
     workspace_client = TestClient(app)
-    _accept_workspace_admin_invitation(
-        workspace_client,
-        invite.json()["invitation_url"],
-        password="owner-pass-123",
-    )
+    _login_workspace_admin(workspace_client, password)
 
     create = workspace_client.post(
         "/managed/workspaces/team-one/sessions",
@@ -597,27 +440,8 @@ def test_managed_agent_token_can_close_and_cleanup_workspace_sessions(monkeypatc
     module = _load_managed_app()
     app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
     admin_client = TestClient(app)
-
-    assert admin_client.post(
-        "/managed/auth/login",
-        json={"email": "admin@example.com", "password": password},
-    ).status_code == 200
-    assert admin_client.post(
-        "/managed/admin/workspaces",
-        json={"slug": "team-one", "name": "Team One", "status": "active"},
-    ).status_code == 200
-    invite = admin_client.post(
-        "/managed/admin/workspaces/team-one/invite-admin",
-        json={"email": "owner@example.com"},
-    )
-    assert invite.status_code == 200
-
     workspace_client = TestClient(app)
-    _accept_workspace_admin_invitation(
-        workspace_client,
-        invite.json()["invitation_url"],
-        password="owner-pass-123",
-    )
+    _login_workspace_admin(workspace_client, password)
     raw_token = workspace_client.post("/managed/workspaces/team-one/token/rotate").json()["raw_token"]
 
     create_session = admin_client.post(
@@ -687,27 +511,8 @@ def test_workspace_admin_can_create_session_from_workspace_panel(monkeypatch, tm
     module = _load_managed_app()
     app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
     admin_client = TestClient(app)
-
-    assert admin_client.post(
-        "/managed/auth/login",
-        json={"email": "admin@example.com", "password": password},
-    ).status_code == 200
-    assert admin_client.post(
-        "/managed/admin/workspaces",
-        json={"slug": "team-one", "name": "Team One", "status": "active"},
-    ).status_code == 200
-    invite = admin_client.post(
-        "/managed/admin/workspaces/team-one/invite-admin",
-        json={"email": "owner@example.com"},
-    )
-    assert invite.status_code == 200
-
     workspace_client = TestClient(app)
-    _accept_workspace_admin_invitation(
-        workspace_client,
-        invite.json()["invitation_url"],
-        password="owner-pass-123",
-    )
+    _login_workspace_admin(workspace_client, password)
 
     create_session_page = workspace_client.post(
         "/managed/ui/workspaces/team-one/sessions/create",
@@ -757,28 +562,11 @@ def test_workspace_admin_creates_team_preset_via_json(monkeypatch, tmp_path) -> 
     module = _load_managed_app()
     app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
     admin_client = TestClient(app)
-
-    assert admin_client.post(
-        "/managed/auth/login",
-        json={"email": "admin@example.com", "password": password},
-    ).status_code == 200
-    assert admin_client.post(
-        "/managed/admin/workspaces",
-        json={"slug": "team-one", "name": "Team One", "status": "active"},
-    ).status_code == 200
-    invite = admin_client.post(
-        "/managed/admin/workspaces/team-one/invite-admin",
-        json={"email": "owner@example.com"},
-    )
-    assert invite.status_code == 200
-
     workspace_client = TestClient(app)
-    _accept_workspace_admin_invitation(
-        workspace_client, invite.json()["invitation_url"], password="owner-pass-123"
-    )
+    _login_workspace_admin(workspace_client, password)
 
     response = workspace_client.post(
-        "/managed/admin/workspaces/team-one/presets/create",
+        "/managed/workspaces/team-one/presets/create",
         json={"preset_id": "chief-reviewer"},
     )
     assert response.status_code == 200
@@ -792,26 +580,11 @@ def test_workspace_admin_create_preset_rejects_unknown_preset(monkeypatch, tmp_p
     module = _load_managed_app()
     app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
     admin_client = TestClient(app)
-
-    admin_client.post(
-        "/managed/auth/login",
-        json={"email": "admin@example.com", "password": password},
-    )
-    admin_client.post(
-        "/managed/admin/workspaces",
-        json={"slug": "team-one", "name": "Team One", "status": "active"},
-    )
-    invite = admin_client.post(
-        "/managed/admin/workspaces/team-one/invite-admin",
-        json={"email": "owner@example.com"},
-    )
     workspace_client = TestClient(app)
-    _accept_workspace_admin_invitation(
-        workspace_client, invite.json()["invitation_url"], password="owner-pass-123"
-    )
+    _login_workspace_admin(workspace_client, password)
 
     response = workspace_client.post(
-        "/managed/admin/workspaces/team-one/presets/create",
+        "/managed/workspaces/team-one/presets/create",
         json={"preset_id": "does-not-exist"},
     )
     assert response.status_code == 404
@@ -911,40 +684,3 @@ def test_managed_store_adds_owner_member_token_column_to_existing_workspace_sess
         conn.close()
 
     assert "owner_member_token" in columns
-
-
-def test_invitation_accept_for_existing_account_requires_password(monkeypatch, tmp_path) -> None:
-    password = _bootstrap_env(monkeypatch, tmp_path)
-    module = _load_managed_app()
-    app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
-    admin_client = TestClient(app)
-
-    login = admin_client.post(
-        "/managed/auth/login",
-        json={"email": "admin@example.com", "password": password},
-    )
-    assert login.status_code == 200
-
-    create_workspace = admin_client.post(
-        "/managed/admin/workspaces",
-        json={"slug": "team-existing", "name": "Team Existing", "status": "active"},
-    )
-    assert create_workspace.status_code == 200
-
-    # Invite an email that ALREADY has an account (the instance_admin itself).
-    invite = admin_client.post(
-        "/managed/admin/workspaces/team-existing/invite-admin",
-        json={"email": "admin@example.com"},
-    )
-    assert invite.status_code == 200
-    invitation_url = invite.json()["invitation_url"]
-
-    # A holder of the invitation link must NOT receive a session for an existing
-    # account without the correct password.
-    attacker = TestClient(app)
-    resp = attacker.post(
-        f"{urlparse(invitation_url).path}/accept",
-        json={"password": "totally-wrong-password"},
-    )
-    assert resp.status_code == 401
-    assert "acp_managed_session" not in resp.headers.get("set-cookie", "")

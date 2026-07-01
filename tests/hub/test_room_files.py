@@ -1,4 +1,4 @@
-"""Managed room files — M4 storage slice 1.
+﻿"""Managed room files â€” M4 storage slice 1.
 
 Room files are durable per-session storage, separate from wall posts and replay.
 The owner can upload/delete; agents can read/download through their workspace
@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from test_managed_app_smoke import (
-    _accept_workspace_admin_invitation,
+    _login_workspace_admin,
     _bootstrap_env,
     _create_managed_app_with_spa,
     _load_managed_app,
@@ -23,22 +23,8 @@ def _owner_with_session(monkeypatch, tmp_path) -> tuple[object, TestClient, str]
     app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
 
     admin = TestClient(app)
-    assert admin.post(
-        "/managed/auth/login",
-        json={"email": "admin@example.com", "password": password},
-    ).status_code == 200
-    assert admin.post(
-        "/managed/admin/workspaces",
-        json={"slug": "team-one", "name": "Team One", "status": "active"},
-    ).status_code == 200
-    invite = admin.post(
-        "/managed/admin/workspaces/team-one/invite-admin",
-        json={"email": "owner@example.com"},
-    )
-    assert invite.status_code == 200
-
     owner = TestClient(app)
-    _accept_workspace_admin_invitation(owner, invite.json()["invitation_url"], password="owner-pass-123")
+    _login_workspace_admin(owner, password)
 
     created = owner.post(
         "/managed/workspaces/team-one/sessions",
@@ -69,7 +55,7 @@ def test_room_files_owner_uploads_and_agents_can_read_without_owner_token(monkey
     assert file_item["size_bytes"] == len(b"# Decision\nUse room files for durable artifacts.\n")
     assert file_item["uploaded_by_type"] == "owner"
     assert file_item["purpose"] == "artifact"
-    assert file_item["uploaded_by_name"] == "owner@example.com"
+    assert file_item["uploaded_by_name"] == "admin@example.com"
     assert "content" not in file_item
 
     owner_list = owner.get(f"/managed/workspaces/team-one/sessions/{session_id}/files")

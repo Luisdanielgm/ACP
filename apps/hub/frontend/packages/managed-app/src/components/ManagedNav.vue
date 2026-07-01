@@ -103,7 +103,7 @@ type NavItem = {
 }
 
 const route = useRoute()
-const { isInstanceAdmin, isSingleWorkspace, user, logout } = useManagedAuth()
+const { isSingleWorkspace, user, logout } = useManagedAuth()
 const { t } = useManagedI18n()
 
 const routeAnnouncement = ref('')
@@ -119,24 +119,19 @@ const brandSub = computed(() => t(isSingleWorkspace.value ? 'workspace_control_k
 
 const navItems = computed<NavItem[]>(() =>
   [
-    // D1: For instance_admin, "Admin" is the single canonical surface (it
-    // contains create + list + search). The standalone "Dashboard" entry was
-    // removed because it duplicated the same content.
     {
       to: singleWorkspaceHomePath.value,
       label: t(isSingleWorkspace.value ? 'nav_workspace' : 'nav_workspaces'),
       icon: '01',
       visible: true,
     },
-    { to: '/managed/admin/workspaces/ui', label: t('nav_admin'), icon: '02', visible: !isSingleWorkspace.value && isInstanceAdmin.value },
   ].filter(item => item.visible),
 )
 
 const pageTitle = computed(() => {
   const name = String(route.name ?? '')
   if (name === 'workspace-detail') return formatSlug(String(route.params.slug ?? '')) || t('nav_workspace')
-  if (name === 'admin-workspaces') return t('nav_admin')
-  if (name === 'dashboard') return t(isInstanceAdmin.value ? 'dash_instance_title' : 'dash_workspace_title')
+  if (name === 'dashboard') return t('dash_workspace_title')
   if (name === 'workspaces') return t('my_workspaces_page_title')
   return t(isSingleWorkspace.value ? 'nav_workspace' : 'nav_workspaces')
 })
@@ -144,7 +139,6 @@ const pageTitle = computed(() => {
 const pageKicker = computed(() => {
   const name = String(route.name ?? '')
   if (name === 'workspace-detail') return t('workspace_kicker')
-  if (name === 'admin-workspaces') return t('admin_kicker')
   if (name === 'dashboard') return t(isSingleWorkspace.value ? 'workspace_control_kicker' : 'dash_kicker')
   return t(isSingleWorkspace.value ? 'workspace_kicker' : 'workspace_surface_kicker')
 })

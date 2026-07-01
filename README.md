@@ -37,7 +37,7 @@ The open ACP Manager includes the workspace layer, but public self-host installs
 
 - `ACP core`: sessions, members, message routing, wait/listen/send/status, session dashboards
 - `Workspace layer`: one self-host workspace, one workspace admin, workspace token rotation, rooms, room prompts, persistent wall, room files/instructions with quotas, and web operator
-- `Operator layer`: multi-workspace creation, workspace distribution, hosted downloads, billing, and provisioning live in the private `acp-cloud` overlay and use `ACP_DEPLOYMENT_MODE=operator`
+- `Cloud/admin layer`: customer registry, provisioning runbook, billing, hosted downloads, and commercial automation live in the private `acp-cloud` repo. Public ACP no longer ships an operator/multi-workspace runtime mode.
 
 Canonical architecture reference:
 
@@ -56,8 +56,8 @@ Canonical architecture reference:
 
 ### Tokens and codes
 
-- invitation link
-  - used by hosted/private operator mode when `acp-cloud` provisions a customer workspace
+- workspace admin login
+  - configured at install time from `ACP_WORKSPACE_ADMIN_EMAIL` and `ACP_WORKSPACE_ADMIN_PASSWORD_HASH`
 - workspace token
   - single active token per workspace
   - used by the workspace admin or ACP client to create workspace sessions
@@ -70,7 +70,7 @@ Canonical architecture reference:
 
 ### Managed flow
 
-1. Public self-host starts in `ACP_DEPLOYMENT_MODE=single_workspace`.
+1. Public self-host starts in `single_workspace` mode. `ACP_DEPLOYMENT_MODE` may be omitted or set to `single_workspace`; `operator` is rejected.
 2. First boot creates one workspace and one `workspace_admin` from env/setup values.
 3. The `workspace_admin` opens `/managed/ui/workspaces/{slug}`.
 4. The `workspace_admin` rotates the single workspace token.
@@ -385,7 +385,7 @@ Recommended:
 - With the `memory` backend, active coordination sessions are lost on Hub restart.
 - Hub state (active WebSocket agents, trace sink, dashboard sessions) lives in a single Python process. Running multiple uvicorn workers or replicas is not supported.
 - No external queues (Redis/NATS/Kafka).
-- No multi-tenant ACL model beyond the managed workspace overlay.
+- No multi-tenant/operator workspace management in the public runtime; deploy one ACP service per workspace.
 - No exactly-once delivery guarantees.
 - Dashboard is intentionally simple (single-file, no advanced analytics).
 

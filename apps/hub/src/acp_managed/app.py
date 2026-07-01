@@ -36,7 +36,6 @@ from acp_managed.routing import ManagedRouterDeps
 from acp_managed.routing.agent import build_agent_router
 from acp_managed.routing.auth import build_auth_router
 from acp_managed.routing.downloads import build_downloads_router
-from acp_managed.routing.instance_admin import build_instance_admin_router
 from acp_managed.routing.public_pages import build_public_pages_router
 from acp_managed.routing.workspace_admin import build_workspace_admin_router
 from acp_managed.routing._helpers import (
@@ -54,8 +53,7 @@ def create_managed_app() -> FastAPI:
     principal_store = _managed_principal_store()
     session_secret = _managed_session_secret()
     agent_token_secret = _managed_agent_token_secret()
-    if deployment_mode == "single_workspace":
-        app.state.single_workspace = ensure_single_workspace_bootstrap(principal_store)
+    app.state.single_workspace = ensure_single_workspace_bootstrap(principal_store)
     session_manager = SessionTokenManager(
         secret=session_secret,
         ttl_seconds=_managed_session_ttl_seconds(),
@@ -145,8 +143,6 @@ def create_managed_app() -> FastAPI:
         if session_record is None:
             return False
         principal = current_principal_from_cookie(acp_managed_session)
-        if principal.role == "instance_admin":
-            return True
         membership = principal_store.get_membership(
             workspace_id=session_record.workspace_id,
             email=principal.email,
@@ -156,8 +152,6 @@ def create_managed_app() -> FastAPI:
     runtime.managed_session_authorizer = authorize_managed_session_dashboard_access
 
     app.include_router(build_auth_router(deps))
-    if deployment_mode == "operator":
-        app.include_router(build_instance_admin_router(deps))
     app.include_router(build_workspace_admin_router(deps))
     app.include_router(build_agent_router(deps))
 

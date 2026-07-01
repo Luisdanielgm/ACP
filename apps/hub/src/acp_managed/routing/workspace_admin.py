@@ -89,7 +89,7 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
             )
         return JSONResponse({"workspaces": items, "count": len(items)})
 
-    @router.get("/managed/admin/workspaces/{slug}/agent-tokens")
+    @router.get("/managed/workspaces/{slug}/agent-tokens")
     async def managed_list_agent_tokens(
         slug: str,
         acp_managed_session: str | None = Cookie(default=None),
@@ -104,7 +104,7 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
             }
         )
 
-    @router.post("/managed/admin/workspaces/{slug}/agent-tokens")
+    @router.post("/managed/workspaces/{slug}/agent-tokens")
     async def managed_create_agent_token(
         slug: str,
         payload: CreateAgentTokenRequest,
@@ -136,7 +136,7 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
             }
         )
 
-    @router.delete("/managed/admin/workspaces/{slug}/agent-tokens/{token_id}")
+    @router.delete("/managed/workspaces/{slug}/agent-tokens/{token_id}")
     async def managed_revoke_agent_token(
         slug: str,
         token_id: str,
@@ -155,7 +155,7 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
             }
         )
 
-    @router.post("/managed/admin/workspaces/{slug}/presets/create")
+    @router.post("/managed/workspaces/{slug}/presets/create")
     async def managed_create_workspace_preset(
         slug: str,
         payload: CreateWorkspacePresetRequest,

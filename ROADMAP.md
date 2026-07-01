@@ -12,7 +12,7 @@ See [OPEN_CORE_MODEL.md](OPEN_CORE_MODEL.md) for the open-core model and
 ## 📍 Current state (update me)
 
 - **Milestones reached:** ★ M1 (clean engine) · ★ M2 (open source — this repo is public).
-- **Public product state:** self-hostable ACP Manager is moving to `single_workspace` by default: one admin, one workspace, many rooms/sessions. Cloud/operator remains private.
+- **Public product state:** self-hostable ACP Manager runs as a single-workspace product: one admin, one workspace, many rooms/sessions. Cloud/operator remains private.
   - ✅ Broadcast (one-to-all) — already in `coordination_service.send_message`.
   - ✅ Room prompt (session instructions) — backend + dashboard. Owner sets it on
     session create; agents receive it on join/detail. (`test_room_prompt.py`)
@@ -43,7 +43,7 @@ the room from the managed dashboard without exposing pseudo-member credentials t
 | M2 | Open source | This repo public; AGPL server + Apache client; CLA; CI | ✅ done |
 | M3 | Rooms (Salas) | Room prompt, persistent wall, web operator (Option B) | ✅ done |
 | M4 | Storage | Per-room files/instructions, quotas | ✅ done |
-| M5 | Single-workspace public mode | Public self-host defaults to one workspace/one admin; private `acp-cloud` owns operator multi-workspace mode | in progress |
+| M5 | Single-workspace public mode | Public self-host is one workspace/one admin; private `acp-cloud` owns hosted customer administration | done |
 | DX | **Client automation** (parallel track) | Deterministic connect/coordinate/onboard/chief/runner commands; slim skill guardrail | ✅ done |
 | — | 🎯 **Sellable OSS product** | engine + rooms + storage, self-hostable, durable | ✅ done |
 | (Cloud) | Commercial overlay | Billing/provisioning/branding — lives in the **separate private `acp-cloud` repo**, not here | deferred/private |

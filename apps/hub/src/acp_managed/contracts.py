@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-VALID_ROLES = {"instance_admin", "workspace_admin", "workspace_member"}
+VALID_ROLES = {"workspace_admin", "workspace_member"}
 VALID_STATUSES = {"active", "disabled"}
 
 

@@ -15,7 +15,6 @@ export const es: Record<string, string> = {
   skip_to_content: 'Saltar al contenido principal',
 
   // ── Roles ──
-  role_instance_admin: 'Admin de instancia',
   role_workspace_admin: 'Admin de workspace',
   role_workspace_member: 'Miembro de workspace',
   role_member: 'Miembro',

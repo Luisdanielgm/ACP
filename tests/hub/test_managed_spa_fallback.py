@@ -17,16 +17,17 @@ def _bootstrap_env(monkeypatch, tmp_path) -> str:
     password_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
     monkeypatch.setenv("ACP_MANAGED_SESSION_SECRET", "test-secret")
     monkeypatch.setenv("ACP_MANAGED_AGENT_TOKEN_SECRET", "agent-secret")
-    monkeypatch.setenv("ACP_DEPLOYMENT_MODE", "operator")
-    monkeypatch.setenv("ACP_PRIVATE_OPERATOR_ENABLED", "true")
+    monkeypatch.delenv("ACP_DEPLOYMENT_MODE", raising=False)
+    monkeypatch.delenv("ACP_PRIVATE_OPERATOR_ENABLED", raising=False)
+    monkeypatch.delenv("ACP_MANAGED_WHITELIST", raising=False)
     monkeypatch.setenv("ACP_PUBLIC_WEB_ENABLED", "false")
     monkeypatch.setenv("ACP_PERSISTENCE_BACKEND", "sqlite")
     monkeypatch.setenv("ACP_SQLITE_PATH", str(tmp_path / "acp.sqlite3"))
     monkeypatch.setenv("ACP_MANAGED_AUTH_SQLITE_PATH", str(tmp_path / "acp-managed-auth.sqlite3"))
-    monkeypatch.setenv(
-        "ACP_MANAGED_WHITELIST",
-        f"admin@example.com={password_hash}:instance_admin,active",
-    )
+    monkeypatch.setenv("ACP_WORKSPACE_SLUG", "team-one")
+    monkeypatch.setenv("ACP_WORKSPACE_NAME", "Team One")
+    monkeypatch.setenv("ACP_WORKSPACE_ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("ACP_WORKSPACE_ADMIN_PASSWORD_HASH", password_hash)
     return password
 
 

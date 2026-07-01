@@ -30,7 +30,7 @@ interface Crumb {
 }
 
 const route = useRoute()
-const { isInstanceAdmin, isSingleWorkspace, user } = useManagedAuth()
+const { isSingleWorkspace, user } = useManagedAuth()
 const { t } = useManagedI18n()
 
 function formatSlug(value: string): string {
@@ -54,16 +54,14 @@ const crumbs = computed<Crumb[]>(() => {
           ? `/managed/ui/workspaces/${encodeURIComponent(user.value.default_workspace.slug)}`
           : '/managed/ui/workspaces',
       }
-    : isInstanceAdmin.value
-      ? { label: t('nav_admin'), to: '/managed/admin/workspaces/ui' }
-      : { label: t('nav_workspaces'), to: '/managed/ui/workspaces' }
+    : { label: t('nav_workspaces'), to: '/managed/ui/workspaces' }
 
   // Routes where breadcrumbs are not meaningful or are self-evident.
   if (!name || name === 'login' || name === 'landing' || name === 'invitation') {
     return []
   }
 
-  if (name === 'admin-workspaces' || name === 'workspaces' || name === 'dashboard') {
+  if (name === 'workspaces' || name === 'dashboard') {
     return [{ ...root }]
   }
 

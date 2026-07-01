@@ -45,10 +45,6 @@ def build_public_pages_router(deps: ManagedRouterDeps) -> APIRouter:
     async def managed_my_workspaces_page(acp_managed_session: str | None = Cookie(default=None)) -> HTMLResponse:
         return _managed_spa_response()
 
-    @router.get("/managed/admin/workspaces/ui", response_class=HTMLResponse)
-    async def managed_workspaces_admin_page(acp_managed_session: str | None = Cookie(default=None)) -> HTMLResponse:
-        return _managed_spa_response()
-
     @router.get("/managed/ui/workspaces/{slug}", response_class=HTMLResponse)
     async def managed_workspace_dashboard_page(slug: str, acp_managed_session: str | None = Cookie(default=None)) -> HTMLResponse:
         return _managed_spa_response()

@@ -43,12 +43,6 @@ class ManagedAccessService:
             raise HTTPException(status_code=401, detail="unknown managed principal")
         return principal
 
-    def require_instance_admin(self, acp_managed_session: str | None) -> ManagedPrincipal:
-        principal = self.current_principal_from_cookie(acp_managed_session)
-        if principal.role != "instance_admin":
-            raise HTTPException(status_code=403, detail="instance_admin role required")
-        return principal
-
     def require_workspace_access(
         self,
         *,

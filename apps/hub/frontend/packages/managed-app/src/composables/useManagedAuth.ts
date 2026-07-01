@@ -17,9 +17,6 @@ export function managedHomePathFor(identity?: Pick<ManagedUser, 'deployment_mode
   if (identity?.deployment_mode === 'single_workspace' && identity.default_workspace?.slug) {
     return `/managed/ui/workspaces/${encodeURIComponent(identity.default_workspace.slug)}`
   }
-  if (identity?.role === 'instance_admin') {
-    return '/managed/admin/workspaces/ui'
-  }
   return '/managed/ui/workspaces'
 }
 
@@ -27,7 +24,7 @@ export function useManagedAuth() {
   const router = useRouter()
 
   const isAuthenticated = computed(() => user.value !== null)
-  const isInstanceAdmin = computed(() => user.value?.role === 'instance_admin')
+  const isInstanceAdmin = computed(() => false)
   const isWorkspaceAdmin = computed(() => user.value?.role === 'workspace_admin')
   const isSingleWorkspace = computed(() => user.value?.deployment_mode === 'single_workspace')
 

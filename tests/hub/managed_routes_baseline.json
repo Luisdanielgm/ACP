@@ -1,6 +1,5 @@
 {
-  "_comment": "A-DETANGLE-00 regression baseline. Frozen route+state surface of acp_managed.create_managed_app(). Regenerate ONLY for intentional API changes. Updated for M4 room files route.",
-  "route_count": 107,
+  "route_count": 99,
   "routes": [
     {
       "path": "/",
@@ -104,78 +103,6 @@
       "path": "/health",
       "methods": [
         "GET"
-      ]
-    },
-    {
-      "path": "/managed/admin/audit",
-      "methods": [
-        "GET"
-      ]
-    },
-    {
-      "path": "/managed/admin/workspaces",
-      "methods": [
-        "GET"
-      ]
-    },
-    {
-      "path": "/managed/admin/workspaces",
-      "methods": [
-        "POST"
-      ]
-    },
-    {
-      "path": "/managed/admin/workspaces/ui",
-      "methods": [
-        "GET"
-      ]
-    },
-    {
-      "path": "/managed/admin/workspaces/{slug}",
-      "methods": [
-        "DELETE"
-      ]
-    },
-    {
-      "path": "/managed/admin/workspaces/{slug}",
-      "methods": [
-        "PATCH"
-      ]
-    },
-    {
-      "path": "/managed/admin/workspaces/{slug}/agent-tokens",
-      "methods": [
-        "GET"
-      ]
-    },
-    {
-      "path": "/managed/admin/workspaces/{slug}/agent-tokens",
-      "methods": [
-        "POST"
-      ]
-    },
-    {
-      "path": "/managed/admin/workspaces/{slug}/agent-tokens/{token_id}",
-      "methods": [
-        "DELETE"
-      ]
-    },
-    {
-      "path": "/managed/admin/workspaces/{slug}/disable",
-      "methods": [
-        "POST"
-      ]
-    },
-    {
-      "path": "/managed/admin/workspaces/{slug}/invite-admin",
-      "methods": [
-        "POST"
-      ]
-    },
-    {
-      "path": "/managed/admin/workspaces/{slug}/presets/create",
-      "methods": [
-        "POST"
       ]
     },
     {
@@ -441,6 +368,30 @@
       ]
     },
     {
+      "path": "/managed/workspaces/{slug}/agent-tokens",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/agent-tokens",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/agent-tokens/{token_id}",
+      "methods": [
+        "DELETE"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/presets/create",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
       "path": "/managed/workspaces/{slug}/sessions",
       "methods": [
         "GET"
@@ -657,6 +608,7 @@
     "managed_workspace_invitation_service",
     "managed_workspace_session_service",
     "managed_workspace_token_service",
-    "runtime"
+    "runtime",
+    "single_workspace"
   ]
 }

@@ -35,9 +35,6 @@ const routes: RouteRecordRaw[] = [
             replace: true,
           })
         }
-        if (me.role === 'instance_admin') {
-          return next({ path: '/managed/admin/workspaces/ui', replace: true })
-        }
         return next({ path: '/managed/ui/workspaces', replace: true })
       } catch {
         // Not authenticated; let the view's own requireAuth handle the redirect.
@@ -74,11 +71,6 @@ const routes: RouteRecordRaw[] = [
     path: '/managed/ui/workspaces/:slug/sessions/:sessionId/live',
     name: 'session-live',
     component: () => import('../views/SessionLiveView.vue'),
-  },
-  {
-    path: '/managed/admin/workspaces/ui',
-    name: 'admin-workspaces',
-    component: () => import('../views/WorkspaceAdminView.vue'),
   },
   {
     path: '/managed/invitations/:token',

@@ -38,16 +38,6 @@ def _single_workspace_env(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("ACP_WORKSPACE_ADMIN_PASSWORD_HASH", _password_hash())
 
 
-def _operator_env(monkeypatch, tmp_path) -> None:
-    _base_env(monkeypatch, tmp_path)
-    monkeypatch.setenv("ACP_DEPLOYMENT_MODE", "operator")
-    monkeypatch.setenv("ACP_PRIVATE_OPERATOR_ENABLED", "true")
-    monkeypatch.setenv(
-        "ACP_MANAGED_WHITELIST",
-        f"admin@example.com={_password_hash()}:instance_admin,active",
-    )
-
-
 def test_public_default_bootstraps_exactly_one_workspace_and_admin(monkeypatch, tmp_path) -> None:
     _single_workspace_env(monkeypatch, tmp_path)
     module = _load_managed_app()
@@ -129,22 +119,5 @@ def test_operator_mode_requires_private_overlay_flag(monkeypatch, tmp_path) -> N
     monkeypatch.setenv("ACP_DEPLOYMENT_MODE", "operator")
     monkeypatch.delenv("ACP_PRIVATE_OPERATOR_ENABLED", raising=False)
 
-    with pytest.raises(ValueError, match="reserved for private overlays"):
+    with pytest.raises(ValueError, match="operator was removed"):
         _load_managed_app()
-
-
-def test_operator_mode_preserves_global_workspace_admin_routes(monkeypatch, tmp_path) -> None:
-    _operator_env(monkeypatch, tmp_path)
-    module = _load_managed_app()
-    client = TestClient(module.create_managed_app())
-
-    login = client.post(
-        "/managed/auth/login",
-        json={"email": "admin@example.com", "password": "admin-pass"},
-    )
-    assert login.status_code == 200
-    response = client.post(
-        "/managed/admin/workspaces",
-        json={"slug": "team-one", "name": "Team One", "status": "active"},
-    )
-    assert response.status_code == 200
