@@ -100,6 +100,20 @@ python -m pip install -e "apps/hub[test]"
 
 ## Public Single-workspace Setup
 
+For hosted customer deployments, prefer the customer's own subdomain, for example:
+
+```text
+https://acp.aerocostos.com
+https://nephila.aerocostos.com
+```
+
+That public origin is the `hub_http` agents use, and it is also where the bundle docs are served:
+
+```text
+https://acp.aerocostos.com/downloads/ACP_AGENT/AGENT.md
+https://acp.aerocostos.com/downloads/ACP_AGENT.json
+```
+
 For a fresh local/VPS install, generate a private `.env` first. This creates one
 workspace, one admin login, strong browser/agent secrets, and an scrypt password
 hash. Do not commit the generated file.
@@ -378,6 +392,10 @@ Recommended:
 | `ACP_SQLITE_PATH` | `.planning/acp.sqlite3` | Sqlite path when backend is `sqlite` |
 | `ACP_MAX_PAYLOAD_BYTES` | `32768` | Payload size guardrail |
 | `ACP_VERSION` | `0.1.0` | Hub version label |
+| `ACP_PUBLIC_BRAND_NAME` | `ACP Hub` | Public/download branding label |
+| `ACP_PUBLIC_BASE_URL` | empty | Public origin used to infer hosted hub URLs, e.g. `https://acp.customer.com` |
+| `ACP_PUBLIC_HUB_HTTP` | inferred from base URL | Public HTTP origin agents should use as `hub_http` |
+| `ACP_PUBLIC_HUB_WS` | inferred from HTTP origin | Public WebSocket URL, usually `wss://host/ws` |
 
 ## MVP Limitations
 
