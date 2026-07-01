@@ -314,7 +314,7 @@ The setup command should:
 Docs should show:
 
 - Dockerfile: `apps/hub/Dockerfile`
-- Docker context: `apps/hub`
+- Docker context: `/` (repository root, so the image can include `ACP_AGENT/`)
 - port: `8000`
 - volume: `/data`
 - env vars required

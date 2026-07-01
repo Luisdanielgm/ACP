@@ -1,12 +1,12 @@
 FROM node:20-alpine AS frontend-builder
 
 WORKDIR /build
-COPY frontend/package.json frontend/package-lock.json* ./
-COPY frontend/packages/shared/package.json ./packages/shared/
-COPY frontend/packages/public-app/package.json ./packages/public-app/
-COPY frontend/packages/managed-app/package.json ./packages/managed-app/
+COPY apps/hub/frontend/package.json apps/hub/frontend/package-lock.json* ./
+COPY apps/hub/frontend/packages/shared/package.json ./packages/shared/
+COPY apps/hub/frontend/packages/public-app/package.json ./packages/public-app/
+COPY apps/hub/frontend/packages/managed-app/package.json ./packages/managed-app/
 RUN npm ci --ignore-scripts 2>/dev/null || npm install --ignore-scripts
-COPY frontend/ ./
+COPY apps/hub/frontend/ ./
 RUN npm run build --workspace=packages/public-app && \
     npm run build --workspace=packages/managed-app
 
@@ -21,13 +21,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     ACP_PERSISTENCE_BACKEND=sqlite \
     ACP_SQLITE_PATH=/data/acp/acp.sqlite3 \
     ACP_MANAGED_AUTH_SQLITE_PATH=/data/acp/acp-managed-auth.sqlite3 \
-    ACP_ASGI_APP=acp_managed.app:app
+    ACP_ASGI_APP=acp_managed.app:app \
+    ACP_AGENT_SOURCE_DIR=/app/ACP_AGENT
 
 WORKDIR /app
 
-COPY pyproject.toml ./
-COPY src ./src
-COPY downloads ./downloads
+COPY apps/hub/pyproject.toml ./
+COPY apps/hub/src ./src
+COPY apps/hub/downloads ./downloads
+COPY ACP_AGENT ./ACP_AGENT
 
 RUN pip install --no-cache-dir .
 

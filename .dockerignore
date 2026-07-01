@@ -1,0 +1,11 @@
+.git
+.pytest_cache
+.ruff_cache
+.venv
+venv
+env
+**/__pycache__
+**/.pytest_cache
+**/node_modules
+**/dist
+apps/hub/downloads/*.zip

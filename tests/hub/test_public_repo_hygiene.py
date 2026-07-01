@@ -112,6 +112,16 @@ def test_public_distribution_defaults_require_explicit_hub_configuration() -> No
     assert '"default_manifest_url": null' in payload
 
 
+def test_docker_build_context_includes_agent_bundle_source() -> None:
+    dockerfile = (REPO_ROOT / "apps" / "hub" / "Dockerfile").read_text(encoding="utf-8")
+    compose = (REPO_ROOT / "apps" / "hub" / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "COPY ACP_AGENT ./ACP_AGENT" in dockerfile
+    assert "ACP_AGENT_SOURCE_DIR=/app/ACP_AGENT" in dockerfile
+    assert "context: ../.." in compose
+    assert "dockerfile: apps/hub/Dockerfile" in compose
+
+
 def test_state_doc_has_no_tbd_and_matches_v03_phase_range() -> None:
     state_path = REPO_ROOT / ".planning" / "STATE.md"
     roadmap_path = REPO_ROOT / ".planning" / "ROADMAP.md"

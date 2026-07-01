@@ -1,8 +1,8 @@
 services:
   hub:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: apps/hub/Dockerfile
     container_name: acp-hub
     restart: unless-stopped
     environment:

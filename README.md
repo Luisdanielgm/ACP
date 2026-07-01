@@ -26,7 +26,7 @@ tests/
 
 ## What Runs Where
 
-- Dokploy server: `apps/hub`
+- Dokploy service: `apps/hub/Dockerfile` built from the repository root context
 - Local machine per agent: one copied `ACP_AGENT/` folder inside the project
 
 The Hub stays remote. There is no local ACP server. The recommended flow is session-based over Hub HTTP. The WebSocket `run` mode still exists for compatibility.
@@ -346,7 +346,9 @@ The public community bundle should stay in `explicit` mode.
 
 ## Docker Quickstart
 
-Uses `apps/hub/Dockerfile` and `apps/hub/docker-compose.yml`:
+Uses `apps/hub/Dockerfile` and `apps/hub/docker-compose.yml`.
+The Docker build context is the repository root because the image must include
+the root `ACP_AGENT/` bundle source for `/downloads/ACP_AGENT/*`:
 
 ```bash
 docker compose -f apps/hub/docker-compose.yml up -d
@@ -372,10 +374,14 @@ Recommended source/build settings from the repository root:
 
 - Build Path: `/`
 - Docker File: `apps/hub/Dockerfile`
-- Docker Context Path: `apps/hub`
+- Docker Context Path: `/`
 - Docker Build Stage: empty
 - Container Port: `8000`
-- Watch Paths: `apps/hub/**`
+- Watch Paths: `apps/hub/**` and `ACP_AGENT/**`
+
+Do not set the Docker context to `apps/hub`; that context cannot see the root
+`ACP_AGENT/` folder, so hosted downloads like `/downloads/ACP_AGENT/AGENT.md`
+will be unavailable in production.
 
 For hosted customer services, mount one unique volume at `/data` and keep the SQLite paths stable inside that volume:
 
