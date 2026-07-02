@@ -17,7 +17,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { SessionDashboardView } from '@acp/public-app'
 import { fetchSessionDetail } from '../api/managed'
@@ -41,6 +41,11 @@ const resolveMessage = computed(() =>
     : t('session_resolve_loading')
 )
 
+let unmounted = false
+onBeforeUnmount(() => {
+  unmounted = true
+})
+
 onMounted(async () => {
   if (hasQueryContext.value || !routeSessionId.value || !routeSlug.value) {
     return
@@ -49,9 +54,10 @@ onMounted(async () => {
   resolving.value = true
   try {
     const currentUser = await requireAuth()
-    if (!currentUser) return
+    if (!currentUser || unmounted) return
 
     const data = await fetchSessionDetail(routeSlug.value, routeSessionId.value)
+    if (unmounted) return
     await router.replace(
       buildManagedSessionDashboardPath({
         sessionId: data.workspace_session.session_id,
@@ -60,13 +66,14 @@ onMounted(async () => {
       })
     )
   } catch {
+    if (unmounted) return
     await router.replace(
       buildManagedSessionDashboardPath({
         sessionId: routeSessionId.value,
       })
     )
   } finally {
-    resolving.value = false
+    if (!unmounted) resolving.value = false
   }
 })
 </script>

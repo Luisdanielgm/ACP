@@ -109,6 +109,15 @@
       </div>
     </section>
 
+    <!-- Initial loading skeleton -->
+    <section v-if="session.loading.value && !session.payload.value" class="panel">
+      <div class="panel-body">
+        <div class="empty-state">
+          <span>{{ t('sd_session_waiting_load') }}</span>
+        </div>
+      </div>
+    </section>
+
     <!-- Content (only when session loaded) -->
     <template v-if="session.payload.value">
       <!-- Layout: Summary + Health -->
@@ -379,7 +388,7 @@
             </div>
           </div>
           <div class="panel-body">
-            <div :class="['timeline', session.timelineDensity.value === 'compact' ? 'compact' : '']">
+            <div ref="timelineEl" :class="['timeline', session.timelineDensity.value === 'compact' ? 'compact' : '']" @scroll="handleTimelineScroll">
               <div v-if="!session.filteredHistory.value.length" class="empty-state">
                 <span>{{ session.timelineFilter.value === 'all' ? t('sd_no_session_events') : t('sd_no_filtered_events') }}</span>
               </div>
@@ -440,7 +449,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watchEffect } from 'vue'
+import { ref, computed, watch, watchEffect, nextTick } from 'vue'
 import { useI18n, useTheme, useMotion, ThemeToggle, LangToggle, MotionToggle } from '@acp/shared'
 import { messages } from '../i18n'
 import { useSessionDashboard } from '../composables/useSessionDashboard'
@@ -739,7 +748,7 @@ const pulseChips = computed(() => {
     if (!count) return
     chips.push({
       key: `action-${action}`,
-      label: `${t('sd_action_' + action.toLowerCase())} ${count}`,
+      label: `${t('sd_action_' + action)} ${count}`,
       className: actionChipClass(action),
     })
   })
@@ -947,6 +956,29 @@ function resetVisuals() {
   setMotion('auto')
   applyMotion(session.trafficSnapshot.value.level)
 }
+
+// ── Timeline auto-scroll ──
+
+const timelineEl = ref<HTMLElement | null>(null)
+const timelineStickToBottom = ref(true)
+const SCROLL_BOTTOM_THRESHOLD = 40
+
+function handleTimelineScroll() {
+  const el = timelineEl.value
+  if (!el) return
+  timelineStickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight <= SCROLL_BOTTOM_THRESHOLD
+}
+
+watch(() => session.filteredHistory.value.length, () => {
+  if (!timelineStickToBottom.value) return
+  nextTick(() => {
+    const el = timelineEl.value
+    if (!el) return
+    const effectiveMotion = resolveEffectiveMode(session.trafficSnapshot.value.level)
+    const behavior = effectiveMotion === 'reduced' || effectiveMotion === 'off' ? 'auto' : 'smooth'
+    el.scrollTo({ top: el.scrollHeight, behavior })
+  })
+})
 
 // ── Page title ──
 watchEffect(() => {

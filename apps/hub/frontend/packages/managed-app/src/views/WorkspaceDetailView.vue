@@ -272,7 +272,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import ManagedNav from '../components/ManagedNav.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -523,6 +523,11 @@ async function handleCreateSession() {
 onMounted(async () => {
   const currentUser = await requireAuth()
   if (!currentUser) return
+  await loadData()
+  await showFlashBannerIfNeeded()
+})
+
+watch(slug, async () => {
   await loadData()
   await showFlashBannerIfNeeded()
 })
@@ -826,7 +831,8 @@ onMounted(async () => {
   color: var(--text-2);
   font-weight: 500;
 }
-.workspace-form input {
+.workspace-form input,
+.workspace-form textarea {
   padding: 11px 14px;
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
@@ -835,7 +841,11 @@ onMounted(async () => {
   font-size: 0.9rem;
   transition: all var(--transition-fast);
 }
-.workspace-form input:focus {
+.workspace-form textarea {
+  resize: vertical;
+}
+.workspace-form input:focus,
+.workspace-form textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-subtle);
   outline: none;
@@ -1194,7 +1204,8 @@ onMounted(async () => {
 .copy-btn:focus-visible,
 .page-banner-dismiss:focus-visible,
 .shortcut-button:focus-visible,
-.workspace-form input:focus-visible {
+.workspace-form input:focus-visible,
+.workspace-form textarea:focus-visible {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-subtle);

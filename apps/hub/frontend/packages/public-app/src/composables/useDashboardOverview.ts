@@ -20,6 +20,7 @@ export function useDashboardOverview(authEndpoint = '/dashboard/auth/session') {
 
   let pollHandle: ReturnType<typeof setInterval> | null = null
   let inFlight = false
+  let loadRequestId = 0
 
   const connectedSet = computed(() => new Set(payload.value?.connected_agents ?? []))
 
@@ -64,10 +65,14 @@ export function useDashboardOverview(authEndpoint = '/dashboard/auth/session') {
       authenticated.value = session.authenticated
       tokenRequired.value = session.token_required
       return session
-    } catch {
-      tokenRequired.value = false
-      authenticated.value = false
-      return { authenticated: false, token_required: false }
+    } catch (e: any) {
+      if (e?.status === 401) {
+        tokenRequired.value = false
+        authenticated.value = false
+      } else {
+        setStatus(e?.message || 'auth check failed', true)
+      }
+      return { authenticated: authenticated.value, token_required: tokenRequired.value }
     }
   }
 
@@ -104,11 +109,14 @@ export function useDashboardOverview(authEndpoint = '/dashboard/auth/session') {
     }
     inFlight = true
     locked.value = false
+    const requestId = ++loadRequestId
     try {
       const data = await fetchOverview()
+      if (requestId !== loadRequestId) return
       payload.value = data
       traceEvents.value = data.traces || []
     } catch (e: any) {
+      if (requestId !== loadRequestId) return
       setStatus(e.message || 'request failed', true)
     } finally {
       inFlight = false
@@ -138,7 +146,19 @@ export function useDashboardOverview(authEndpoint = '/dashboard/auth/session') {
     issueMode.value = false
   }
 
+  function handleVisibilityChange() {
+    if (document.hidden) {
+      stopPolling()
+    } else if (!locked.value) {
+      startPolling()
+      loadOverview()
+    }
+  }
+
   onMounted(async () => {
+    // Register unconditionally so tab pause/resume works after in-app login;
+    // the handler itself is a no-op while locked.
+    document.addEventListener('visibilitychange', handleVisibilityChange)
     const session = await checkAuth()
     if (tokenRequired.value && !session.authenticated) {
       locked.value = true
@@ -151,6 +171,7 @@ export function useDashboardOverview(authEndpoint = '/dashboard/auth/session') {
 
   onUnmounted(() => {
     stopPolling()
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
   })
 
   return {

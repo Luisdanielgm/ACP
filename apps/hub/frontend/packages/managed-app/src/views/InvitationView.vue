@@ -62,12 +62,12 @@ onMounted(async () => {
     const preview = await fetchInvitationPreview(token.value)
     requiresPassword.value = preview.requires_password
     workspaceName.value = preview.workspace?.name ?? ''
-  } catch (e: any) {
-    // Preview failure is non-fatal: keep the password field visible and let
-    // the accept call surface the real error (404/410/etc.) on submit.
-    error.value = e?.message ?? t('invitation_error')
-  } finally {
     previewReady.value = true
+  } catch (e: any) {
+    // Preview failure means the token could be invalid/expired: keep the
+    // submit button disabled and surface the error instead of letting the
+    // user submit against a known-bad token.
+    error.value = e?.message ?? t('invitation_error')
   }
 })
 

@@ -215,7 +215,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import ManagedNav from '../components/ManagedNav.vue'
 import SkeletonBlock from '../components/SkeletonBlock.vue'
@@ -453,6 +453,17 @@ onMounted(async () => {
     loading.value = false
   }
 })
+
+watch([slug, sessionId], async () => {
+  loading.value = true
+  try {
+    await loadDetail()
+  } catch (err) {
+    toast.show(getApiErrorMessage(err), 'error')
+  } finally {
+    loading.value = false
+  }
+})
 </script>
 
 <style scoped>
@@ -529,9 +540,43 @@ onMounted(async () => {
 textarea,
 select {
   width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--surface-0);
+  color: var(--text-1);
+  font-size: 0.9rem;
+  transition: all var(--transition-fast);
 }
 textarea {
   resize: vertical;
+}
+textarea:focus,
+select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+  outline: none;
+}
+input[type='file'] {
+  color: var(--text-2);
+  font-size: 0.86rem;
+}
+input[type='file']::file-selector-button {
+  padding: 9px 15px;
+  margin-right: 12px;
+  background: var(--glass-bg);
+  color: var(--text-1);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  font-size: 0.84rem;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all var(--transition-fast);
+}
+input[type='file']::file-selector-button:hover {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--accent);
 }
 .operator-form label,
 .file-form label {

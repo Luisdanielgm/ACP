@@ -15,6 +15,12 @@
       <div class="sub" :class="{ show: showSub }">{{ t('db_hero_sub') }}</div>
     </section>
 
+    <!-- Notice -->
+    <section v-if="noticeText" class="notice-banner">
+      <span>{{ noticeText }}</span>
+      <button type="button" class="ghost compact-action" @click="dismissNotice">{{ t('db_notice_dismiss') }}</button>
+    </section>
+
     <!-- Layout -->
     <main class="layout" :class="{ locked: dashboard.locked.value }">
       <!-- Access panel -->
@@ -258,7 +264,7 @@
             <span>{{ t('db_no_traces') }}</span>
           </div>
           <div v-else class="trace-log">
-            <div v-for="(event, i) in visibleTraces" :key="i" class="trace-row">
+            <div v-for="{ event, key } in visibleTraces" :key="key" class="trace-row">
               <div class="trace-head">
                 <div style="display:flex;gap:8px;align-items:center">
                   <span class="trace-summary">{{ event.event || event.type || t('db_trace_fallback') }}</span>
@@ -266,10 +272,10 @@
                 </div>
                 <div style="display:flex;gap:8px;align-items:center">
                   <span class="muted" style="font-size:11px">{{ timeAgo(event.ts, locale) }}</span>
-                  <button class="trace-toggle" @click="toggleTrace(i)">▸ JSON</button>
+                  <button class="trace-toggle" @click="toggleTrace(key)">▸ JSON</button>
                 </div>
               </div>
-              <pre v-if="expandedTraces.has(i)" class="trace-json">{{ JSON.stringify(event, null, 2) }}</pre>
+              <pre v-if="expandedTraces.has(key)" class="trace-json">{{ JSON.stringify(event, null, 2) }}</pre>
             </div>
           </div>
         </div>
@@ -279,7 +285,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watchEffect } from 'vue'
+import { ref, computed, watch, watchEffect } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n, useTheme, ThemeToggle, LangToggle } from '@acp/shared'
 import { messages } from '../i18n'
 import { useDashboardOverview } from '../composables/useDashboardOverview'
@@ -288,19 +295,37 @@ import {
   heartbeatState, heartbeatAgeSeconds, collectTaskLane,
   type TaskLaneItem,
 } from '../composables/dashboardHelpers'
-import type { MemberData, SessionData, TraceEvent } from '../api/overview'
+import type { MemberData, SessionData } from '../api/overview'
 
 const { locale, t } = useI18n(messages)
 useTheme()
+
+const route = useRoute()
+const router = useRouter()
 
 const dashboard = useDashboardOverview()
 
 const showSub = ref(false)
 const tokenInput = ref('')
 const accessCompact = ref(false)
-const expandedTraces = ref(new Set<number>())
+const expandedTraces = ref(new Set<string>())
+const noticeText = ref('')
 
 const MAX_TRACES = 200
+
+const NOTICE_KEYS: Record<string, string> = {
+  session_unavailable: 'db_notice_session_unavailable',
+}
+
+if (typeof route.query.notice === 'string' && NOTICE_KEYS[route.query.notice]) {
+  noticeText.value = t(NOTICE_KEYS[route.query.notice])
+  const { notice, ...rest } = route.query
+  router.replace({ query: rest })
+}
+
+function dismissNotice() {
+  noticeText.value = ''
+}
 
 const overview = computed(() => dashboard.payload.value?.overview)
 const hubFlags = computed(() => dashboard.payload.value?.hub)
@@ -445,9 +470,17 @@ const taskLedgerItems = computed(() => {
   return items
 })
 
-const visibleTraces = computed(() =>
-  dashboard.traceEvents.value.slice(-MAX_TRACES).reverse()
-)
+const visibleTraces = computed(() => {
+  // Content-based keys with a duplicate counter: stable across reorders,
+  // unique even when two events share ts/event/from/to.
+  const seen = new Map<string, number>()
+  return dashboard.traceEvents.value.slice(-MAX_TRACES).reverse().map(event => {
+    const base = `${event.ts || ''}|${event.event || event.type || ''}|${event.from || ''}|${event.to || ''}`
+    const count = seen.get(base) ?? 0
+    seen.set(base, count + 1)
+    return { event, key: count ? `${base}#${count}` : base }
+  })
+})
 
 function translateStatus(value: string | undefined): string {
   const s = String(value || '').toLowerCase()
@@ -495,10 +528,10 @@ function esc(value: string): string {
     .replace(/"/g, '&quot;')
 }
 
-function toggleTrace(index: number) {
+function toggleTrace(key: string) {
   const s = new Set(expandedTraces.value)
-  if (s.has(index)) s.delete(index)
-  else s.add(index)
+  if (s.has(key)) s.delete(key)
+  else s.add(key)
   expandedTraces.value = s
 }
 
@@ -526,9 +559,10 @@ watchEffect(() => {
   document.title = t('db_page_title')
 })
 
-watchEffect(() => {
-  if (!dashboard.locked.value && overview.value) {
+const stopInitialLoadWatch = watch(overview, (value) => {
+  if (!dashboard.locked.value && value) {
     accessCompact.value = dashboard.authenticated.value || !dashboard.tokenRequired.value
+    stopInitialLoadWatch()
   }
 })
 </script>
@@ -556,6 +590,7 @@ watchEffect(() => {
 .info-toggle { background:none; border:1px solid var(--line); color:var(--muted); width:32px; height:32px; border-radius:50%; font-size:14px; padding:0; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; transition:all 0.2s ease; flex-shrink:0; }
 .info-toggle:hover { color:var(--ink); border-color:var(--accent); background:var(--accent-glow); transform:rotate(90deg); }
 .hero-controls { display:inline-flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.notice-banner { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:20px; padding:12px 18px; border-radius:14px; border:1px solid rgba(251,191,36,0.24); background:rgba(251,191,36,0.08); color:var(--ink); font-size:13px; }
 .layout { display:grid; gap:24px; grid-template-columns:380px 1fr; }
 .layout.locked { grid-template-columns:1fr; }
 .panel-head { padding:14px 20px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; }

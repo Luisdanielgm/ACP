@@ -1,4 +1,4 @@
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { fetchAuthSession } from '../api/auth'
 import { fetchSessionDetail, closeSession, disconnectMember, type SessionDetailPayload, type SessionMember, type SessionEvent } from '../api/sessions'
@@ -57,6 +57,7 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
 
   let pollHandle: ReturnType<typeof setInterval> | null = null
   let inFlight = false
+  let loadRequestId = 0
 
   // ── Computed ──
 
@@ -225,9 +226,13 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
       const session = await fetchAuthSession(authEndpoint)
       dashboardAuthenticated.value = session.authenticated
       dashboardTokenRequired.value = session.token_required
-    } catch {
-      dashboardAuthenticated.value = false
-      dashboardTokenRequired.value = false
+    } catch (e: any) {
+      if (e?.status === 401) {
+        dashboardAuthenticated.value = false
+        dashboardTokenRequired.value = false
+      } else {
+        setStatus(e?.message || 'auth check failed', true)
+      }
     }
   }
 
@@ -252,6 +257,7 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
 
     if (showLoading) loading.value = true
     inFlight = true
+    const requestId = ++loadRequestId
 
     try {
       const data = await fetchSessionDetail({
@@ -260,14 +266,16 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
         memberToken: memberToken || undefined,
         adminToken: adminToken || undefined,
       })
+      if (requestId !== loadRequestId) return false
       payload.value = data
       persistAccess()
       isFirstRender.value = false
       setStatus('')
       return true
     } catch (e: any) {
+      if (requestId !== loadRequestId) return false
       if (e.status === 403 || e.status === 404) {
-        router.push(redirectPath)
+        router.push({ path: redirectPath, query: { notice: 'session_unavailable' } })
         return false
       }
       setStatus(e.message || 'request failed', true)
@@ -330,8 +338,7 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
 
   // ── Lifecycle ──
 
-  onMounted(async () => {
-    await checkAuth()
+  async function loadFromQueryOrStorage() {
     const hasQueryContext = Boolean(
       route.query.session_id ||
       route.query.agent_name ||
@@ -352,10 +359,33 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
         startPolling()
       }
     }
+  }
+
+  function handleVisibilityChange() {
+    if (document.hidden) {
+      stopPolling()
+    } else if (sessionIdInput.value.trim()) {
+      startPolling()
+      loadSession()
+    }
+  }
+
+  onMounted(async () => {
+    await checkAuth()
+    await loadFromQueryOrStorage()
+    document.addEventListener('visibilitychange', handleVisibilityChange)
   })
+
+  watch(
+    () => [route.query.session_id, route.query.agent_name, route.query.member_token, route.query.token],
+    () => {
+      loadFromQueryOrStorage()
+    },
+  )
 
   onUnmounted(() => {
     stopPolling()
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
   })
 
   return {
