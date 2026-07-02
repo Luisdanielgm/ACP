@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Iterator, Protocol
 from uuid import uuid4
 
 from acp.hub.coordination_state import CoordinationSession, SessionMember
-from acp.hub.idempotency import record_if_new
+from acp.hub.idempotency import prune_older_than, record_if_new
 from acp.hub.sqlite_support import connect
 
 
@@ -57,6 +59,29 @@ def _encode_capabilities(value: tuple[str, ...] | list[str] | None) -> str:
     return json.dumps(items, sort_keys=True, separators=(",", ":"))
 
 
+def _member_from_row(row: sqlite3.Row) -> SessionMember:
+    return SessionMember(
+        agent_name=str(row["agent_name"]),
+        role=str(row["role"]),
+        member_token=str(row["member_token"]),
+        capabilities=_decode_capabilities(row["capabilities_json"]),
+        delivery_mode=str(row["delivery_mode"]) if row["delivery_mode"] is not None else "attached",
+        provider=str(row["provider"]) if row["provider"] is not None else None,
+        workspace_path=str(row["workspace_path"]) if row["workspace_path"] is not None else None,
+        status=str(row["status"]),
+        status_text=str(row["status_text"]) if row["status_text"] is not None else None,
+        joined_at=str(row["joined_at"]),
+        last_seen_at=str(row["last_seen_at"]),
+        last_message_at=str(row["last_message_at"]) if row["last_message_at"] is not None else None,
+        last_action=str(row["last_action"]) if row["last_action"] is not None else None,
+        current_task=str(row["current_task"]) if row["current_task"] is not None else None,
+        current_task_from=str(row["current_task_from"]) if row["current_task_from"] is not None else None,
+        current_task_at=str(row["current_task_at"]) if row["current_task_at"] is not None else None,
+        current_run=_decode_optional_json_object(row["current_run_json"]),
+        last_run=_decode_optional_json_object(row["last_run_json"]),
+    )
+
+
 class CoordinationStore(Protocol):
     def create_session(self, session: CoordinationSession) -> None: ...
 
@@ -92,6 +117,8 @@ class CoordinationStore(Protocol):
 
     def pending_counts_for_session(self, session_id: str) -> dict[str, int]: ...
 
+    def pending_counts_for_sessions(self, session_ids: list[str]) -> dict[str, dict[str, int]]: ...
+
     def clear_pending(self, *, session_id: str, agent_name: str) -> None: ...
 
     def record_delivery_if_new(
@@ -107,6 +134,10 @@ class CoordinationStore(Protocol):
 
     def get_session_events(self, session_id: str, *, limit: int) -> list[dict[str, Any]]: ...
 
+    def count_session_events(self, session_id: str) -> int: ...
+
+    def last_session_event_ts(self, session_id: str) -> str | None: ...
+
     def put_notice(
         self,
         *,
@@ -119,6 +150,8 @@ class CoordinationStore(Protocol):
     def get_notice(self, *, session_id: str, agent_name: str, member_token: str) -> dict[str, Any] | None: ...
 
     def cleanup_stale_sessions(self, *, stale_after_seconds: int) -> list[str]: ...
+
+    def prune_idempotency_older_than(self, cutoff: str) -> int: ...
 
 
 @dataclass
@@ -224,6 +257,14 @@ class InMemoryCoordinationStore:
                 counts[agent_name] = len(queue)
         return counts
 
+    def pending_counts_for_sessions(self, session_ids: list[str]) -> dict[str, dict[str, int]]:
+        wanted = set(session_ids)
+        counts: dict[str, dict[str, int]] = {}
+        for (queued_session_id, agent_name), queue in self._pending_messages.items():
+            if queued_session_id in wanted:
+                counts.setdefault(queued_session_id, {})[agent_name] = len(queue)
+        return counts
+
     def clear_pending(self, *, session_id: str, agent_name: str) -> None:
         self._pending_messages.pop((session_id, agent_name), None)
 
@@ -249,6 +290,15 @@ class InMemoryCoordinationStore:
         if limit <= 0:
             return []
         return [dict(item) for item in events[-limit:]]
+
+    def count_session_events(self, session_id: str) -> int:
+        return len(self._session_events.get(session_id, ()))
+
+    def last_session_event_ts(self, session_id: str) -> str | None:
+        events = self._session_events.get(session_id)
+        if not events:
+            return None
+        return events[-1].get("ts")
 
     def put_notice(
         self,
@@ -285,6 +335,12 @@ class InMemoryCoordinationStore:
                 self.delete_session(session_id)
                 removed.append(session_id)
         return removed
+
+    def prune_idempotency_older_than(self, cutoff: str) -> int:
+        # _delivered tracks only (session_id, recipient, message_id) tuples with
+        # no processed_at timestamp, so time-based pruning is not meaningful
+        # here. No-op kept for interface parity with SqliteCoordinationStore.
+        return 0
 
     def _clone_session(self, session: CoordinationSession | None) -> CoordinationSession | None:
         if session is None:
@@ -329,13 +385,49 @@ class SqliteCoordinationStore:
     def __post_init__(self) -> None:
         self._db_path = Path(self.sqlite_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        # A single persistent connection per store instance so the WAL +
+        # busy_timeout PRAGMAs run once (see sqlite_support.connect) instead of
+        # on every query. check_same_thread=False + _lock lets us serialize all
+        # access safely even if the instance is touched from more than one
+        # thread; in practice every caller runs on the asyncio event loop and
+        # SessionCoordinationService already wraps calls in an asyncio.Lock.
+        # RLock (not Lock) because a few methods (cleanup_stale_sessions) call
+        # other methods (delete_session) that re-enter the connection guard on
+        # the same thread; a plain Lock would self-deadlock there.
+        self._lock = threading.RLock()
+        self._conn: sqlite3.Connection | None = None
 
-    def _connect(self) -> sqlite3.Connection:
-        return connect(self._db_path, row_factory=True)
+    def _get_connection(self) -> sqlite3.Connection:
+        if self._conn is None:
+            self._conn = connect(
+                self._db_path, row_factory=True, check_same_thread=False
+            )
+        return self._conn
+
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        with self._lock:
+            yield self._get_connection()
+
+    def close(self) -> None:
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
+
+    def __del__(self) -> None:
+        # Best-effort cleanup so a store that is dropped without an explicit
+        # close() (e.g. per-test instances on tmp_path) does not leave the
+        # sqlite file handle open, which would block Windows temp cleanup.
+        conn = self._conn
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def create_session(self, session: CoordinationSession) -> None:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             conn.execute(
                 """
                 INSERT INTO coordination_sessions(
@@ -354,12 +446,9 @@ class SqliteCoordinationStore:
             for member in session.members.values():
                 self._upsert_member(conn, session.session_id, member)
             conn.commit()
-        finally:
-            conn.close()
 
     def get_session(self, session_id: str) -> CoordinationSession | None:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT session_id, join_code, created_by, created_at, title, project
@@ -372,12 +461,9 @@ class SqliteCoordinationStore:
             if row is None:
                 return None
             return self._row_to_session(conn, row)
-        finally:
-            conn.close()
 
     def get_session_by_join_code(self, join_code: str) -> CoordinationSession | None:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT session_id, join_code, created_by, created_at, title, project
@@ -390,12 +476,9 @@ class SqliteCoordinationStore:
             if row is None:
                 return None
             return self._row_to_session(conn, row)
-        finally:
-            conn.close()
 
     def list_sessions(self) -> list[CoordinationSession]:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             rows = conn.execute(
                 """
                 SELECT session_id, join_code, created_by, created_at, title, project
@@ -403,13 +486,23 @@ class SqliteCoordinationStore:
                 ORDER BY created_at ASC, session_id ASC
                 """
             ).fetchall()
-            return [self._row_to_session(conn, row) for row in rows]
-        finally:
-            conn.close()
+            session_ids = [str(row["session_id"]) for row in rows]
+            members_by_session = self._load_members_for_sessions(conn, session_ids)
+            return [
+                CoordinationSession(
+                    session_id=str(row["session_id"]),
+                    join_code=str(row["join_code"]),
+                    created_by=str(row["created_by"]),
+                    created_at=str(row["created_at"]),
+                    title=str(row["title"]) if row["title"] is not None else None,
+                    project=str(row["project"]) if row["project"] is not None else None,
+                    members=members_by_session.get(str(row["session_id"]), {}),
+                )
+                for row in rows
+            ]
 
     def is_agent_attached(self, agent_name: str) -> bool:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT 1
@@ -420,28 +513,19 @@ class SqliteCoordinationStore:
                 (agent_name,),
             ).fetchone()
             return row is not None
-        finally:
-            conn.close()
 
     def add_member(self, session_id: str, member: SessionMember) -> None:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             self._upsert_member(conn, session_id, member)
             conn.commit()
-        finally:
-            conn.close()
 
     def update_member(self, session_id: str, member: SessionMember) -> None:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             self._upsert_member(conn, session_id, member)
             conn.commit()
-        finally:
-            conn.close()
 
     def remove_member(self, session_id: str, agent_name: str) -> None:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             conn.execute(
                 "DELETE FROM coordination_pending_messages WHERE session_id = ? AND recipient_agent_name = ?",
                 (session_id, agent_name),
@@ -451,20 +535,15 @@ class SqliteCoordinationStore:
                 (session_id, agent_name),
             )
             conn.commit()
-        finally:
-            conn.close()
 
     def delete_session(self, session_id: str) -> None:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             conn.execute("DELETE FROM coordination_pending_messages WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM coordination_members WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM coordination_events WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM coordination_member_notices WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM coordination_sessions WHERE session_id = ?", (session_id,))
             conn.commit()
-        finally:
-            conn.close()
 
     def enqueue_message(
         self,
@@ -475,8 +554,7 @@ class SqliteCoordinationStore:
         sort_ts: str,
         message: dict[str, Any],
     ) -> None:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             conn.execute(
                 """
                 INSERT INTO coordination_pending_messages(
@@ -502,12 +580,9 @@ class SqliteCoordinationStore:
                 ),
             )
             conn.commit()
-        finally:
-            conn.close()
 
     def dequeue_next_message(self, *, session_id: str, recipient_agent_name: str) -> dict[str, Any] | None:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT queue_id, payload_json
@@ -527,12 +602,9 @@ class SqliteCoordinationStore:
             conn.commit()
             payload = json.loads(str(row["payload_json"]))
             return payload if isinstance(payload, dict) else None
-        finally:
-            conn.close()
 
     def pending_count(self, *, session_id: str, agent_name: str) -> int:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT COUNT(*)
@@ -542,12 +614,9 @@ class SqliteCoordinationStore:
                 (session_id, agent_name),
             ).fetchone()
             return int(row[0]) if row else 0
-        finally:
-            conn.close()
 
     def pending_counts_for_session(self, session_id: str) -> dict[str, int]:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             rows = conn.execute(
                 """
                 SELECT recipient_agent_name, COUNT(*)
@@ -558,19 +627,33 @@ class SqliteCoordinationStore:
                 (session_id,),
             ).fetchall()
             return {str(row[0]): int(row[1]) for row in rows}
-        finally:
-            conn.close()
+
+    def pending_counts_for_sessions(self, session_ids: list[str]) -> dict[str, dict[str, int]]:
+        if not session_ids:
+            return {}
+        with self._connection() as conn:
+            placeholders = ",".join("?" * len(session_ids))
+            rows = conn.execute(
+                f"""
+                SELECT session_id, recipient_agent_name, COUNT(*)
+                FROM coordination_pending_messages
+                WHERE session_id IN ({placeholders})
+                GROUP BY session_id, recipient_agent_name
+                """,
+                tuple(session_ids),
+            ).fetchall()
+            counts: dict[str, dict[str, int]] = {}
+            for row in rows:
+                counts.setdefault(str(row[0]), {})[str(row[1])] = int(row[2])
+            return counts
 
     def clear_pending(self, *, session_id: str, agent_name: str) -> None:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             conn.execute(
                 "DELETE FROM coordination_pending_messages WHERE session_id = ? AND recipient_agent_name = ?",
                 (session_id, agent_name),
             )
             conn.commit()
-        finally:
-            conn.close()
 
     def record_delivery_if_new(
         self,
@@ -580,8 +663,7 @@ class SqliteCoordinationStore:
         message_id: str,
         processed_at: str,
     ) -> bool:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             is_new = record_if_new(
                 conn,
                 session_id=session_id,
@@ -591,12 +673,9 @@ class SqliteCoordinationStore:
             )
             conn.commit()
             return is_new
-        finally:
-            conn.close()
 
     def append_event(self, session_id: str, event_payload: dict[str, Any]) -> None:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             conn.execute(
                 """
                 INSERT INTO coordination_events(event_id, session_id, created_at, event_type, payload_json)
@@ -611,14 +690,11 @@ class SqliteCoordinationStore:
                 ),
             )
             conn.commit()
-        finally:
-            conn.close()
 
     def get_session_events(self, session_id: str, *, limit: int) -> list[dict[str, Any]]:
         if limit <= 0:
             return []
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             rows = conn.execute(
                 """
                 SELECT payload_json
@@ -635,8 +711,30 @@ class SqliteCoordinationStore:
                 if isinstance(payload, dict):
                     payloads.append(payload)
             return payloads
-        finally:
-            conn.close()
+
+    def count_session_events(self, session_id: str) -> int:
+        with self._connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM coordination_events WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            return int(row[0]) if row else 0
+
+    def last_session_event_ts(self, session_id: str) -> str | None:
+        with self._connection() as conn:
+            # created_at is stored as the event payload's "ts" (see append_event),
+            # so we can read it directly without decoding payload_json.
+            row = conn.execute(
+                """
+                SELECT created_at
+                FROM coordination_events
+                WHERE session_id = ?
+                ORDER BY event_seq DESC
+                LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+            return str(row["created_at"]) if row is not None else None
 
     def put_notice(
         self,
@@ -646,8 +744,7 @@ class SqliteCoordinationStore:
         member_token: str,
         notice: dict[str, Any],
     ) -> None:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO coordination_member_notices(
@@ -667,12 +764,9 @@ class SqliteCoordinationStore:
                 ),
             )
             conn.commit()
-        finally:
-            conn.close()
 
     def get_notice(self, *, session_id: str, agent_name: str, member_token: str) -> dict[str, Any] | None:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT payload_json
@@ -686,8 +780,6 @@ class SqliteCoordinationStore:
                 return None
             payload = json.loads(str(row["payload_json"]))
             return payload if isinstance(payload, dict) else None
-        finally:
-            conn.close()
 
     def cleanup_stale_sessions(self, *, stale_after_seconds: int) -> list[str]:
         from datetime import datetime, timezone
@@ -695,8 +787,7 @@ class SqliteCoordinationStore:
 
         now = datetime.now(timezone.utc)
         removed: list[str] = []
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             rows = conn.execute(
                 "SELECT session_id FROM coordination_sessions"
             ).fetchall()
@@ -716,9 +807,13 @@ class SqliteCoordinationStore:
                 if all_stale:
                     self.delete_session(session_id)
                     removed.append(session_id)
-        finally:
-            conn.close()
         return removed
+
+    def prune_idempotency_older_than(self, cutoff: str) -> int:
+        with self._connection() as conn:
+            deleted = prune_older_than(conn, cutoff=cutoff)
+            conn.commit()
+            return deleted
 
     def _row_to_session(self, conn: sqlite3.Connection, row: sqlite3.Row) -> CoordinationSession:
         return CoordinationSession(
@@ -761,30 +856,49 @@ class SqliteCoordinationStore:
         ).fetchall()
         members: dict[str, SessionMember] = {}
         for row in rows:
-            member = SessionMember(
-                agent_name=str(row["agent_name"]),
-                role=str(row["role"]),
-                member_token=str(row["member_token"]),
-                capabilities=_decode_capabilities(row["capabilities_json"]),
-                delivery_mode=str(row["delivery_mode"]) if row["delivery_mode"] is not None else "attached",
-                provider=str(row["provider"]) if row["provider"] is not None else None,
-                workspace_path=str(row["workspace_path"]) if row["workspace_path"] is not None else None,
-                status=str(row["status"]),
-                status_text=str(row["status_text"]) if row["status_text"] is not None else None,
-                joined_at=str(row["joined_at"]),
-                last_seen_at=str(row["last_seen_at"]),
-                last_message_at=str(row["last_message_at"]) if row["last_message_at"] is not None else None,
-                last_action=str(row["last_action"]) if row["last_action"] is not None else None,
-                current_task=str(row["current_task"]) if row["current_task"] is not None else None,
-                current_task_from=(
-                    str(row["current_task_from"]) if row["current_task_from"] is not None else None
-                ),
-                current_task_at=str(row["current_task_at"]) if row["current_task_at"] is not None else None,
-                current_run=_decode_optional_json_object(row["current_run_json"]),
-                last_run=_decode_optional_json_object(row["last_run_json"]),
-            )
+            member = _member_from_row(row)
             members[member.agent_name] = member
         return members
+
+    def _load_members_for_sessions(
+        self, conn: sqlite3.Connection, session_ids: list[str]
+    ) -> dict[str, dict[str, SessionMember]]:
+        members_by_session: dict[str, dict[str, SessionMember]] = {}
+        if not session_ids:
+            return members_by_session
+        placeholders = ",".join("?" * len(session_ids))
+        rows = conn.execute(
+            f"""
+            SELECT
+                session_id,
+                agent_name,
+                role,
+                member_token,
+                delivery_mode,
+                provider,
+                workspace_path,
+                status,
+                status_text,
+                joined_at,
+                last_seen_at,
+                last_message_at,
+                last_action,
+                current_task,
+                current_task_from,
+                current_task_at,
+                capabilities_json,
+                current_run_json,
+                last_run_json
+            FROM coordination_members
+            WHERE session_id IN ({placeholders})
+            ORDER BY session_id ASC, agent_name ASC
+            """,
+            tuple(session_ids),
+        ).fetchall()
+        for row in rows:
+            member = _member_from_row(row)
+            members_by_session.setdefault(str(row["session_id"]), {})[member.agent_name] = member
+        return members_by_session
 
     def _upsert_member(self, conn: sqlite3.Connection, session_id: str, member: SessionMember) -> None:
         conn.execute(

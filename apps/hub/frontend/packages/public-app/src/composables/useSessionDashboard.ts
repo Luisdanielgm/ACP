@@ -14,7 +14,6 @@ export type TimelineFilter = 'all' | 'session' | 'message' | 'wait' | 'status'
 export type TimelineDensity = 'detailed' | 'compact'
 
 const STORAGE_KEY = 'acp_session_dashboard_access'
-const HINT_KEY = 'acp_session_dashboard_hint'
 
 export interface UseSessionDashboardOptions {
   authEndpoint?: string
@@ -131,10 +130,6 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
         access_mode: accessMode.value,
       }
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data))
-      localStorage.setItem(HINT_KEY, JSON.stringify({
-        session_id: sessionIdInput.value,
-        agent_name: agentNameInput.value,
-      }))
     } catch { /* ignore */ }
   }
 

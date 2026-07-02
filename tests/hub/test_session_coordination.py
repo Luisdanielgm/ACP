@@ -528,6 +528,35 @@ def test_session_detail_exposes_history_pending_and_current_task(api_client: Any
     assert any(event["event"] == "MESSAGE_SENT" for event in body["session"]["history"])
 
 
+def test_session_detail_authorizes_member_via_header(api_client: Any) -> None:
+    # The dashboard polls this endpoint every ~2s; the frontend now sends the
+    # member token as X-ACP-Member-Token so the secret stays out of access logs.
+    chief = _create_session(api_client, "chief")
+    worker = _join_session(api_client, "worker", chief["join_code"])
+
+    detail = api_client.get(
+        f"/sessions/{chief['session_id']}/detail",
+        params={"agent_name": "worker"},
+        headers={"X-ACP-Member-Token": worker["member_token"]},
+    )
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["status"] == "ok"
+    assert body["session"]["session_id"] == chief["session_id"]
+
+
+def test_session_detail_rejects_bad_member_token_header(api_client: Any) -> None:
+    chief = _create_session(api_client, "chief")
+    _join_session(api_client, "worker", chief["join_code"])
+
+    detail = api_client.get(
+        f"/sessions/{chief['session_id']}/detail",
+        params={"agent_name": "worker"},
+        headers={"X-ACP-Member-Token": "not-the-real-token"},
+    )
+    assert detail.status_code in (401, 403)
+
+
 def test_reply_clears_worker_current_task(api_client: Any) -> None:
     chief = _create_session(api_client, "chief")
     worker = _join_session(api_client, "worker", chief["join_code"])

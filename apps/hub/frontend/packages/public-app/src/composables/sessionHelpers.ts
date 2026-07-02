@@ -219,11 +219,14 @@ function emptyActionDeliveryCounts(): ActionDeliveryCounts {
   return { TASK: emptyDeliveryCounts(), INFO: emptyDeliveryCounts(), REPLY: emptyDeliveryCounts() }
 }
 
+const RECENT_HISTORY_SCAN_LIMIT = 200
+
 export function recentMemberActivity(payload: SessionDetailPayload, windowSeconds = 18): Map<string, MemberActivityData> {
   const map = new Map<string, MemberActivityData>()
   const now = Date.now()
+  const history = (payload.history || []).slice(-RECENT_HISTORY_SCAN_LIMIT)
 
-  for (const event of payload.history || []) {
+  for (const event of history) {
     const ev = String(event.event || '').toUpperCase()
     if (ev !== 'MESSAGE_SENT' && ev !== 'MESSAGE_DELIVERED') continue
     const ts = Date.parse(String(event.ts || ''))
@@ -311,7 +314,7 @@ export function mapRoutePath(
 
 export function mapAnimationEvents(payload: SessionDetailPayload, windowMs = 6000): SessionEvent[] {
   const now = Date.now()
-  return (payload.history || []).filter(e => {
+  return (payload.history || []).slice(-RECENT_HISTORY_SCAN_LIMIT).filter(e => {
     const ev = String(e.event || '').toUpperCase()
     if (ev !== 'MESSAGE_SENT' && ev !== 'MESSAGE_DELIVERED') return false
     const ts = Date.parse(String(e.ts || ''))
@@ -453,7 +456,7 @@ export type TrafficLevel = 'low' | 'medium' | 'high' | 'critical'
 
 export function recentTrafficSnapshot(payload: SessionDetailPayload, windowMs = 20000): { count: number; level: TrafficLevel } {
   const now = Date.now()
-  const count = (payload.history || []).filter(e => {
+  const count = (payload.history || []).slice(-RECENT_HISTORY_SCAN_LIMIT).filter(e => {
     const ts = Date.parse(String(e.ts || ''))
     return !Number.isNaN(ts) && (now - ts) <= windowMs
   }).length

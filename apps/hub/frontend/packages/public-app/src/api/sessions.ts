@@ -82,14 +82,18 @@ export interface FetchSessionParams {
 }
 
 export async function fetchSessionDetail(params: FetchSessionParams): Promise<SessionDetailPayload> {
+  // Secrets go in headers, never the query string: this endpoint is polled
+  // every ~2s and query params leak into server/proxy/CDN access logs.
   const qs = new URLSearchParams({ session_id: params.sessionId })
+  const headers: Record<string, string> = {}
   if (params.agentName && params.memberToken) {
     qs.set('agent_name', params.agentName)
-    qs.set('member_token', params.memberToken)
+    headers['X-ACP-Member-Token'] = params.memberToken
   }
-  if (params.adminToken) qs.set('token', params.adminToken)
+  if (params.adminToken) headers['X-ACP-Token'] = params.adminToken
   const data = await apiFetch<SessionDetailResponse>(
-    `/sessions/${encodeURIComponent(params.sessionId)}/detail?${qs.toString()}`
+    `/sessions/${encodeURIComponent(params.sessionId)}/detail?${qs.toString()}`,
+    { headers }
   )
   return data.session
 }

@@ -41,3 +41,17 @@ def record_if_new(
         (session_id, recipient, message_id, processed_at),
     )
     return cursor.rowcount > 0
+
+
+def prune_older_than(conn: sqlite3.Connection, *, cutoff: str) -> int:
+    """Delete ledger rows older than cutoff (RFC3339 UTC string).
+
+    processed_at is stored as an RFC3339 string, so a lexicographic comparison
+    against another RFC3339 UTC string is valid. Returns the number of rows
+    deleted.
+    """
+    cursor = conn.execute(
+        f"DELETE FROM {IDEMPOTENCY_TABLE} WHERE processed_at < ?",
+        (cutoff,),
+    )
+    return cursor.rowcount if cursor.rowcount is not None else 0

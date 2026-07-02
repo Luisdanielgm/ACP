@@ -17,8 +17,9 @@ def connect(
     row_factory: bool = False,
     foreign_keys: bool = False,
     timeout: float = 30,
+    check_same_thread: bool = True,
 ) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path, timeout=timeout)
+    conn = sqlite3.connect(db_path, timeout=timeout, check_same_thread=check_same_thread)
     if row_factory:
         conn.row_factory = sqlite3.Row
     if foreign_keys:

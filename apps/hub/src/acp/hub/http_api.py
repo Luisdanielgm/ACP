@@ -26,6 +26,7 @@ from acp.hub.journal import (
     append_rejected,
     append_routed,
 )
+from acp.hub.rate_limit import client_ip_from_request
 from acp.hub.routing_service import (
     ROUTE_STATUS_DELIVERY_FAILED,
     ROUTE_STATUS_DESTINATION_NOT_FOUND,
@@ -588,7 +589,7 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
                 "status": "ok",
                 "hub": runtime.as_status_payload(),
                 "connected_agents": runtime.registry.snapshot_agents(),
-                "traces": list(runtime.trace_sink[-120:]),
+                "traces": list(runtime.trace_sink)[-120:],
                 "overview": overview,
             },
         )
@@ -649,6 +650,25 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
         authorization: str | None = Header(default=None),
         x_acp_token: str | None = Header(default=None, alias="X-ACP-Token"),
     ) -> JSONResponse:
+        join_rate_limiter = getattr(runtime, "join_rate_limiter", None)
+        client_ip = (
+            client_ip_from_request(
+                request,
+                trust_forwarded_for=getattr(runtime, "trust_proxy_headers", False),
+            )
+            if join_rate_limiter is not None
+            else None
+        )
+        if join_rate_limiter is not None:
+            decision = join_rate_limiter.check(client_ip)
+            if not decision.allowed:
+                reason = build_error(INVALID_FIELD, field="join_code", message="too many join attempts; please retry later.")
+                return JSONResponse(
+                    status_code=429,
+                    content=_safe_error_payload(reason),
+                    headers={"Retry-After": str(decision.retry_after)},
+                )
+
         parsed = await _load_json_object(request)
         if parsed is None:
             reason = build_error(INVALID_FIELD, field="body", message="body must be a JSON object.")
@@ -691,6 +711,8 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
                 workspace_path=workspace_path,
             )
         except SessionAccessError as exc:
+            if join_rate_limiter is not None:
+                join_rate_limiter.register_failure(client_ip)
             reason = build_error(INVALID_FIELD, field="join_code", message=str(exc))
             return JSONResponse(status_code=409, content=_safe_error_payload(reason))
 
@@ -744,6 +766,9 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
                 session_id=session_id,
                 acp_managed_session=acp_managed_session,
             )
+        # Accept the member token from either the query param or the header so
+        # callers can keep the secret out of access logs (see fetchSessionDetail).
+        effective_member_token = member_token or x_acp_member_token
         requested_admin_access = any(
             isinstance(value, str) and value.strip()
             for value in (authorization, x_acp_token, token)
@@ -757,12 +782,11 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
             )
             if auth_error is None:
                 admin_authorized = True
-            elif agent_name is None or member_token is None:
+            elif agent_name is None or effective_member_token is None:
                 return JSONResponse(status_code=_error_status_code(auth_error), content=_safe_error_payload(auth_error))
 
         normalized_agent: str | None = None
         normalized_member_token: str | None = None
-        effective_member_token = member_token or x_acp_member_token
         if not admin_authorized and (agent_name is not None or effective_member_token is not None):
             try:
                 if agent_name is None or effective_member_token is None:

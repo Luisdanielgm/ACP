@@ -1,5 +1,7 @@
 export const en: Record<string, string> = {
   // Landing
+  skip_to_content: 'Skip to main content',
+  brand_name: 'ACP Hub',
   nav_platform: 'Value',
   nav_download: 'Download',
   nav_dashboard: 'Dashboard',

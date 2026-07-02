@@ -1,7 +1,7 @@
 <template>
   <div class="wrap">
     <header class="nav">
-      <div class="brand"><span class="mark"></span><span>ACP Hub</span></div>
+      <div class="brand"><span class="mark"></span><span>{{ t('brand_name') }}</span></div>
       <div class="controls">
         <LangToggle :messages="messages" />
         <ThemeToggle :messages="messages" />
@@ -154,7 +154,7 @@
 
     <footer class="footer">
       <div>
-        <h3>ACP Hub</h3>
+        <h3>{{ t('brand_name') }}</h3>
         <p>{{ t('dl_footer_body') }}</p>
       </div>
       <div class="links">
@@ -166,7 +166,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watchEffect } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watchEffect } from 'vue'
 import { useI18n, useTheme, ThemeToggle, LangToggle } from '@acp/shared'
 import { messages } from '../i18n'
 import { apiFetch } from '../api/client'
@@ -199,13 +199,20 @@ const { locale, t } = useI18n(messages)
 useTheme()
 
 const release = ref<ReleaseData | null>(null)
+const releaseAbort = new AbortController()
 
 onMounted(async () => {
   try {
-    release.value = await apiFetch<ReleaseData>('/api/release')
-  } catch {
-    // release info unavailable
+    release.value = await apiFetch<ReleaseData>('/api/release', { signal: releaseAbort.signal })
+  } catch (err) {
+    if ((err as { name?: string })?.name !== 'AbortError') {
+      // release info unavailable
+    }
   }
+})
+
+onUnmounted(() => {
+  releaseAbort.abort()
 })
 
 const shaShort = computed(() => {

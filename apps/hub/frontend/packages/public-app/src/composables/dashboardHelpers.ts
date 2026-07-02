@@ -1,22 +1,7 @@
 import type { MemberData, TraceEvent } from '../api/overview'
+import { heartbeatState } from './sessionHelpers'
 
-export function timeAgo(isoStr: string | undefined, lang: string): string {
-  if (!isoStr || isoStr === '-') return '-'
-  const then = new Date(isoStr).getTime()
-  if (isNaN(then)) return isoStr
-  const diff = Math.max(0, Date.now() - then)
-  const s = Math.floor(diff / 1000)
-  const m = Math.floor(s / 60)
-  const h = Math.floor(m / 60)
-  const d = Math.floor(h / 24)
-  const es = lang === 'es'
-  if (s < 5) return es ? 'ahora' : 'now'
-  if (s < 60) return es ? `hace ${s}s` : `${s}s ago`
-  if (m < 60) return es ? `hace ${m} min` : `${m} min ago`
-  if (h < 24) return es ? `hace ${h}h` : `${h}h ago`
-  if (d < 30) return es ? `hace ${d}d` : `${d}d ago`
-  return isoStr.split('T')[0]
-}
+export { timeAgo, heartbeatAgeSeconds, heartbeatState, statusTone } from './sessionHelpers'
 
 export function shortLabel(value: string | undefined, max = 18): string {
   const text = String(value || '-')
@@ -39,33 +24,6 @@ export function roleTone(role: string | undefined): string {
   if (r === 'reviewer') return '#fb7185'
   if (r === 'admin') return '#c084fc'
   return '#34d399'
-}
-
-export function statusTone(status: string | undefined): string {
-  const s = String(status || '').toLowerCase()
-  if (s === 'busy') return '#f87171'
-  if (s === 'waiting') return '#fbbf24'
-  return '#34d399'
-}
-
-export function heartbeatAgeSeconds(member: MemberData): number | null {
-  if (typeof member.heartbeat_age_seconds === 'number' && Number.isFinite(member.heartbeat_age_seconds)) {
-    return Math.max(0, Math.round(member.heartbeat_age_seconds))
-  }
-  const parsed = Date.parse(String(member.last_seen_at || ''))
-  if (Number.isNaN(parsed)) return null
-  return Math.max(0, Math.round((Date.now() - parsed) / 1000))
-}
-
-export function heartbeatState(member: MemberData, connectedSet: Set<string> = new Set()): string {
-  if (connectedSet.has(member.agent_name)) return 'live'
-  const provided = String(member.heartbeat_state || '').toLowerCase()
-  if (['live', 'quiet', 'stale'].includes(provided)) return provided
-  const age = heartbeatAgeSeconds(member)
-  if (age === null) return 'unknown'
-  if (age <= 90) return 'live'
-  if (age <= 360) return 'quiet'
-  return 'stale'
 }
 
 export function memberIssues(member: MemberData, connectedSet: Set<string> = new Set()): string[] {

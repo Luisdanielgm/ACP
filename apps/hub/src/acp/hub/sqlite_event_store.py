@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Any, Iterator, Literal, Mapping
 from uuid import uuid4
 
 from acp.hub.event_store import (
@@ -52,9 +54,38 @@ class SqliteEventStore:
     def __post_init__(self) -> None:
         self._db_path = Path(self.sqlite_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Persistent per-instance connection so the WAL + busy_timeout PRAGMAs
+        # run once instead of on every query. RLock + check_same_thread=False
+        # serializes all access; every caller runs on the asyncio event loop.
+        self._lock = threading.RLock()
+        self._conn: sqlite3.Connection | None = None
 
-    def _connect(self) -> sqlite3.Connection:
-        return connect(self._db_path)
+    def _get_connection(self) -> sqlite3.Connection:
+        if self._conn is None:
+            self._conn = connect(self._db_path, check_same_thread=False)
+        return self._conn
+
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        with self._lock:
+            yield self._get_connection()
+
+    def close(self) -> None:
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
+
+    def __del__(self) -> None:
+        # Best-effort cleanup so a dropped store (e.g. per-test instances on
+        # tmp_path) does not leave the sqlite handle open and block Windows
+        # temp-file cleanup.
+        conn = self._conn
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def _normalize_payload(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         payload_copy = dict(payload)
@@ -86,8 +117,7 @@ class SqliteEventStore:
 
         payload_json = json.dumps(payload_copy, sort_keys=True, separators=(",", ":"))
 
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             conn.execute(
                 """
                 INSERT OR IGNORE INTO persisted_events(event_id, event_type, created_at, payload_json)
@@ -96,31 +126,22 @@ class SqliteEventStore:
                 (event_id, event_type, created_at, payload_json),
             )
             conn.commit()
-        finally:
-            conn.close()
 
     def count(self) -> int:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             row = conn.execute("SELECT COUNT(*) FROM persisted_events").fetchone()
             return int(row[0]) if row else 0
-        finally:
-            conn.close()
 
     def exists_event_id(self, event_id: str) -> bool:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             row = conn.execute(
                 "SELECT 1 FROM persisted_events WHERE event_id = ? LIMIT 1",
                 (event_id,),
             ).fetchone()
             return row is not None
-        finally:
-            conn.close()
 
     def snapshot(self) -> list[StoredEvent]:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             rows = conn.execute(
                 """
                 SELECT event_id, event_type, created_at, payload_json
@@ -128,14 +149,11 @@ class SqliteEventStore:
                 ORDER BY created_at ASC, event_id ASC
                 """
             ).fetchall()
-        finally:
-            conn.close()
 
         return [self._row_to_event(row) for row in rows]
 
     def events_for_msg(self, msg_id: str) -> list[StoredEvent]:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             rows = conn.execute(
                 """
                 SELECT event_id, event_type, created_at, payload_json
@@ -145,8 +163,6 @@ class SqliteEventStore:
                 """,
                 (msg_id,),
             ).fetchall()
-        finally:
-            conn.close()
         return [self._row_to_event(row) for row in rows]
 
     def event_types_for_msg(self, msg_id: str) -> list[str]:
@@ -178,8 +194,7 @@ class SqliteEventStore:
         return msg_ids
 
     def events_by_type(self, event_type: str) -> list[StoredEvent]:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             rows = conn.execute(
                 """
                 SELECT event_id, event_type, created_at, payload_json
@@ -189,8 +204,6 @@ class SqliteEventStore:
                 """,
                 (event_type,),
             ).fetchall()
-        finally:
-            conn.close()
         return [self._row_to_event(row) for row in rows]
 
     def events_by_ingress(self, ingress: str) -> list[StoredEvent]:
@@ -213,12 +226,24 @@ class SqliteEventStore:
         )
 
     def clear_for_tests(self) -> None:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             conn.execute("DELETE FROM persisted_events")
             conn.commit()
-        finally:
-            conn.close()
+
+    def prune_events_older_than(self, cutoff: str) -> int:
+        """Delete persisted_events rows older than cutoff (RFC3339 UTC string).
+
+        created_at is stored as an RFC3339 string (see _normalize_rfc3339), so a
+        lexicographic comparison against another RFC3339 UTC string is valid.
+        Returns the number of rows deleted.
+        """
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "DELETE FROM persisted_events WHERE created_at < ?",
+                (cutoff,),
+            )
+            conn.commit()
+            return cursor.rowcount if cursor.rowcount is not None else 0
 
     def lifecycle_summary(self) -> dict[str, int]:
         summary: dict[str, int] = {}
@@ -227,8 +252,7 @@ class SqliteEventStore:
         return summary
 
     def get_scopes_for_principal(self, principal_name: str) -> set[str] | None:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT scopes_csv
@@ -238,8 +262,6 @@ class SqliteEventStore:
                 """,
                 (principal_name,),
             ).fetchone()
-        finally:
-            conn.close()
 
         if row is None:
             return None
@@ -253,8 +275,7 @@ class SqliteEventStore:
         }
 
     def get_acl_decision(self, *, sender: str, recipient: str, action: str) -> Literal["allow", "deny"] | None:
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             row = conn.execute(
                 """
                 SELECT COUNT(*), MIN(allow), MAX(allow)
@@ -263,8 +284,6 @@ class SqliteEventStore:
                 """,
                 (sender, recipient, action),
             ).fetchone()
-        finally:
-            conn.close()
 
         if row is None:
             return None
@@ -345,11 +364,8 @@ class SqliteEventStore:
             "LIMIT :limit_plus_one"
         )
 
-        conn = self._connect()
-        try:
+        with self._connection() as conn:
             rows = conn.execute(sql, params).fetchall()
-        finally:
-            conn.close()
 
         has_more = len(rows) > limit
         page_rows = rows[:limit]

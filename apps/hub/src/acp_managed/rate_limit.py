@@ -12,11 +12,14 @@ gains horizontal scale, replace this with a shared Redis-backed limiter.
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Deque, Iterable
+
+_TRUTHY = {"1", "true", "yes", "on"}
 
 
 @dataclass(frozen=True)
@@ -131,17 +134,30 @@ INVITATION_PER_IP_RULE = RateLimitRule(max_attempts=20, window_seconds=300)
 INVITATION_PER_TOKEN_RULE = RateLimitRule(max_attempts=10, window_seconds=300)
 
 
-def client_ip_from_request(request) -> str:  # type: ignore[no-untyped-def]
-    """Best-effort client IP. Reads x-forwarded-for behind a proxy.
+def _trust_proxy_headers_from_env() -> bool:
+    configured = os.getenv("ACP_TRUST_PROXY_HEADERS")
+    return configured is not None and configured.strip().lower() in _TRUTHY
 
-    Only the leftmost IP in the chain is honored, since downstream entries
-    can be forged by upstream clients.
+
+def client_ip_from_request(request, *, trust_forwarded_for: bool | None = None) -> str:  # type: ignore[no-untyped-def]
+    """Best-effort client IP used as the rate-limit / audit key.
+
+    ``X-Forwarded-For`` is client-controlled and trivially spoofable, so it is
+    honored ONLY when the hub is knowingly deployed behind a trusted reverse
+    proxy (ACP_TRUST_PROXY_HEADERS). Otherwise the direct socket peer
+    (``request.client.host``) is used, which a remote client cannot forge —
+    without this, header rotation would bypass the per-IP auth rate limiters.
+    Pass ``trust_forwarded_for`` explicitly to override the env default (e.g.
+    in tests).
     """
-    forwarded_for = request.headers.get("x-forwarded-for", "")
-    if isinstance(forwarded_for, str) and forwarded_for.strip():
-        first = forwarded_for.split(",")[0].strip()
-        if first:
-            return first
+    if trust_forwarded_for is None:
+        trust_forwarded_for = _trust_proxy_headers_from_env()
+    if trust_forwarded_for:
+        forwarded_for = request.headers.get("x-forwarded-for", "")
+        if isinstance(forwarded_for, str) and forwarded_for.strip():
+            first = forwarded_for.split(",")[0].strip()
+            if first:
+                return first
     client = getattr(request, "client", None)
     if client is not None and getattr(client, "host", None):
         return str(client.host)

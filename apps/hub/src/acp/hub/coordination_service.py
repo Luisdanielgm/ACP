@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import re
 import secrets
+import sqlite3
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -36,7 +38,7 @@ def _should_record_heartbeat(previous_seen_at: str | None, *, now: datetime) -> 
 
 
 def _new_join_code() -> str:
-    return secrets.token_hex(3).upper()
+    return secrets.token_hex(4).upper()
 
 
 def _new_member_token() -> str:
@@ -166,7 +168,12 @@ class SessionCoordinationService:
                 project=project,
                 members={owner_agent: member},
             )
-            self._store.create_session(session)
+            try:
+                self._store.create_session(session)
+            except sqlite3.IntegrityError as exc:
+                # Cross-process race: another worker claimed this join_code or
+                # agent_name between our in-process check and the INSERT.
+                raise SessionAccessError("session could not be created due to a conflicting join code or agent name.") from exc
             self._record_event(session_id, event="SESSION_CREATED", actor=owner_agent, detail="session created", extra={"title": title, "project": project})
             return {
                 "session_id": session_id,
@@ -201,7 +208,12 @@ class SessionCoordinationService:
                 provider=provider,
                 workspace_path=workspace_path,
             )
-            self._store.add_member(session.session_id, member)
+            try:
+                self._store.add_member(session.session_id, member)
+            except sqlite3.IntegrityError as exc:
+                # Cross-process race: another worker attached this agent_name
+                # between our in-process check and the INSERT.
+                raise SessionAccessError("agent is already attached to another session.") from exc
             self._record_event(session.session_id, event="SESSION_JOINED", actor=agent_name, detail="agent joined session")
             updated = self._require_session(session.session_id)
             return {
@@ -359,9 +371,9 @@ class SessionCoordinationService:
                 self._authorize(session_id=session_id, agent_name=agent_name, member_token=member_token)
             elif agent_name is not None or member_token is not None:
                 raise SessionDashboardAccessError("agent_name and member_token must be provided together.")
-            payload = self._build_session_payload(session, include_join_code=include_join_code)
+            payload = self._build_session_payload(session, include_join_code=include_join_code, refresh=False)
             payload["history"] = self._store.get_session_events(session_id, limit=_SESSION_EVENT_LIMIT)
-            payload["summary"] = self._build_session_summary(session)
+            payload["summary"] = self._build_session_summary(session, refresh=False)
             return payload
 
     async def cleanup_stale_sessions(self) -> list[str]:
@@ -374,12 +386,32 @@ class SessionCoordinationService:
             self._last_cleanup_at = now
             return self._store.cleanup_stale_sessions(stale_after_seconds=_STALE_SESSION_CLEANUP_SECONDS)
 
+    async def prune_idempotency_older_than(self, cutoff: str) -> int:
+        async with self._lock:
+            return self._store.prune_idempotency_older_than(cutoff)
+
+    def close(self) -> None:
+        """Release the underlying store's persistent connection, if any."""
+        close = getattr(self._store, "close", None)
+        if callable(close):
+            close()
+
     async def dashboard_snapshot(self) -> dict[str, Any]:
         await self.cleanup_stale_sessions()
         async with self._lock:
             live_sessions = sorted(self._store.list_sessions(), key=lambda item: item.created_at)
             live_sessions = [self._refresh_runner_members(session) for session in live_sessions]
-            sessions = [self._build_session_summary(session) for session in live_sessions]
+            pending_counts_by_session = self._store.pending_counts_for_sessions(
+                [session.session_id for session in live_sessions]
+            )
+            sessions = [
+                self._build_session_summary(
+                    session,
+                    pending_counts=pending_counts_by_session.get(session.session_id, {}),
+                    refresh=False,
+                )
+                for session in live_sessions
+            ]
             status_counts: Counter[str] = Counter()
             member_total = 0
             for session in live_sessions:
@@ -808,16 +840,35 @@ class SessionCoordinationService:
             )
         return dict(message)
 
-    def _build_session_payload(self, session: CoordinationSession, *, include_join_code: bool) -> dict[str, Any]:
-        session = self._refresh_runner_members(session)
-        return session.as_payload(pending_counts=self._store.pending_counts_for_session(session.session_id), include_join_code=include_join_code, now=datetime.now(timezone.utc))
+    def _build_session_payload(
+        self,
+        session: CoordinationSession,
+        *,
+        include_join_code: bool,
+        pending_counts: dict[str, int] | None = None,
+        refresh: bool = True,
+    ) -> dict[str, Any]:
+        if refresh:
+            session = self._refresh_runner_members(session)
+        if pending_counts is None:
+            pending_counts = self._store.pending_counts_for_session(session.session_id)
+        return session.as_payload(pending_counts=pending_counts, include_join_code=include_join_code, now=datetime.now(timezone.utc))
 
-    def _build_session_summary(self, session: CoordinationSession) -> dict[str, Any]:
-        session = self._refresh_runner_members(session)
-        pending_counts = self._store.pending_counts_for_session(session.session_id)
-        members = self._build_session_payload(session, include_join_code=False)["members"]
+    def _build_session_summary(
+        self,
+        session: CoordinationSession,
+        *,
+        pending_counts: dict[str, int] | None = None,
+        refresh: bool = True,
+    ) -> dict[str, Any]:
+        if refresh:
+            session = self._refresh_runner_members(session)
+        if pending_counts is None:
+            pending_counts = self._store.pending_counts_for_session(session.session_id)
+        members = self._build_session_payload(session, include_join_code=False, pending_counts=pending_counts, refresh=False)["members"]
         status_counts: Counter[str] = Counter(member["status"] for member in members)
-        history = self._store.get_session_events(session.session_id, limit=_SESSION_EVENT_LIMIT)
+        last_event_at = self._store.last_session_event_ts(session.session_id)
+        history_size = self._store.count_session_events(session.session_id)
         return {
             "session_id": session.session_id,
             "created_by": session.created_by,
@@ -829,8 +880,8 @@ class SessionCoordinationService:
             "pending_total": sum(pending_counts.values()),
             "pending_counts": pending_counts,
             "status_counts": {key: status_counts.get(key, 0) for key in ("idle", "waiting", "busy")},
-            "last_event_at": history[-1]["ts"] if history else session.created_at,
-            "history_size": len(history),
+            "last_event_at": last_event_at if last_event_at is not None else session.created_at,
+            "history_size": history_size,
         }
 
     def _pending_count_for(self, session_id: str, agent_name: str) -> int:
@@ -970,7 +1021,7 @@ class SessionCoordinationService:
             if notice is not None:
                 raise SessionAccessError(self._notice_message(notice))
             raise SessionAccessError("agent is not a member of this session.")
-        if member.member_token != member_token:
+        if not hmac.compare_digest(member.member_token, member_token):
             raise SessionAccessError("member token is invalid.")
         return session, member
 

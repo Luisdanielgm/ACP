@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Literal, Protocol
@@ -133,11 +134,11 @@ class PermissiveAuthService:
     def _token_matches_rotation_window(self, token: str) -> bool:
         if not token:
             return False
-        if self.required_token is not None and token == self.required_token:
+        if self.required_token is not None and hmac.compare_digest(token, self.required_token):
             return True
         if self.previous_token is None or self.overlap_until is None:
             return False
-        if token != self.previous_token:
+        if not hmac.compare_digest(token, self.previous_token):
             return False
         return self._now_provider().astimezone(timezone.utc) <= self.overlap_until.astimezone(timezone.utc)
 

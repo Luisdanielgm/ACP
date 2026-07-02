@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+from collections import deque
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket
@@ -25,6 +28,7 @@ from acp.hub.event_store import EventStore, InMemoryEventStore
 from acp.hub.http_api import build_http_router
 from acp.hub.landing_html import render_landing_html
 from acp.hub.migrations import MigrationError, apply_sqlite_migrations, verify_sqlite_bootstrap_state
+from acp.hub.rate_limit import JoinAttemptRateLimiter
 from acp.hub.session_registry import SessionRegistry
 from acp.hub.sqlite_event_store import SqliteEventStore
 from acp.hub.ws_ingress import run_ws_ingress
@@ -35,6 +39,17 @@ _DEFAULT_PERSISTENCE_BACKEND = "sqlite"
 _SUPPORTED_PERSISTENCE_BACKENDS = {"memory", "sqlite"}
 _DEFAULT_SQLITE_PATH = ".planning/acp.sqlite3"
 _TRUTHY = {"1", "true", "yes", "on"}
+# Bounded well above the largest read slice ([-120:] in http_api.py) so trace
+# consumers keep enough history while capping unbounded memory growth.
+_TRACE_SINK_MAXLEN = 1000
+# How often the background maintenance loop runs stale-session cleanup and
+# retention pruning. Matches the coordination service's own cleanup cadence
+# (_CLEANUP_INTERVAL_SECONDS) so the loop doesn't wake up more often than the
+# work it triggers can actually execute.
+_MAINTENANCE_INTERVAL_SECONDS = 300
+# Retention window for persisted_events and message_idempotency rows. Rows
+# older than this are pruned by the background maintenance loop.
+_EVENT_RETENTION_DAYS = 30
 
 logger = logging.getLogger("acp.hub")
 
@@ -44,7 +59,7 @@ class HubRuntime:
     """In-memory runtime shared by websocket ingress and HTTP adapters."""
 
     active_agents: dict[str, Any] = field(default_factory=dict)
-    trace_sink: list[dict[str, Any]] = field(default_factory=list)
+    trace_sink: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=_TRACE_SINK_MAXLEN))
     required_token: str | None = None
     max_payload_bytes: int = _DEFAULT_MAX_PAYLOAD_BYTES
     event_store: EventStore | None = None
@@ -66,7 +81,17 @@ class HubRuntime:
     memory_backend_warning: bool = False
     registry: SessionRegistry = field(init=False)
     coordination: SessionCoordinationService = field(default_factory=SessionCoordinationService)
+    # Throttles repeated failed /sessions/join attempts per client IP.
+    join_rate_limiter: JoinAttemptRateLimiter = field(default_factory=JoinAttemptRateLimiter)
+    # Only honor X-Forwarded-For for client-IP derivation when the hub is
+    # knowingly behind a trusted reverse proxy; otherwise the header is
+    # spoofable and would let a client bypass the join rate limiter.
+    trust_proxy_headers: bool = False
     dashboard_sessions: DashboardSessionStore = field(default_factory=DashboardSessionStore)
+    # Handle for the background maintenance task (stale-session cleanup +
+    # retention pruning). None until start_maintenance_task() is called;
+    # guards against double-start and lets shutdown cancel it cleanly.
+    maintenance_task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if self.event_store is None:
@@ -183,6 +208,13 @@ def _public_web_enabled_from_env() -> bool:
     return configured.strip().lower() in _TRUTHY
 
 
+def _trust_proxy_headers_from_env() -> bool:
+    configured = os.getenv("ACP_TRUST_PROXY_HEADERS")
+    if configured is None:
+        return False
+    return configured.strip().lower() in _TRUTHY
+
+
 def _legacy_dashboard_enabled_from_env() -> bool:
     configured = os.getenv("ACP_LEGACY_DASHBOARD_ENABLED")
     if configured is None:
@@ -289,6 +321,7 @@ def create_runtime_from_env() -> HubRuntime:
             overlap_until=overlap_until,
         ),
     )
+    runtime.trust_proxy_headers = _trust_proxy_headers_from_env()
     runtime.storage_ready = persistence_backend in _SUPPORTED_PERSISTENCE_BACKENDS
     # Only the sqlite backend persists coordination sessions across restarts.
     # When this is False, a redeploy wipes every live session/member binding.
@@ -309,6 +342,90 @@ def create_runtime_from_env() -> HubRuntime:
         runtime.migration_ready = False
         raise RuntimeError(f"phase-6 migration bootstrap failed: {exc}") from exc
     return runtime
+
+
+def _retention_cutoff_iso() -> str:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=_EVENT_RETENTION_DAYS)
+    return cutoff.isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+async def _run_maintenance_once(runtime: HubRuntime) -> None:
+    """Run one maintenance pass: stale-session cleanup + retention pruning.
+
+    Exposed as a standalone coroutine (not buried in the loop closure) so it
+    can be invoked directly by tests without waiting on the sleep interval.
+    """
+    await runtime.coordination.cleanup_stale_sessions()
+    cutoff = _retention_cutoff_iso()
+    event_store = runtime.event_store
+    if event_store is not None and hasattr(event_store, "prune_events_older_than"):
+        event_store.prune_events_older_than(cutoff)
+    await runtime.coordination.prune_idempotency_older_than(cutoff)
+
+
+async def _maintenance_loop(runtime: HubRuntime) -> None:
+    """Background loop: periodic stale-session cleanup + retention pruning.
+
+    Sleeps first so app startup is never blocked by maintenance work. Each
+    iteration is isolated in try/except so one failure doesn't kill the loop;
+    CancelledError is re-raised so shutdown can await this task to completion.
+    """
+    try:
+        while True:
+            await asyncio.sleep(_MAINTENANCE_INTERVAL_SECONDS)
+            try:
+                await _run_maintenance_once(runtime)
+            except Exception:
+                logger.exception("background maintenance pass failed; will retry next interval")
+    except asyncio.CancelledError:
+        raise
+
+
+def _start_maintenance_task(runtime: HubRuntime) -> None:
+    if runtime.maintenance_task is not None:
+        return
+    runtime.maintenance_task = asyncio.create_task(_maintenance_loop(runtime))
+
+
+async def _stop_maintenance_task(runtime: HubRuntime) -> None:
+    task = runtime.maintenance_task
+    if task is None:
+        return
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    runtime.maintenance_task = None
+
+
+def _close_runtime_stores(runtime: HubRuntime) -> None:
+    """Close persistent sqlite connections held by the stores, if any.
+
+    The sqlite-backed stores keep a single connection per instance so the WAL
+    PRAGMAs run once; that handle must be released on shutdown so the file is
+    not left open (which also matters for temp-file cleanup on Windows).
+    """
+    coordination = getattr(runtime, "coordination", None)
+    if coordination is not None:
+        close = getattr(coordination, "close", None)
+        if callable(close):
+            close()
+    event_store = runtime.event_store
+    if event_store is not None:
+        close = getattr(event_store, "close", None)
+        if callable(close):
+            close()
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    _start_maintenance_task(app.state.runtime)
+    try:
+        yield
+    finally:
+        await _stop_maintenance_task(app.state.runtime)
+        _close_runtime_stores(app.state.runtime)
 
 
 def _register_ws_endpoint(app: FastAPI, runtime: HubRuntime) -> None:
@@ -442,6 +559,7 @@ def create_app(*, runtime: HubRuntime | None = None) -> FastAPI:
     app = FastAPI(
         title="ACP Hub",
         version=_resolve_version(),
+        lifespan=_lifespan,
     )
     app.state.runtime = runtime_instance
 

@@ -159,6 +159,9 @@ class EventStore(Protocol):
     def get_acl_decision(self, *, sender: str, recipient: str, action: str) -> Literal["allow", "deny"] | None:
         ...
 
+    def prune_events_older_than(self, cutoff: str) -> int:
+        ...
+
 
 @dataclass
 class InMemoryEventStore:
@@ -294,3 +297,8 @@ class InMemoryEventStore:
         if any(allow is True for allow in matching):
             return "allow"
         return None
+
+    def prune_events_older_than(self, cutoff: str) -> int:
+        before = len(self.events)
+        self.events = [event for event in self.events if event.ts >= cutoff]
+        return before - len(self.events)
