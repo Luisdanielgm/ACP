@@ -48,7 +48,7 @@ def test_owner_creates_session_with_prompt_and_agent_receives_it(monkeypatch, tm
     owner = TestClient(app)
     _login_workspace_admin(owner, password)
 
-    prompt = "Sala AeroCostos. Reglas: responder en JSON y ser conciso."
+    prompt = "Sala backend-api. Reglas: responder en JSON y ser conciso."
 
     # Owner creates the room WITH a prompt.
     created = owner.post(

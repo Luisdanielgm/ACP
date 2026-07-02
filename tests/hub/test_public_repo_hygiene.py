@@ -36,7 +36,11 @@ TEXT_SUFFIXES = {
     ".ts",
     ".vue",
 }
-FORBIDDEN_MARKERS: dict[str, str] = {}
+FORBIDDEN_MARKERS: dict[str, str] = {
+    "aerocostos": "private customer brand must not appear in the public repo",
+    "nephila": "private brand must not appear in the public repo",
+    "nefila": "private brand must not appear in the public repo",
+}
 FORBIDDEN_PATTERNS = {
     re.compile(r"https?://(?:acp|cloud|agents)\.(?!example\.com\b)[a-z0-9-]+\.(?:com|group|io|net|org)\b", re.IGNORECASE):
         "hosted/customer ACP domains must use neutral example hosts",
@@ -98,8 +102,9 @@ def test_public_repo_has_no_private_branding_or_private_host_defaults() -> None:
     violations: list[str] = []
     for path in _iter_public_text_files():
         content = path.read_text(encoding="utf-8")
+        content_lower = content.lower()
         for marker, reason in FORBIDDEN_MARKERS.items():
-            if marker in content:
+            if marker.lower() in content_lower:
                 violations.append(f"{path.relative_to(REPO_ROOT)} -> {marker} ({reason})")
         for pattern, reason in FORBIDDEN_PATTERNS.items():
             for match in pattern.finditer(content):
