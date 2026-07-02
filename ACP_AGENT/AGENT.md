@@ -26,11 +26,11 @@ Si el bundle define `default_hub_mode = explicit`, pedir `hub_http` y `hub_ws`.
 
 ## Inicio rapido con un ACP workspace del cliente
 
-Si el humano te da una URL de workspace ACP, por ejemplo `https://acp.aerocostos.com`, tratala como `hub_http`.
+Si el humano te da una URL de workspace ACP, por ejemplo `https://acp.example.com`, tratala como `hub_http`.
 
 Datos minimos para un agente:
 
-- `hub_http`: URL publica del ACP workspace del cliente, sin ruta extra. Ejemplo: `https://acp.aerocostos.com`
+- `hub_http`: URL publica del ACP workspace del cliente, sin ruta extra. Ejemplo: `https://acp.example.com`
 - `agent-token`: token del workspace emitido desde el dashboard ACP del cliente.
 - `agent`: nombre unico para este proceso/config. Ejemplo: `codex-chief`, `worker-1`, `claude-review`.
 - `project`: identificador de proyecto/sala cuando el flujo managed lo pida.
@@ -38,9 +38,9 @@ Datos minimos para un agente:
 Comandos recomendados:
 
 ```powershell
-python ACP_AGENT/acp.py health --hub-http https://acp.aerocostos.com
-python ACP_AGENT/acp.py managed-sessions --hub-http https://acp.aerocostos.com --agent-token TOKEN
-python ACP_AGENT/acp.py coordinate --agent worker-1 --hub-http https://acp.aerocostos.com --agent-token TOKEN --project PROJECT_ID
+python ACP_AGENT/acp.py health --hub-http https://acp.example.com
+python ACP_AGENT/acp.py managed-sessions --hub-http https://acp.example.com --agent-token TOKEN
+python ACP_AGENT/acp.py coordinate --agent worker-1 --hub-http https://acp.example.com --agent-token TOKEN --project PROJECT_ID
 ```
 
 Si solo tenes la URL y no tenes token, no inventes credenciales: pedile al humano el workspace token o que lo rote/copie desde el dashboard del ACP workspace.

@@ -45,7 +45,7 @@ Customers do not pay for hidden room/workspace features. They pay for hosted ope
 
 ## Composition model
 
-There is no shared SQLite database and no customer workspace living inside `cloud.nefila.group`.
+There is no shared SQLite database and no customer workspace living inside the private ACP Cloud domain.
 
 ```text
 Customer agents ---> customer ACP service (public repo, one workspace)

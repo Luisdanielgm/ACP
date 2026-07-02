@@ -63,3 +63,28 @@ def test_bundle_release_manifest_preserves_bilingual_changelog_notes(tmp_path: P
         "en": "English release note.",
         "es": "Nota de release en espanol.",
     }
+
+
+def test_bundle_release_manifest_prefers_configured_public_hub_http(tmp_path: Path, monkeypatch) -> None:
+    source_dir = tmp_path / "ACP_AGENT"
+    bundle_path = tmp_path / "downloads" / "ACP_AGENT.zip"
+    source_dir.mkdir(parents=True)
+    (source_dir / "VERSION").write_text("0.3.10\n", encoding="utf-8")
+    (source_dir / "CHANGELOG.md").write_text(
+        "# ACP_AGENT Changelog\n\n## 0.3.10 - 2026-05-30\n\n- Release.\n",
+        encoding="utf-8",
+    )
+    (source_dir / "acp.py").write_text("print('ok')\n", encoding="utf-8")
+    build_bundle_archive(source_dir=source_dir, bundle_path=bundle_path)
+
+    monkeypatch.setenv("ACP_PUBLIC_HUB_HTTP", "https://acp.example.com")
+
+    manifest = build_bundle_release_manifest(
+        base_url="http://internal-service/",
+        source_dir=source_dir,
+        bundle_path=bundle_path,
+    )
+
+    assert manifest["bundle_url"] == "https://acp.example.com/downloads/ACP_AGENT.zip"
+    assert manifest["manifest_url"] == "https://acp.example.com/downloads/ACP_AGENT.json"
+    assert manifest["agent_guide_url"] == "https://acp.example.com/downloads/ACP_AGENT/AGENT.md"

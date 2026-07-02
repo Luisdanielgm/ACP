@@ -38,7 +38,7 @@ Together these are **ACP Manager**: a complete, self-hostable server (VPS or loc
 
 ## Dependency rule
 
-The public side must never import the private side. The private **ACP Cloud** control plane tracks customers and generates provisioning data for separate public ACP services; customer rooms do not run inside `cloud.nefila.group`.
+The public side must never import the private side. The private **ACP Cloud** control plane tracks customers and generates provisioning data for separate public ACP services; customer rooms do not run inside the private ACP Cloud domain.
 
 ## Enforcement
 

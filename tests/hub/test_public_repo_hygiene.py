@@ -16,6 +16,8 @@ PUBLIC_EXTRACTION_SOURCES = (
     # The SPA (public + managed apps) is part of the open Manager.
     REPO_ROOT / "apps" / "hub" / "frontend",
     REPO_ROOT / "tests",
+    REPO_ROOT / "OPEN_CORE_MODEL.md",
+    REPO_ROOT / "PUBLIC_REPO_BOUNDARY.md",
     REPO_ROOT / "README.md",
     REPO_ROOT / "protocol.md",
 )
@@ -34,10 +36,10 @@ TEXT_SUFFIXES = {
     ".ts",
     ".vue",
 }
-FORBIDDEN_MARKERS = {
-    "nefila.group": "private hosted domain must not appear in the public repo",
-    "Nefila": "private managed brand must not appear in the public repo",
-    "nefila-managed": "private distribution id must not appear in the public repo",
+FORBIDDEN_MARKERS: dict[str, str] = {}
+FORBIDDEN_PATTERNS = {
+    re.compile(r"https?://(?:acp|cloud|agents)\.(?!example\.com\b)[a-z0-9-]+\.(?:com|group|io|net|org)\b", re.IGNORECASE):
+        "hosted/customer ACP domains must use neutral example hosts",
 }
 SKIP_PARTS = {"__pycache__", ".pytest_cache", ".planning", ".codex", "downloads", "node_modules", "dist"}
 SKIP_FILES = {
@@ -99,6 +101,9 @@ def test_public_repo_has_no_private_branding_or_private_host_defaults() -> None:
         for marker, reason in FORBIDDEN_MARKERS.items():
             if marker in content:
                 violations.append(f"{path.relative_to(REPO_ROOT)} -> {marker} ({reason})")
+        for pattern, reason in FORBIDDEN_PATTERNS.items():
+            for match in pattern.finditer(content):
+                violations.append(f"{path.relative_to(REPO_ROOT)} -> {match.group(0)} ({reason})")
     assert violations == []
 
 

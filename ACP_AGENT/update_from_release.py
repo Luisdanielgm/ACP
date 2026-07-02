@@ -85,8 +85,18 @@ def write_bundle_info(*, target_dir: Path, manifest: dict[str, Any], source: str
     return payload
 
 
+def _release_request(url: str) -> urllib.request.Request:
+    return urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json, application/zip, application/octet-stream, */*",
+            "User-Agent": f"ACP_AGENT/{local_version(ACP_ROOT)}",
+        },
+    )
+
+
 def fetch_json(url: str) -> dict[str, Any]:
-    with urllib.request.urlopen(url, timeout=30) as response:
+    with urllib.request.urlopen(_release_request(url), timeout=30) as response:
         payload = json.loads(response.read().decode("utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("release manifest must be a JSON object")
@@ -94,7 +104,7 @@ def fetch_json(url: str) -> dict[str, Any]:
 
 
 def fetch_bytes(url: str) -> bytes:
-    with urllib.request.urlopen(url, timeout=120) as response:
+    with urllib.request.urlopen(_release_request(url), timeout=120) as response:
         return response.read()
 
 

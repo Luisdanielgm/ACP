@@ -198,14 +198,15 @@ def build_bundle_release_manifest(
             version = fallback_version
     latest_entry = changelog[0] if changelog else {"version": version, "date": None, "notes": []}
     size_bytes = effective_bundle_path.stat().st_size if effective_bundle_path.is_file() else 0
-    bundle_url_value = _absolute_url(base_url, bundle_url)
-    manifest_url = _absolute_url(base_url, "/downloads/ACP_AGENT.json")
-    downloads_page_url = _absolute_url(base_url, "/downloads")
-    landing_page_url = _absolute_url(base_url, "/")
-    runtime_url = _absolute_url(base_url, "/runtime")
-    health_url = _absolute_url(base_url, "/health")
-    guide_url = _absolute_url(base_url, "/downloads/ACP_AGENT/AGENT.md")
-    skill_url = _absolute_url(base_url, "/downloads/ACP_AGENT/skills/acp-session-coordinator/SKILL.md")
+    link_base_url = branding.official_hub_http or base_url
+    bundle_url_value = _absolute_url(link_base_url, bundle_url)
+    manifest_url = _absolute_url(link_base_url, "/downloads/ACP_AGENT.json")
+    downloads_page_url = _absolute_url(link_base_url, "/downloads")
+    landing_page_url = _absolute_url(link_base_url, "/")
+    runtime_url = _absolute_url(link_base_url, "/runtime")
+    health_url = _absolute_url(link_base_url, "/health")
+    guide_url = _absolute_url(link_base_url, "/downloads/ACP_AGENT/AGENT.md")
+    skill_url = _absolute_url(link_base_url, "/downloads/ACP_AGENT/skills/acp-session-coordinator/SKILL.md")
     policy = _build_update_policy(current_version=version)
     policy["policy_url"] = downloads_page_url
     agent_update = _build_agent_update_policy()
