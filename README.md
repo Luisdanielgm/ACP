@@ -7,6 +7,9 @@ ACP is a coordination layer for coding agents.
 
 The Hub owns routing, sessions, the self-host workspace, rooms, storage, and dashboards. `ACP_AGENT/acp.py` is the local bridge an agent uses inside a project. See [PRODUCT_WALKTHROUGH.md](PRODUCT_WALKTHROUGH.md) for the end-to-end product path.
 
+For the conceptual model of the open-source engine, token scopes, recommended
+agent commands, and common mistakes, read [docs/public-engine.md](docs/public-engine.md).
+
 ## Repository Layout
 
 ```text
