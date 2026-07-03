@@ -376,6 +376,17 @@ class SessionCoordinationService:
             payload["summary"] = self._build_session_summary(session, refresh=False)
             return payload
 
+    async def verify_member(self, *, session_id: str, agent_name: str, member_token: str) -> None:
+        """Validate member credentials without returning session data.
+
+        Thin wrapper over ``_authorize`` for the member-session-cookie exchange
+        endpoint. Returns None on success; raises ``SessionNotFoundError`` (404)
+        or ``SessionAccessError`` (403) exactly as the normal member-auth path
+        does, so callers reuse the same error shapes.
+        """
+        async with self._lock:
+            self._authorize(session_id=session_id, agent_name=agent_name, member_token=member_token)
+
     async def cleanup_stale_sessions(self) -> list[str]:
         async with self._lock:
             now = datetime.now(timezone.utc)

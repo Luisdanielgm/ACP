@@ -1,5 +1,5 @@
 {
-  "route_count": 99,
+  "route_count": 101,
   "routes": [
     {
       "path": "/",
@@ -53,6 +53,18 @@
       "path": "/dashboard/session",
       "methods": [
         "GET"
+      ]
+    },
+    {
+      "path": "/dashboard/session/auth",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/dashboard/session/auth/logout",
+      "methods": [
+        "POST"
       ]
     },
     {

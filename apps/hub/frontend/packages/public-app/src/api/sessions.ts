@@ -76,20 +76,15 @@ export interface SessionDetailResponse {
 
 export interface FetchSessionParams {
   sessionId: string
-  agentName?: string
-  memberToken?: string
   adminToken?: string
 }
 
 export async function fetchSessionDetail(params: FetchSessionParams): Promise<SessionDetailPayload> {
-  // Secrets go in headers, never the query string: this endpoint is polled
-  // every ~2s and query params leak into server/proxy/CDN access logs.
+  // Member auth rides the httpOnly `acp_member_session` cookie (sent automatically
+  // by apiFetch's credentials:'include'), so this ~2s poll carries no member token.
+  // Admin dashboards still authenticate with the X-ACP-Token header.
   const qs = new URLSearchParams({ session_id: params.sessionId })
   const headers: Record<string, string> = {}
-  if (params.agentName && params.memberToken) {
-    qs.set('agent_name', params.agentName)
-    headers['X-ACP-Member-Token'] = params.memberToken
-  }
   if (params.adminToken) headers['X-ACP-Token'] = params.adminToken
   const data = await apiFetch<SessionDetailResponse>(
     `/sessions/${encodeURIComponent(params.sessionId)}/detail?${qs.toString()}`,

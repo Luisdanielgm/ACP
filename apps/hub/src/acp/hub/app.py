@@ -22,7 +22,7 @@ from acp.hub.bundle_archive import ACP_AGENT_BUNDLE_PATH, ACP_AGENT_SOURCE_DIR, 
 from acp.hub.bundle_release import build_bundle_release_manifest
 from acp.hub.coordination_service import SessionCoordinationService
 from acp.hub.coordination_store import SqliteCoordinationStore
-from acp.hub.dashboard_auth import DashboardSessionStore
+from acp.hub.dashboard_auth import DashboardSessionStore, MemberSessionStore
 from acp.hub.downloads_html import render_downloads_html
 from acp.hub.event_store import EventStore, InMemoryEventStore
 from acp.hub.http_api import build_http_router
@@ -88,6 +88,10 @@ class HubRuntime:
     # spoofable and would let a client bypass the join rate limiter.
     trust_proxy_headers: bool = False
     dashboard_sessions: DashboardSessionStore = field(default_factory=DashboardSessionStore)
+    # Server-side store for httpOnly member-session cookies. Lets a live-dashboard
+    # member exchange their member_token once for a cookie scoped to a single
+    # {session_id, agent_name}; carries no admin capability (see MemberSessionStore).
+    member_sessions: MemberSessionStore = field(default_factory=MemberSessionStore)
     # Handle for the background maintenance task (stale-session cleanup +
     # retention pruning). None until start_maintenance_task() is called;
     # guards against double-start and lets shutdown cancel it cleanly.
@@ -127,6 +131,7 @@ class HubRuntime:
             "token_rotation_active": self.token_rotation_active,
             "token_overlap_until": self.token_overlap_until,
             "dashboard_sessions": self.dashboard_sessions.count(),
+            "member_sessions": self.member_sessions.count(),
             "public_web_enabled": self.public_web_enabled,
             "legacy_dashboard_enabled": self.legacy_dashboard_enabled,
             "coordination_durable": self.coordination_durable,

@@ -1,6 +1,6 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { fetchAuthSession } from '../api/auth'
+import { fetchAuthSession, authMemberSession, logoutMemberSession } from '../api/auth'
 import { fetchSessionDetail, closeSession, disconnectMember, type SessionDetailPayload, type SessionMember, type SessionEvent } from '../api/sessions'
 import {
   sortedMembers, memberIssues, eventIssues, heartbeatState, eventClass, eventTouchesAgent,
@@ -57,6 +57,9 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
   let pollHandle: ReturnType<typeof setInterval> | null = null
   let inFlight = false
   let loadRequestId = 0
+  // True once the in-memory member token has been exchanged for the httpOnly
+  // cookie this page load. Reset when the token changes or access is cleared.
+  let memberSessionExchanged = false
 
   // ── Computed ──
 
@@ -122,10 +125,13 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
 
   function persistAccess() {
     try {
+      // member_token is intentionally NOT persisted: it is exchanged once for an
+      // httpOnly cookie that survives reload and authenticates the poll. Only
+      // non-secret session_id + agent_name (and the admin token, which still
+      // authenticates via header) are stored so a reload can resume.
       const data = {
         session_id: sessionIdInput.value,
         agent_name: agentNameInput.value,
-        member_token: memberTokenInput.value,
         admin_token: adminTokenInput.value,
         access_mode: accessMode.value,
       }
@@ -140,7 +146,6 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
       const data = JSON.parse(raw)
       if (data.session_id) sessionIdInput.value = data.session_id
       if (data.agent_name) agentNameInput.value = data.agent_name
-      if (data.member_token) memberTokenInput.value = data.member_token
       if (data.admin_token) adminTokenInput.value = data.admin_token
       if (data.access_mode) accessMode.value = data.access_mode
       return Boolean(data.session_id)
@@ -155,6 +160,12 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
 
   function clearLoadedSession() {
     stopPolling()
+    // Revoke the member session cookie server-side; ignore errors (admin-only
+    // sessions never had one, and a failed revoke must not block teardown).
+    if (memberSessionExchanged) {
+      void logoutMemberSession().catch(() => { /* ignore */ })
+    }
+    memberSessionExchanged = false
     payload.value = null
     isFirstRender.value = true
     clearAccess()
@@ -231,6 +242,12 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
     }
   }
 
+  function redirectToAccess() {
+    stopPolling()
+    memberSessionExchanged = false
+    router.push({ path: redirectPath, query: { notice: 'session_unavailable' } })
+  }
+
   async function loadSession(showLoading = false): Promise<boolean> {
     if (inFlight) return false
 
@@ -244,7 +261,11 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
     const memberToken = memberTokenInput.value.trim()
     const adminToken = adminTokenInput.value.trim()
 
-    const hasMemberAccess = Boolean(agentName && memberToken)
+    // A member is authorized either by a fresh token pending exchange, or by an
+    // already-exchanged httpOnly cookie (e.g. after a reload, when no token is
+    // in memory). Both count as member access.
+    const hasMemberToken = Boolean(agentName && memberToken)
+    const hasMemberAccess = hasMemberToken || memberSessionExchanged
     const hasAdminAccess = Boolean(adminToken || dashboardAuthenticated.value)
     if (!hasMemberAccess && !hasAdminAccess) {
       return false
@@ -255,10 +276,18 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
     const requestId = ++loadRequestId
 
     try {
+      // Exchange the member token for the cookie exactly once, before the first
+      // poll. After this the token is no longer needed and is dropped from the
+      // in-memory ref; the cookie authenticates every subsequent request.
+      if (hasMemberToken && !memberSessionExchanged) {
+        await authMemberSession({ sessionId, agentName, memberToken })
+        if (requestId !== loadRequestId) return false
+        memberSessionExchanged = true
+        memberTokenInput.value = ''
+      }
+
       const data = await fetchSessionDetail({
         sessionId,
-        agentName: agentName || undefined,
-        memberToken: memberToken || undefined,
         adminToken: adminToken || undefined,
       })
       if (requestId !== loadRequestId) return false
@@ -269,8 +298,11 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
       return true
     } catch (e: any) {
       if (requestId !== loadRequestId) return false
-      if (e.status === 403 || e.status === 404) {
-        router.push({ path: redirectPath, query: { notice: 'session_unavailable' } })
+      // 401/403: the member cookie is missing, expired, or revoked (or the token
+      // exchange was rejected). 404: the session is gone. Route back to the
+      // access form so the user can re-enter the token/link to re-exchange.
+      if (e.status === 401 || e.status === 403 || e.status === 404) {
+        redirectToAccess()
         return false
       }
       setStatus(e.message || 'request failed', true)
@@ -345,6 +377,14 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
       applyQueryParams()
     } else {
       restoreAccess()
+      // Resuming from storage after a reload: the member token was never
+      // persisted, but the httpOnly cookie survives the reload. Treat the
+      // member session as already exchanged so the poll rides the cookie with
+      // no token. If the cookie is gone/expired, the first poll's 401/403
+      // routes back to the access form.
+      if (sessionIdInput.value.trim() && agentNameInput.value.trim() && !memberTokenInput.value.trim()) {
+        memberSessionExchanged = true
+      }
     }
     if (sessionIdInput.value.trim()) {
       accessMode.value = inferAccessMode()

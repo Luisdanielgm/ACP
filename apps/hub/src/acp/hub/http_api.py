@@ -66,6 +66,7 @@ _SESSION_ALLOWED_STATUS = {"idle", "waiting", "busy"}
 _SESSION_ALLOWED_DELIVERY_MODES = {"attached", "runner"}
 _RUNNER_ALLOWED_EVENTS = {"RUN_STARTED", "RUN_LOG", "RUN_FINISHED", "RUN_REPLY_SENT", "RUN_INTERRUPTED"}
 _DASHBOARD_COOKIE_NAME = "acp_dashboard_session"
+_MEMBER_COOKIE_NAME = "acp_member_session"
 _BROADCAST_DESTINATIONS = {"all", "*"}
 _SESSION_JOIN_OPENAPI_EXTRA = {
     "requestBody": {
@@ -562,6 +563,65 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
             },
         )
 
+    @router.post("/dashboard/session/auth")
+    async def post_member_session_auth(
+        request: Request,
+    ) -> JSONResponse:
+        parsed = await _load_json_object(request)
+        if parsed is None:
+            reason = build_error(INVALID_FIELD, field="body", message="body must be a JSON object.")
+            return JSONResponse(status_code=400, content=_safe_error_payload(reason))
+
+        session_id = parsed.get("session_id")
+        try:
+            normalized_agent = _normalize_agent_name(parsed.get("agent_name"))
+            normalized_member_token = _normalize_member_token(parsed.get("member_token"))
+        except ValueError as exc:
+            reason = build_error(INVALID_FIELD, field="member_token", message=str(exc))
+            return JSONResponse(status_code=400, content=_safe_error_payload(reason))
+        if not isinstance(session_id, str) or not session_id.strip():
+            reason = build_error(INVALID_FIELD, field="session_id", message="session_id is required.")
+            return JSONResponse(status_code=400, content=_safe_error_payload(reason))
+        session_id = session_id.strip()
+
+        # Validate the member_token through the SAME coordination auth path used
+        # by /detail — no shortcut. Only on success do we mint a cookie.
+        try:
+            await runtime.coordination.verify_member(
+                session_id=session_id,
+                agent_name=normalized_agent,
+                member_token=normalized_member_token,
+            )
+        except SessionNotFoundError as exc:
+            reason = build_error(SESSION_NOT_FOUND, field="session_id", message=str(exc))
+            return JSONResponse(status_code=404, content=_safe_error_payload(reason))
+        except SessionAccessError as exc:
+            reason = build_error(INVALID_FIELD, field="session_id", message=str(exc))
+            return JSONResponse(status_code=403, content=_safe_error_payload(reason))
+
+        raw_token = runtime.member_sessions.create(session_id, normalized_agent, normalized_member_token)
+        max_age = getattr(runtime.member_sessions, "ttl_seconds", None)
+        result = JSONResponse(status_code=200, content={"status": "ok"})
+        result.set_cookie(
+            key=_MEMBER_COOKIE_NAME,
+            value=raw_token,
+            httponly=True,
+            samesite="lax",
+            secure=_request_is_secure(request),
+            path="/",
+            max_age=max_age if isinstance(max_age, int) and max_age > 0 else None,
+        )
+        return result
+
+    @router.post("/dashboard/session/auth/logout")
+    async def post_member_session_logout(
+        member_session_cookie: str | None = Cookie(default=None, alias=_MEMBER_COOKIE_NAME),
+    ) -> JSONResponse:
+        runtime.member_sessions.revoke(member_session_cookie)
+        result = JSONResponse(status_code=200, content={"status": "ok"})
+        result.delete_cookie(key=_MEMBER_COOKIE_NAME, path="/")
+        return result
+
     @router.get("/dashboard/overview")
     async def get_dashboard_overview(
         authorization: str | None = Header(default=None),
@@ -758,7 +818,11 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
         token: str | None = Query(default=None),
         dashboard_session_id: str | None = Cookie(default=None, alias=_DASHBOARD_COOKIE_NAME),
         acp_managed_session: str | None = Cookie(default=None),
+        member_session_cookie: str | None = Cookie(default=None, alias=_MEMBER_COOKIE_NAME),
     ) -> JSONResponse:
+        # Admin resolution precedence is UNCHANGED: dashboard cookie -> managed
+        # admin session -> admin token. A member cookie NEVER participates here,
+        # so it can never grant admin (GUARD B: no privilege escalation).
         admin_authorized = _resolve_dashboard_session(runtime, dashboard_session_id) is not None
         if not admin_authorized:
             admin_authorized = _authorize_managed_admin_session(
@@ -768,7 +832,21 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
             )
         # Accept the member token from either the query param or the header so
         # callers can keep the secret out of access logs (see fetchSessionDetail).
+        effective_agent = agent_name
         effective_member_token = member_token or x_acp_member_token
+        # Fall back to the member-session cookie only when no admin auth and no
+        # explicit member creds were supplied. The cookie is an opaque handle to
+        # a server-side {session_id, agent_name, member_token}; we feed that token
+        # back through the SAME coordination auth path (below) as the header/query
+        # flow, so a rejoined/replaced same-name member (new token) fails closed
+        # (GUARD C: full per-request token re-validation, no name-only shortcut).
+        if not admin_authorized and effective_agent is None and effective_member_token is None:
+            member_session = runtime.member_sessions.get(member_session_cookie)
+            # GUARD A (scope isolation): a cookie minted for a different session
+            # must be ignored entirely — never authorizes THIS session_id.
+            if member_session is not None and member_session.session_id == session_id:
+                effective_agent = member_session.agent_name
+                effective_member_token = member_session.member_token
         requested_admin_access = any(
             isinstance(value, str) and value.strip()
             for value in (authorization, x_acp_token, token)
@@ -782,16 +860,16 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
             )
             if auth_error is None:
                 admin_authorized = True
-            elif agent_name is None or effective_member_token is None:
+            elif effective_agent is None or effective_member_token is None:
                 return JSONResponse(status_code=_error_status_code(auth_error), content=_safe_error_payload(auth_error))
 
         normalized_agent: str | None = None
         normalized_member_token: str | None = None
-        if not admin_authorized and (agent_name is not None or effective_member_token is not None):
+        if not admin_authorized and (effective_agent is not None or effective_member_token is not None):
             try:
-                if agent_name is None or effective_member_token is None:
+                if effective_agent is None or effective_member_token is None:
                     raise ValueError("agent_name and member_token are required together.")
-                normalized_agent = _normalize_agent_name(agent_name)
+                normalized_agent = _normalize_agent_name(effective_agent)
                 normalized_member_token = _normalize_member_token(effective_member_token)
             except ValueError as exc:
                 reason = build_error(INVALID_FIELD, field="member_token", message=str(exc))
@@ -873,6 +951,10 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
             reason = build_error(INVALID_FIELD, field="detail", message=str(exc))
             return JSONResponse(status_code=400, content=_safe_error_payload(reason))
 
+        # Invalidate any member-session cookies for the now-closed session so the
+        # store doesn't hold dead records until TTL (per-request re-validation
+        # already denies them; this is eager cleanup).
+        runtime.member_sessions.revoke_for(session_id)
         return JSONResponse(status_code=200, content={"status": "ok", **payload})
 
     @router.post("/sessions/{session_id}/admin/members/{agent_name}/disconnect")
@@ -927,6 +1009,9 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
             reason = build_error(INVALID_FIELD, field="agent_name", message=str(exc))
             return JSONResponse(status_code=400, content=_safe_error_payload(reason))
 
+        # Eagerly drop the disconnected member's cookie(s); per-request
+        # re-validation already denies them, this just avoids dead records.
+        runtime.member_sessions.revoke_for(session_id, normalized_agent)
         return JSONResponse(status_code=200, content={"status": "ok", **payload})
 
     @router.post("/sessions/status")
