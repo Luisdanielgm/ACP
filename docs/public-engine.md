@@ -227,6 +227,7 @@ domain. Users provide their own `--hub-http`.
 
 ## Related docs
 
+- [Quickstart](quickstart.md)
 - [README](../README.md)
 - [Product walkthrough](../PRODUCT_WALKTHROUGH.md)
 - [Public repo boundary](../PUBLIC_REPO_BOUNDARY.md)
