@@ -15,7 +15,7 @@
       </div>
       <div class="hero-status-row">
         <div class="motion-status">{{ motionStatus }}</div>
-        <button type="button" class="ghost compact-action" @click="resetVisuals">{{ t('sd_visual_reset_btn') }}</button>
+        <UiButton type="button" variant="ghost" size="sm" @click="resetVisuals">{{ t('sd_visual_reset_btn') }}</UiButton>
       </div>
       <div class="sub" :class="{ show: showSub }">{{ t('sd_hero_sub') }}</div>
     </section>
@@ -34,7 +34,7 @@
               <div class="access-summary-title">{{ t('sd_access_active_title') }}</div>
               <div class="access-summary-primary">
                 <span class="access-summary-primary-value">{{ session.sessionIdInput.value || '-' }}</span>
-                <button type="button" class="ghost summary-copy-btn" @click="copyValue(session.sessionIdInput.value, t('sd_session_id_meta'))">{{ t('sd_copy_btn') }}</button>
+                <UiButton type="button" variant="ghost" class="summary-copy-btn" @click="copyValue(session.sessionIdInput.value, t('sd_session_id_meta'))">{{ t('sd_copy_btn') }}</UiButton>
               </div>
               <div class="access-summary-secondary">
                 <span class="access-summary-chip">
@@ -48,17 +48,17 @@
                 </span>
               </div>
             </div>
-            <button type="button" class="ghost compact-action" @click="session.accessCompact.value = false">{{ t('sd_edit_access_btn') }}</button>
+            <UiButton type="button" variant="ghost" size="sm" @click="session.accessCompact.value = false">{{ t('sd_edit_access_btn') }}</UiButton>
           </div>
 
           <!-- Full form -->
           <div class="access-form" :data-mode="session.accessMode.value">
             <div class="access-mode-row">
-              <button v-for="mode in (['member', 'admin', 'hybrid'] as const)" :key="mode"
-                type="button" class="access-mode-btn" :class="{ active: session.accessMode.value === mode }"
+              <UiButton v-for="mode in (['member', 'admin', 'hybrid'] as const)" :key="mode"
+                type="button" variant="access-mode" active-style="invert" :active="session.accessMode.value === mode"
                 @click="session.accessMode.value = mode">
                 {{ t('sd_access_mode_' + mode) }}
-              </button>
+              </UiButton>
             </div>
             <div class="access-guide" :class="`mode-${session.accessMode.value}`">
               <div class="access-guide-head">
@@ -93,7 +93,7 @@
                 </label>
               </div>
               <div class="access-actions">
-                <button :disabled="session.loading.value" @click="doLoad">{{ t('sd_load_session_btn') }}</button>
+                <UiButton :disabled="session.loading.value" @click="doLoad">{{ t('sd_load_session_btn') }}</UiButton>
               </div>
             </div>
           </div>
@@ -149,8 +149,8 @@
             <div v-if="session.adminActionsAvailable.value" class="admin-actions">
               <div class="muted" style="font-size:11px;margin-bottom:10px">{{ t('sd_admin_actions_hint') }}</div>
               <div class="access-actions">
-                <button type="button" class="ghost" @click="copyInvite">{{ t('sd_invite_prompt_btn') }}</button>
-                <button type="button" class="ghost danger-ghost" @click="confirmCloseSession">{{ t('sd_close_session_btn') }}</button>
+                <UiButton type="button" variant="ghost" @click="copyInvite">{{ t('sd_invite_prompt_btn') }}</UiButton>
+                <UiButton type="button" variant="danger-ghost" @click="confirmCloseSession">{{ t('sd_close_session_btn') }}</UiButton>
               </div>
             </div>
           </div>
@@ -273,7 +273,7 @@
                       <span>{{ t('sd_last_run_label') }}: {{ runSummary(member.last_run) }}</span>
                     </div>
                     <div v-if="session.adminActionsAvailable.value" class="lane-meta">
-                      <button type="button" class="ghost member-action" @click="confirmDisconnect(member.agent_name)">{{ t('sd_disconnect_member_btn') }}</button>
+                      <UiButton type="button" variant="ghost" size="xs" @click="confirmDisconnect(member.agent_name)">{{ t('sd_disconnect_member_btn') }}</UiButton>
                     </div>
                   </article>
                 </div>
@@ -298,9 +298,9 @@
                     <option v-for="m in session.members.value" :key="m.agent_name" :value="m.agent_name">{{ m.agent_name }}</option>
                   </select>
                 </label>
-                <button type="button" class="filter-chip" :class="{ active: session.problemMode.value }" @click="session.problemMode.value = !session.problemMode.value">
+                <UiButton type="button" variant="filter-chip" :active="session.problemMode.value" @click="session.problemMode.value = !session.problemMode.value">
                   {{ session.problemMode.value ? t('sd_problems_filter_on') : t('sd_problems_filter_off') }}
-                </button>
+                </UiButton>
               </div>
               <div class="problem-summary muted">
                 {{ session.problemSummary.value.memberCount || session.problemSummary.value.eventCount
@@ -378,12 +378,12 @@
             </div>
             <div class="filter-tools">
               <div class="filter-row">
-                <button v-for="f in timelineFilters" :key="f" type="button" class="filter-chip" :class="{ active: session.timelineFilter.value === f }" @click="session.timelineFilter.value = f">
+                <UiButton v-for="f in timelineFilters" :key="f" type="button" variant="filter-chip" :active="session.timelineFilter.value === f" @click="session.timelineFilter.value = f">
                   {{ t('sd_timeline_filter_' + f) }}
-                </button>
-                <button type="button" class="filter-chip" :class="{ active: session.timelineDensity.value === 'compact' }" @click="session.timelineDensity.value = session.timelineDensity.value === 'compact' ? 'detailed' : 'compact'">
+                </UiButton>
+                <UiButton type="button" variant="filter-chip" :active="session.timelineDensity.value === 'compact'" @click="session.timelineDensity.value = session.timelineDensity.value === 'compact' ? 'detailed' : 'compact'">
                   {{ session.timelineDensity.value === 'compact' ? t('sd_timeline_density_compact') : t('sd_timeline_density_detailed') }}
-                </button>
+                </UiButton>
               </div>
             </div>
           </div>
@@ -434,9 +434,9 @@
               <div class="panel-title">{{ t('sd_raw_json_title') }}</div>
               <div class="muted">{{ t('sd_raw_json_sub') }}</div>
             </div>
-            <button type="button" class="ghost raw-toggle" @click="session.showRawJson.value = !session.showRawJson.value">
+            <UiButton type="button" variant="ghost" class="raw-toggle" @click="session.showRawJson.value = !session.showRawJson.value">
               {{ session.showRawJson.value ? t('sd_raw_toggle_hide') : t('sd_raw_toggle_show') }}
-            </button>
+            </UiButton>
           </div>
           <div v-if="session.showRawJson.value" class="panel-body">
             <pre class="raw-json" v-if="session.payload.value">{{ JSON.stringify(session.payload.value, null, 2) }}</pre>
@@ -450,7 +450,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, watchEffect, nextTick } from 'vue'
-import { useI18n, useTheme, useMotion, ThemeToggle, LangToggle, MotionToggle } from '@acp/shared'
+import { useI18n, useTheme, useMotion, ThemeToggle, LangToggle, MotionToggle, UiButton } from '@acp/shared'
 import { messages } from '../i18n'
 import { useSessionDashboard } from '../composables/useSessionDashboard'
 import {
@@ -991,6 +991,7 @@ watchEffect(() => {
 </script>
 
 <style src="../../../shared/src/tokens/dashboard.css"></style>
+<style src="../../../shared/src/tokens/semantic.css"></style>
 <style scoped>
 .page { max-width: 1400px; margin: 0 auto; padding: 24px; position: relative; z-index: 1; }
 .hero, .panel {
@@ -1036,12 +1037,12 @@ watchEffect(() => {
 .access-summary-secondary { display:flex; gap:8px; flex-wrap:wrap; align-items:center; color:var(--muted); font-size:12px; }
 .access-summary-chip { display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px; border:1px solid var(--line); background:var(--soft); }
 .access-summary-chip-label { font-size:10px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--muted); }
-.summary-copy-btn { padding:6px 10px; font-size:10px; border-radius:999px; line-height:1; }
+/* Self-chained to reliably override UiButton's base padding/font/radius on the
+   component root (equal single-class specificity would otherwise depend on
+   style-injection order). Sizing delta from UiButton's variants, kept per-site. */
+.summary-copy-btn.summary-copy-btn { padding:6px 10px; font-size:10px; border-radius:999px; line-height:1; }
 .access-form { display:block; }
 .access-mode-row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
-.access-mode-btn { background:var(--soft); color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:6px 10px; font-size:11px; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; box-shadow:none; cursor:pointer; }
-.access-mode-btn:hover { background:var(--trace-hover); color:var(--ink); border-color:var(--hover-line); box-shadow:none; transform:none; }
-.access-mode-btn.active { background:var(--ink); color:var(--bg); border-color:var(--ink); }
 .access-guide { margin-bottom:14px; padding:12px 14px; border-radius:14px; border:1px solid var(--line); background:var(--card-bg-soft); display:grid; gap:6px; }
 .access-guide.mode-member { border-color:rgba(34,211,238,0.22); background:rgba(34,211,238,0.08); }
 .access-guide.mode-admin { border-color:rgba(251,191,36,0.22); background:rgba(251,191,36,0.08); }
@@ -1065,13 +1066,6 @@ label.access-field span { color:var(--ink); font-weight:700; }
 label.access-field .access-field-hint { color:var(--muted); font-size:11px; line-height:1.45; font-weight:500; }
 input, select { width:100%; border:1px solid var(--line); border-radius:10px; padding:8px 12px; font:inherit; font-size:13px; background:var(--input-bg,transparent); color:var(--ink); transition:all 0.2s ease; outline:none; }
 input:focus, select:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-glow); }
-button { border:0; border-radius:10px; padding:9px 16px; font:inherit; font-size:13px; font-weight:600; background:var(--accent); color:var(--button-ink); cursor:pointer; transition:all 0.25s cubic-bezier(0.16,1,0.3,1); }
-button:hover { background:var(--accent-hover); transform:translateY(-2px); box-shadow:0 6px 20px rgba(34,211,238,0.35); }
-.ghost { background:var(--soft); color:var(--ink); border:1px solid var(--line); box-shadow:none; }
-.ghost:hover { background:var(--trace-hover); border-color:var(--accent); box-shadow:var(--shadow-glow); transform:translateY(-1px); }
-.danger-ghost { color:#f87171; border-color:rgba(248,113,113,0.3); }
-.danger-ghost:hover { background:rgba(248,113,113,0.08); border-color:#f87171; }
-.compact-action { padding:8px 14px; font-size:11px; border-radius:10px; }
 .pill { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:4px 12px; font-size:10px; font-weight:700; letter-spacing:0.05em; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent-glow); text-decoration:none; }
 
 /* Status */
@@ -1205,7 +1199,6 @@ button:hover { background:var(--accent-hover); transform:translateY(-2px); box-s
 .lane-card.is-busy, .member.is-busy { border-color: color-mix(in srgb, var(--member-accent, var(--accent)) 40%, var(--line)); }
 .lane-task { margin-top:12px; border-radius:12px; border:1px solid rgba(34,211,238,0.16); background:rgba(34,211,238,0.08); padding:14px; font-size:12px; line-height:1.6; }
 .lane-task strong { color:var(--accent); }
-.member-action { padding:6px 12px; font-size:11px; border-radius:8px; }
 .lane-activity-row, .member-activity-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px; }
 .activity-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; font-size:10px; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; border:1px solid transparent; }
 .activity-chip.busy { color:#34d399; background:rgba(52,211,153,0.12); border-color:rgba(52,211,153,0.22); }
@@ -1269,9 +1262,6 @@ button:hover { background:var(--accent-hover); transform:translateY(-2px); box-s
 
 /* Filters */
 .filter-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-.filter-chip { background:var(--soft); color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:6px 14px; font-size:11px; font-weight:700; cursor:pointer; transition:all 0.2s ease; }
-.filter-chip:hover { color:var(--ink); border-color:var(--accent); }
-.filter-chip.active { background:var(--accent); color:var(--button-ink); border-color:var(--accent); }
 .filter-tools { display:flex; flex-direction:column; gap:8px; align-items:flex-end; }
 .filter-tools-group { display:flex; gap:8px; align-items:center; }
 .inline-filter { display:inline-flex; align-items:center; gap:8px; color:var(--muted); font-size:11px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; }
@@ -1329,7 +1319,8 @@ button:hover { background:var(--accent-hover); transform:translateY(-2px); box-s
 
 /* Raw JSON */
 .raw-panel.collapsed .panel-body { display:none; }
-.raw-toggle { font-size:11px; padding:6px 14px; border-radius:999px; }
+/* Self-chained: see .summary-copy-btn note above. */
+.raw-toggle.raw-toggle { font-size:11px; padding:6px 14px; border-radius:999px; }
 .raw-json { padding:16px; border-radius:12px; border:1px solid var(--line); background:var(--card-bg-soft); font-family:'JetBrains Mono',monospace; font-size:11px; line-height:1.5; overflow-x:auto; white-space:pre-wrap; max-height:600px; overflow-y:auto; }
 
 /* Empty state */

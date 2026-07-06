@@ -1,0 +1,64 @@
+/*
+ * Canonical semantic token layer.
+ *
+ * Loaded AFTER dashboard.css. Every declaration is either an alias to an
+ * existing dashboard.css token (so it inherits that token's dark/light/system
+ * variants automatically and renders identically) or a NEW scale (radius,
+ * transition, severity) whose values match the literals already hardcoded
+ * across the dashboard views today. Adopting these tokens in place of those
+ * literals in later slices is therefore pixel-identical.
+ *
+ * This file introduces vocabulary only — nothing here changes rendering until
+ * a view is migrated to use it.
+ */
+
+:root {
+  /* Surfaces — aliases of dashboard.css primitives */
+  --surface-0: var(--input-bg);
+  --surface-1: var(--panel);
+  --surface-2: var(--soft);
+  --surface-hover: var(--trace-hover);
+  --surface-card: var(--card-bg);
+  --surface-card-soft: var(--card-bg-soft);
+  --surface-card-strong: var(--card-bg-strong);
+
+  /* Text tiers */
+  --text-strong: var(--ink);
+  --text-muted: var(--muted);
+  --text-subtle: var(--muted-strong);
+
+  /* Borders */
+  --border: var(--line);
+  --border-hover: var(--hover-line);
+
+  /* Radius scale — matches the px literals already used across the views
+     (inputs/buttons 10, cards 14, panels 20). */
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 999px;
+
+  /* Motion — consolidates the "cubic-bezier(0.16, 1, 0.3, 1)" easing +
+     0.15/0.25/0.4s durations repeated inline throughout the dashboard. */
+  --ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-fast: 0.15s var(--ease-standard);
+  --transition-base: 0.25s var(--ease-standard);
+  --transition-slow: 0.4s var(--ease-standard);
+
+  /* Button ink — splits the single --button-ink so a danger variant can
+     differ without a hardcoded hex in the views. */
+  --button-ink-on-accent: var(--button-ink);
+  --button-ink-on-danger: #ffffff;
+
+  /* Severity/role palette — aliases the existing severity tokens so badges
+     stop redeclaring ~25 arbitrary hex values. Adopted in the badge slice. */
+  --severity-live: var(--success);
+  --severity-live-soft: var(--success-soft);
+  --severity-quiet: var(--warning);
+  --severity-quiet-soft: var(--warning-soft);
+  --severity-stale: var(--danger);
+  --severity-stale-soft: var(--danger-soft);
+  --severity-info: var(--info);
+  --severity-unknown: var(--muted-strong);
+}

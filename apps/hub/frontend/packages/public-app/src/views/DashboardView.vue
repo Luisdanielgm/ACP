@@ -18,7 +18,7 @@
     <!-- Notice -->
     <section v-if="noticeText" class="notice-banner">
       <span>{{ noticeText }}</span>
-      <button type="button" class="ghost compact-action" @click="dismissNotice">{{ t('db_notice_dismiss') }}</button>
+      <UiButton type="button" variant="ghost" size="sm" @click="dismissNotice">{{ t('db_notice_dismiss') }}</UiButton>
     </section>
 
     <!-- Layout -->
@@ -39,7 +39,7 @@
                   <span class="access-summary-chip">{{ accessModeLabel }}</span>
                 </div>
               </div>
-              <button type="button" class="ghost compact-action" @click="accessCompact = false">{{ t('db_edit_access_btn') }}</button>
+              <UiButton type="button" variant="ghost" size="sm" @click="accessCompact = false">{{ t('db_edit_access_btn') }}</UiButton>
             </div>
             <!-- Full form -->
             <div class="access-form">
@@ -49,10 +49,10 @@
                   <input v-model="tokenInput" type="password" :placeholder="t('db_global_token_placeholder')" @keyup.enter="doLogin" />
                 </label>
                 <div class="access-actions">
-                  <button :disabled="dashboard.loading.value" @click="doLogin">{{ t('db_login_btn') }}</button>
-                  <button v-if="!dashboard.locked.value" class="ghost" @click="doReload">{{ t('db_reload_btn') }}</button>
-                  <button v-if="!dashboard.locked.value" class="ghost" @click="doLogout">{{ t('db_logout_btn') }}</button>
-                  <button v-if="!dashboard.locked.value" class="ghost" @click="dashboard.clearTraces()">{{ t('db_clear_traces_btn') }}</button>
+                  <UiButton :disabled="dashboard.loading.value" @click="doLogin">{{ t('db_login_btn') }}</UiButton>
+                  <UiButton v-if="!dashboard.locked.value" variant="ghost" @click="doReload">{{ t('db_reload_btn') }}</UiButton>
+                  <UiButton v-if="!dashboard.locked.value" variant="ghost" @click="doLogout">{{ t('db_logout_btn') }}</UiButton>
+                  <UiButton v-if="!dashboard.locked.value" variant="ghost" @click="dashboard.clearTraces()">{{ t('db_clear_traces_btn') }}</UiButton>
                 </div>
               </div>
             </div>
@@ -217,10 +217,10 @@
               <span>{{ t('db_filter_label') }}</span>
               <input v-model="dashboard.filterText.value" :placeholder="t('db_filter_placeholder')" />
             </label>
-            <button type="button" class="filter-chip" :class="{ active: dashboard.issueMode.value }" @click="dashboard.issueMode.value = !dashboard.issueMode.value">
+            <UiButton type="button" variant="filter-chip" :active="dashboard.issueMode.value" @click="dashboard.issueMode.value = !dashboard.issueMode.value">
               {{ dashboard.issueMode.value ? t('db_issues_filter_on') : t('db_issues_filter_off') }}
-            </button>
-            <button type="button" class="ghost compact-action" @click="dashboard.resetFilters()">{{ t('db_reset_btn') }}</button>
+            </UiButton>
+            <UiButton type="button" variant="ghost" size="sm" @click="dashboard.resetFilters()">{{ t('db_reset_btn') }}</UiButton>
           </div>
           <div v-if="!dashboard.filteredSessions.value.length" class="empty-state">
             <span>{{ (dashboard.filterText.value || dashboard.issueMode.value) ? t('db_no_filtered') : t('db_no_sessions') }}</span>
@@ -272,7 +272,7 @@
                 </div>
                 <div style="display:flex;gap:8px;align-items:center">
                   <span class="muted" style="font-size:11px">{{ timeAgo(event.ts, locale) }}</span>
-                  <button class="trace-toggle" @click="toggleTrace(key)">▸ JSON</button>
+                  <UiButton variant="trace-toggle" @click="toggleTrace(key)">▸ JSON</UiButton>
                 </div>
               </div>
               <pre v-if="expandedTraces.has(key)" class="trace-json">{{ JSON.stringify(event, null, 2) }}</pre>
@@ -287,7 +287,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useI18n, useTheme, ThemeToggle, LangToggle } from '@acp/shared'
+import { useI18n, useTheme, ThemeToggle, LangToggle, UiButton } from '@acp/shared'
 import { messages } from '../i18n'
 import { useDashboardOverview } from '../composables/useDashboardOverview'
 import {
@@ -568,6 +568,7 @@ const stopInitialLoadWatch = watch(overview, (value) => {
 </script>
 
 <style src="../../../shared/src/tokens/dashboard.css"></style>
+<style src="../../../shared/src/tokens/semantic.css"></style>
 <style scoped>
 .page { max-width: 1400px; margin: 0 auto; padding: 24px; position: relative; z-index: 1; }
 .hero, .panel {
@@ -601,13 +602,9 @@ const stopInitialLoadWatch = watch(overview, (value) => {
 .grid { display:grid; gap:16px; grid-template-columns:repeat(3, minmax(0,1fr)); }
 .session-grid { display:grid; gap:16px; }
 .filter-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-.filter-chip { background:var(--soft); color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:6px 14px; font-size:11px; font-weight:700; cursor:pointer; transition:all 0.2s ease; }
-.filter-chip:hover { color:var(--ink); border-color:var(--accent); }
-.filter-chip.active { background:var(--accent); color:var(--button-ink); border-color:var(--accent); }
 .inline-filter { display:inline-flex; align-items:center; gap:8px; color:var(--muted); font-size:11px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; }
 .inline-filter input { min-width:180px; padding:8px 14px; border-radius:999px; font-size:13px; font-weight:500; text-transform:none; border:1px solid var(--line); background:var(--input-bg,transparent); color:var(--ink); outline:none; transition:all 0.2s ease; }
 .inline-filter input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-glow); }
-.compact-action { padding:8px 14px; font-size:11px; border-radius:10px; }
 .cockpit-grid { display:grid; gap:16px; grid-template-columns:minmax(0,1.6fr) minmax(280px,0.9fr); }
 .cockpit-card { border:1px solid var(--line); border-radius:18px; padding:20px; background:linear-gradient(180deg,var(--card-bg-soft),var(--soft)); position:relative; overflow:hidden; }
 .cockpit-card::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent,var(--accent-glow),transparent); }
@@ -674,10 +671,6 @@ const stopInitialLoadWatch = watch(overview, (value) => {
 label { display:grid; gap:6px; font-size:12px; font-weight:500; color:var(--muted); }
 input { width:100%; border:1px solid var(--line); border-radius:10px; padding:8px 12px; font:inherit; font-size:13px; background:var(--input-bg,transparent); color:var(--ink); transition:all 0.2s ease; outline:none; }
 input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-glow); }
-button { border:0; border-radius:10px; padding:9px 16px; font:inherit; font-size:13px; font-weight:600; background:var(--accent); color:var(--button-ink); cursor:pointer; transition:all 0.25s cubic-bezier(0.16,1,0.3,1); }
-button:hover { background:var(--accent-hover); transform:translateY(-2px); box-shadow:0 6px 20px rgba(34,211,238,0.35); }
-.ghost { background:var(--soft); color:var(--ink); border:1px solid var(--line); box-shadow:none; }
-.ghost:hover { background:var(--trace-hover); border-color:var(--accent); box-shadow:var(--shadow-glow); transform:translateY(-1px); }
 .muted { color:var(--muted); }
 .pill { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:4px 12px; font-size:10px; font-weight:700; letter-spacing:0.05em; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent-glow); text-decoration:none; }
 .metric { border:1px solid var(--line); border-radius:12px; padding:14px 16px; background:var(--card-bg); position:relative; overflow:hidden; transition:all 0.2s ease; }
@@ -706,8 +699,6 @@ button:hover { background:var(--accent-hover); transform:translateY(-2px); box-s
 .trace-head { display:flex; justify-content:space-between; gap:8px; align-items:center; }
 .trace-summary { font-weight:600; font-size:12px; letter-spacing:0.04em; color:var(--accent); }
 .trace-json { margin-top:8px; padding:12px; border-radius:10px; border:1px solid var(--line); background:var(--card-bg-soft); font-family:'JetBrains Mono',monospace; font-size:11px; line-height:1.5; overflow-x:auto; white-space:pre-wrap; }
-.trace-toggle { background:none; border:1px solid var(--line); color:var(--muted); font-size:11px; padding:6px 12px; border-radius:8px; cursor:pointer; font-weight:600; }
-.trace-toggle:hover { color:var(--ink); border-color:var(--accent); transform:none; box-shadow:none; }
 .status-line { font-size:13px; color:var(--muted); display:flex; align-items:center; gap:8px; }
 .status-line.danger { color:var(--danger); }
 .sections-stack { display:grid; gap:24px; margin-top:24px; }
