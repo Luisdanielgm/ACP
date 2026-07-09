@@ -4,6 +4,7 @@ import hashlib
 import importlib
 import sqlite3
 import sys
+from unittest.mock import AsyncMock
 from urllib.parse import urlparse
 
 import pytest
@@ -433,6 +434,62 @@ def test_owner_member_token_exposed_to_admin_but_never_to_agent_tokens(monkeypat
     assert agent_list.status_code == 200
     for item in agent_list.json()["sessions"]:
         assert "owner_member_token" not in item
+
+
+def test_managed_agent_session_lists_report_live_status_without_guessing_on_snapshot_failure(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    password = _bootstrap_env(monkeypatch, tmp_path)
+    module = _load_managed_app()
+    app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
+    agent_client = TestClient(app)
+    workspace_client = TestClient(app)
+    _login_workspace_admin(workspace_client, password)
+    raw_token = workspace_client.post("/managed/workspaces/team-one/token/rotate").json()["raw_token"]
+    headers = {"Authorization": f"Bearer {raw_token}"}
+    list_paths = (
+        "/managed/agent/sessions",
+        "/managed/agent/workspaces/team-one/sessions",
+    )
+
+    create = agent_client.post(
+        "/managed/agent/sessions",
+        headers=headers,
+        json={"agent_name": "chief-agent", "title": "Live status", "project": "ACP"},
+    )
+    assert create.status_code == 200
+    session_id = create.json()["workspace_session"]["session_id"]
+
+    def assert_live_status(expected: str) -> None:
+        for path in list_paths:
+            response = agent_client.get(path, headers=headers)
+            assert response.status_code == 200
+            session = next(item for item in response.json()["sessions"] if item["session_id"] == session_id)
+            assert session["live_status"] == expected
+
+    assert_live_status("active")
+
+    coordination = app.state.managed_runtime.coordination
+    dashboard_snapshot = coordination.dashboard_snapshot
+    monkeypatch.setattr(
+        coordination,
+        "dashboard_snapshot",
+        AsyncMock(side_effect=RuntimeError("snapshot unavailable")),
+    )
+    assert_live_status("unknown")
+
+    monkeypatch.setattr(
+        coordination,
+        "dashboard_snapshot",
+        AsyncMock(return_value={}),
+    )
+    assert_live_status("unknown")
+
+    monkeypatch.setattr(coordination, "dashboard_snapshot", dashboard_snapshot)
+    close = workspace_client.post(f"/sessions/{session_id}/admin/close", json={})
+    assert close.status_code == 200
+    assert_live_status("closed")
 
 
 def test_managed_agent_token_can_close_and_cleanup_workspace_sessions(monkeypatch, tmp_path) -> None:

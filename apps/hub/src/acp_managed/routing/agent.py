@@ -118,7 +118,40 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
     ) -> JSONResponse:
         token_record, workspace = current_agent_token(request=request, slug=slug)
         records = principal_store.list_workspace_sessions(workspace_id=workspace.workspace_id)
-        sessions = [_sanitize_workspace_session(item) for item in records]
+        live_session_ids: set[str] = set()
+        snapshot_available = False
+        try:
+            snapshot = await runtime.coordination.dashboard_snapshot()
+            if not isinstance(snapshot, dict):
+                raise TypeError("dashboard snapshot must be an object")
+            if "sessions" not in snapshot:
+                raise TypeError("dashboard snapshot must include sessions")
+            live_sessions = snapshot["sessions"]
+            if not isinstance(live_sessions, list):
+                raise TypeError("dashboard snapshot sessions must be a list")
+            for live_session in live_sessions:
+                if not isinstance(live_session, dict):
+                    raise TypeError("dashboard snapshot session entries must be objects")
+                session_id = live_session.get("session_id")
+                if not isinstance(session_id, str) or not session_id:
+                    raise TypeError("dashboard snapshot session entries must include session_id")
+                live_session_ids.add(session_id)
+            snapshot_available = True
+        except Exception:
+            # Persisted sessions still exist when coordination is unavailable;
+            # absence from a failed snapshot does not prove that they are closed.
+            pass
+
+        sessions = []
+        for item in records:
+            session = _sanitize_workspace_session(item)
+            if not snapshot_available:
+                session["live_status"] = "unknown"
+            elif item.session_id in live_session_ids:
+                session["live_status"] = "active"
+            else:
+                session["live_status"] = "closed"
+            sessions.append(session)
         return JSONResponse(
             {
                 "workspace": _sanitize_workspace(workspace),
