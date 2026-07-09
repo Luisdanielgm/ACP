@@ -59,7 +59,7 @@
 
         <div class="workspace-grid">
           <div class="primary-stack">
-            <article class="surface-card">
+            <article class="surface-card" ref="createSessionSection">
               <div class="section-head">
                 <span class="section-chip section-chip-accent">{{ t('workspace_primary_section') }}</span>
                 <h2 id="session-heading">{{ t('workspace_sessions_title') }}</h2>
@@ -118,7 +118,7 @@
                 <p>{{ t('workspace_recent_sessions_body') }}</p>
               </div>
 
-              <div v-if="sessions.length === 0" class="empty-state compact">
+              <div v-if="activeSessions.length === 0" class="empty-state compact">
                 <div class="empty-icon" aria-hidden="true">
                   <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 </div>
@@ -128,7 +128,7 @@
 
               <div v-else class="session-cards">
                 <RouterLink
-                  v-for="s in sessions"
+                  v-for="s in activeSessions"
                   :key="s.session_id"
                   :to="sessionDetailPath(s)"
                   class="session-card"
@@ -156,6 +156,62 @@
                   </div>
                   <span class="session-card-action">{{ t('open_session_detail') }} &rarr;</span>
                 </RouterLink>
+              </div>
+
+              <div class="closed-sessions-block">
+                <button
+                  type="button"
+                  class="closed-sessions-toggle"
+                  :aria-expanded="showClosedSessions"
+                  aria-controls="closed-sessions-panel"
+                  @click="showClosedSessions = !showClosedSessions"
+                >
+                  <span class="closed-sessions-caret" :class="{ open: showClosedSessions }" aria-hidden="true">&#9656;</span>
+                  {{ t('closed_sessions_toggle', { count: closedSessions.length }) }}
+                </button>
+
+                <div v-if="showClosedSessions" id="closed-sessions-panel" class="closed-sessions-panel">
+                  <ul class="closed-sessions-notes">
+                    <li>{{ t('closed_sessions_note_1') }}</li>
+                    <li>{{ t('closed_sessions_note_2') }}</li>
+                    <li>{{ t('closed_sessions_note_3') }}</li>
+                  </ul>
+
+                  <p v-if="closedSessions.length === 0" class="empty-body">{{ t('closed_sessions_empty') }}</p>
+
+                  <div v-else class="closed-session-list">
+                    <div v-for="s in closedSessions" :key="s.session_id" class="closed-session-item">
+                      <RouterLink
+                        :to="sessionDetailPath(s)"
+                        class="session-card closed-session-link"
+                        :aria-label="`${s.owner_agent_name} — ${s.title || t('untitled_session')} — ${t('open_session_detail')}`"
+                      >
+                        <div class="session-card-main">
+                          <div class="session-card-agent">{{ s.owner_agent_name }}</div>
+                          <div class="session-card-title">{{ s.title || t('untitled_session') }}</div>
+                          <div class="session-card-meta">
+                            <span class="pill session-status-pill pill-status-none" :title="sessionStatusTooltip(s)">
+                              <span class="pill-icon" aria-hidden="true">○</span>
+                              {{ t('session_status_closed') }}
+                            </span>
+                            <code class="session-id">{{ s.session_id }}</code>
+                            <span v-if="s.project" class="session-project">{{ s.project }}</span>
+                            <time class="session-time" :datetime="s.created_at" :title="formatAbsolute(s.created_at)">{{ relativeTime(s.created_at) }}</time>
+                          </div>
+                        </div>
+                        <span class="session-card-action">{{ t('open_session_detail') }} &rarr;</span>
+                      </RouterLink>
+                      <div class="closed-session-actions">
+                        <button type="button" class="secondary-button" @click="prefillFromClosedSession(s)">
+                          {{ t('create_from_closed_session') }}
+                        </button>
+                        <button type="button" class="danger" @click="requestDeleteSession(s)" :disabled="deleteSessionLoading">
+                          {{ t('delete_closed_session') }}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </article>
           </div>
@@ -267,12 +323,22 @@
         @confirm="handleConfirmRevoke"
         @cancel="handleCancelRevoke"
       />
+      <ConfirmDialog
+        :open="showConfirmDeleteSession"
+        :title="t('confirm_delete_session_title')"
+        :message="t('confirm_delete_session_body')"
+        :confirm-label="t('confirm_delete_session_btn')"
+        :cancel-label="t('confirm_cancel')"
+        :resource-name="sessionPendingDelete?.title || t('untitled_session')"
+        @confirm="handleConfirmDeleteSession"
+        @cancel="handleCancelDeleteSession"
+      />
     </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import ManagedNav from '../components/ManagedNav.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -287,12 +353,13 @@ import {
   rotateWorkspaceToken,
   revokeWorkspaceToken,
   createWorkspaceSession,
+  deleteWorkspaceSession,
   type Workspace,
   type WorkspaceMembership,
   type AgentToken,
   type WorkspaceSession,
 } from '../api/managed'
-import { getApiErrorMessage } from '../api/client'
+import { ApiError, getApiErrorMessage } from '../api/client'
 import { buildManagedSessionDashboardPath } from '../lib/sessionLive'
 
 const route = useRoute()
@@ -320,6 +387,18 @@ const pageBanner = ref<{ title: string; body: string } | null>(null)
 
 const newSession = ref({ agent_name: '', title: '', project: '', prompt: '' })
 const sessionErrors = ref({ agent_name: '', title: '', project: '' })
+
+// ── Closed sessions ──
+const showClosedSessions = ref(false)
+const sessionPendingDelete = ref<WorkspaceSession | null>(null)
+const showConfirmDeleteSession = ref(false)
+const deleteSessionLoading = ref(false)
+const createSessionSection = ref<HTMLElement | null>(null)
+
+const activeSessions = computed(() => sessions.value.filter((s) => s.live_status === 'active'))
+// Anything not explicitly "active" (closed, or missing live_status on older backends)
+// is treated as closed — same rule the status pill already used before this split.
+const closedSessions = computed(() => sessions.value.filter((s) => s.live_status !== 'active'))
 
 function validateSession(): boolean {
   const errors = { agent_name: '', title: '', project: '' }
@@ -437,6 +516,51 @@ async function handleConfirmRevoke() {
 
 function handleCancelRevoke() {
   showConfirmRevoke.value = false
+}
+
+function requestDeleteSession(session: WorkspaceSession) {
+  sessionPendingDelete.value = session
+  showConfirmDeleteSession.value = true
+}
+
+async function handleConfirmDeleteSession() {
+  const session = sessionPendingDelete.value
+  showConfirmDeleteSession.value = false
+  if (!session) return
+  deleteSessionLoading.value = true
+  try {
+    await deleteWorkspaceSession(slug.value, session.session_id)
+    toast.show(t('session_deleted_success'), 'success')
+    await loadData()
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409) {
+      toast.show(t('session_delete_conflict'), 'error')
+      await loadData()
+    } else {
+      toast.show(getApiErrorMessage(err), 'error')
+    }
+  } finally {
+    deleteSessionLoading.value = false
+    sessionPendingDelete.value = null
+  }
+}
+
+function handleCancelDeleteSession() {
+  showConfirmDeleteSession.value = false
+  sessionPendingDelete.value = null
+}
+
+async function prefillFromClosedSession(session: WorkspaceSession) {
+  newSession.value = {
+    agent_name: '',
+    title: session.title ?? '',
+    project: session.project ?? '',
+    prompt: '',
+  }
+  clearSessionErrors()
+  createSessionSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  await nextTick()
+  document.getElementById('agent-name')?.focus()
 }
 
 async function copyToken() {
@@ -947,6 +1071,72 @@ watch(slug, async () => {
   transition: all var(--transition-fast);
 }
 
+/* ── Closed Sessions ── */
+.closed-sessions-block {
+  margin-top: 16px;
+  border-top: 1px solid var(--glass-border);
+  padding-top: 16px;
+}
+.closed-sessions-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+.closed-sessions-toggle:hover {
+  color: var(--accent);
+}
+.closed-sessions-caret {
+  display: inline-block;
+  font-size: 0.7rem;
+  transition: transform var(--transition-fast);
+}
+.closed-sessions-caret.open {
+  transform: rotate(90deg);
+}
+.closed-sessions-panel {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.closed-sessions-notes {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--text-3);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+.closed-session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.closed-session-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.closed-session-link {
+  opacity: 0.85;
+}
+.closed-session-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-left: 4px;
+}
+
 /* ── Empty State ── */
 .empty-state {
   text-align: center;
@@ -1204,6 +1394,7 @@ watch(slug, async () => {
 .copy-btn:focus-visible,
 .page-banner-dismiss:focus-visible,
 .shortcut-button:focus-visible,
+.closed-sessions-toggle:focus-visible,
 .workspace-form input:focus-visible,
 .workspace-form textarea:focus-visible {
   outline: none;

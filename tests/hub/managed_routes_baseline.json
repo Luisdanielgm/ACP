@@ -1,5 +1,5 @@
 {
-  "route_count": 101,
+  "route_count": 102,
   "routes": [
     {
       "path": "/",
@@ -413,6 +413,12 @@
       "path": "/managed/workspaces/{slug}/sessions",
       "methods": [
         "POST"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/sessions/{session_id}",
+      "methods": [
+        "DELETE"
       ]
     },
     {

@@ -506,6 +506,52 @@ def test_managed_agent_token_can_close_and_cleanup_workspace_sessions(monkeypatc
     assert final_list.json()["sessions"] == []
 
 
+def test_workspace_admin_can_delete_closed_session_but_not_active(monkeypatch, tmp_path) -> None:
+    password = _bootstrap_env(monkeypatch, tmp_path)
+    module = _load_managed_app()
+    app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
+    workspace_client = TestClient(app)
+    anon_client = TestClient(app)
+    _login_workspace_admin(workspace_client, password)
+
+    created = workspace_client.post(
+        "/managed/workspaces/team-one/sessions",
+        json={"agent_name": "demo-chief", "title": "Cleanup demo", "project": "ACP"},
+    )
+    assert created.status_code == 200, created.text
+    session_id = created.json()["workspace_session"]["session_id"]
+
+    # Auth is required — an anonymous client cannot delete.
+    assert anon_client.delete(f"/managed/workspaces/team-one/sessions/{session_id}").status_code in (401, 403)
+
+    # A session that is still live must NOT be deletable (no killing active agents).
+    refuse = workspace_client.delete(f"/managed/workspaces/team-one/sessions/{session_id}")
+    assert refuse.status_code == 409, refuse.text
+    # ...and the record is still there, still reported active.
+    dash = workspace_client.get("/managed/workspaces/team-one").json()
+    active = next(s for s in dash["sessions"] if s["session_id"] == session_id)
+    assert active["live_status"] == "active"
+
+    # Close the core session from the dashboard — this leaves a dangling managed
+    # record (core hard-deletes, managed row persists as live_status="closed").
+    assert workspace_client.post(f"/sessions/{session_id}/admin/close", json={}).status_code == 200
+    dash_closed = workspace_client.get("/managed/workspaces/team-one").json()
+    closed = next(s for s in dash_closed["sessions"] if s["session_id"] == session_id)
+    assert closed["live_status"] == "closed"
+
+    # Now the closed record can be removed from the list.
+    removed = workspace_client.delete(f"/managed/workspaces/team-one/sessions/{session_id}")
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["status"] == "deleted"
+
+    # The record is gone; the list no longer carries it.
+    dash_after = workspace_client.get("/managed/workspaces/team-one").json()
+    assert all(s["session_id"] != session_id for s in dash_after["sessions"])
+
+    # Deleting an unknown session id is a 404.
+    assert workspace_client.delete("/managed/workspaces/team-one/sessions/does-not-exist").status_code == 404
+
+
 def test_workspace_admin_can_create_session_from_workspace_panel(monkeypatch, tmp_path) -> None:
     password = _bootstrap_env(monkeypatch, tmp_path)
     module = _load_managed_app()

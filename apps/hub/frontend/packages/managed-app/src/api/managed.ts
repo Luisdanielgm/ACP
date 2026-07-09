@@ -225,6 +225,13 @@ export async function createWorkspaceSession(slug: string, data: { agent_name: s
   })
 }
 
+export async function deleteWorkspaceSession(slug: string, sessionId: string) {
+  return apiFetch<{ status: string; session_id: string }>(
+    `/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}`,
+    { method: 'DELETE' },
+  )
+}
+
 export async function fetchSessionDetail(slug: string, sessionId: string) {
   return apiFetch<{ workspace: Workspace; workspace_session: WorkspaceSession; acp_session: any | null }>(`/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}`)
 }

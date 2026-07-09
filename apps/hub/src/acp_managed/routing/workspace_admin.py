@@ -461,6 +461,47 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
             raise HTTPException(status_code=404, detail="managed workspace session does not exist")
         return principal, workspace, record
 
+    @router.delete("/managed/workspaces/{slug}/sessions/{session_id}")
+    async def managed_delete_workspace_session(
+        slug: str,
+        session_id: str,
+        acp_managed_session: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        # Removes a CLOSED session's persisted managed record — the metadata row
+        # that lingers after the core coordination session was hard-deleted on
+        # close (the core has no "closed" state; close = delete). This never
+        # touches a session that is still live, so active agents are never
+        # disrupted; closing an active session remains a separate action.
+        _, workspace, record = _require_workspace_session_record(
+            slug=slug,
+            session_id=session_id,
+            acp_managed_session=acp_managed_session,
+        )
+        live_ids: set[str] = set()
+        try:
+            snapshot = await runtime.coordination.dashboard_snapshot()
+            for live_session in snapshot.get("sessions", []) or []:
+                sid = live_session.get("session_id") if isinstance(live_session, dict) else None
+                if isinstance(sid, str) and sid:
+                    live_ids.add(sid)
+        except Exception:
+            # If liveness can't be confirmed, refuse rather than risk deleting
+            # the record of a session that may still be active.
+            raise HTTPException(status_code=503, detail="cannot verify session state; try again")
+        if record.session_id in live_ids:
+            raise HTTPException(
+                status_code=409,
+                detail="session is still active; close it before removing it from the list",
+            )
+        principal_store.delete_workspace_session(session_id=record.session_id)
+        return JSONResponse(
+            {
+                "status": "deleted",
+                "workspace": _sanitize_workspace(workspace),
+                "session_id": record.session_id,
+            }
+        )
+
     @router.get("/managed/workspaces/{slug}/sessions/{session_id}/wall")
     async def managed_workspace_session_wall(
         slug: str,

@@ -212,6 +212,18 @@ export const en: Record<string, string> = {
   open_session_detail: 'Open session detail',
   open_json_view: 'Open JSON view',
   session_create_denied: 'Only the workspace admin can create new ACP sessions.',
+  closed_sessions_toggle: 'Closed sessions ({count})',
+  closed_sessions_empty: 'No closed sessions yet.',
+  closed_sessions_note_1: 'A closed session is no longer active — no agent currently holds it.',
+  closed_sessions_note_2: 'Removing a session from this list only deletes its record here. It does not stop any active agents.',
+  closed_sessions_note_3: '"Create new from this" starts a brand-new session — it does not reactivate the closed one.',
+  delete_closed_session: 'Remove from list',
+  create_from_closed_session: 'Create new from this',
+  confirm_delete_session_title: 'Remove session from list',
+  confirm_delete_session_body: 'This removes the record for "{name}" from this list. It does not affect any live agents.',
+  confirm_delete_session_btn: 'Remove',
+  session_deleted_success: 'Session removed from the list.',
+  session_delete_conflict: 'This session is still active and cannot be removed. Reload the page to see its current state.',
 
   // ── Session Detail ──
   session_detail_kicker: 'Session Detail',
