@@ -46,9 +46,9 @@ const { t } = useI18n(messages)
 
 /* Health */
 .summary-health { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:6px 14px; font-size:11px; font-weight:800; letter-spacing:0.06em; text-transform:uppercase; }
-.summary-health.healthy { color:#34d399; background:rgba(52,211,153,0.08); border:1px solid rgba(52,211,153,0.22); }
-.summary-health.warning { color:#fbbf24; background:rgba(251,191,36,0.08); border:1px solid rgba(251,191,36,0.22); }
-.summary-health.critical { color:#f87171; background:rgba(248,113,113,0.08); border:1px solid rgba(248,113,113,0.22); }
+.summary-health.healthy { color:#5DCAA5; background:rgba(93,202,165,0.08); border:1px solid rgba(93,202,165,0.22); }
+.summary-health.warning { color:#EF9F27; background:rgba(239,159,39,0.08); border:1px solid rgba(239,159,39,0.22); }
+.summary-health.critical { color:#F0997B; background:rgba(240,153,123,0.08); border:1px solid rgba(240,153,123,0.22); }
 
 .access-actions { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
 .admin-actions { margin-top:8px; }

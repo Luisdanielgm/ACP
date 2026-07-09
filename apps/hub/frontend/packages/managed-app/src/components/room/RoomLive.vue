@@ -78,16 +78,16 @@
     <template v-if="session.payload.value">
       <!-- Signal legend (toggled from the bar) -->
       <div v-if="legendOpen" class="signal-legend">
-        <span class="legend-chip"><span class="legend-line" style="background:#fbbf24"></span>{{ st('sd_legend_task') }}</span>
-        <span class="legend-chip"><span class="legend-line" style="background:#22d3ee"></span>{{ st('sd_legend_info') }}</span>
-        <span class="legend-chip"><span class="legend-line" style="background:#a78bfa"></span>{{ st('sd_legend_reply') }}</span>
+        <span class="legend-chip"><span class="legend-line" style="background:#EF9F27"></span>{{ st('sd_legend_task') }}</span>
+        <span class="legend-chip"><span class="legend-line" style="background:#85B7EB"></span>{{ st('sd_legend_info') }}</span>
+        <span class="legend-chip"><span class="legend-line" style="background:#AFA9EC"></span>{{ st('sd_legend_reply') }}</span>
         <span class="legend-chip">
           <span class="legend-work" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
           {{ st('sd_legend_working') }}
         </span>
-        <span class="legend-chip" :title="st('sd_legend_issue_low_help')"><span class="legend-dot" style="background:#c084fc"></span>{{ st('sd_legend_issue_low') }}</span>
-        <span class="legend-chip" :title="st('sd_legend_issue_medium_help')"><span class="legend-dot" style="background:#fbbf24"></span>{{ st('sd_legend_issue_medium') }}</span>
-        <span class="legend-chip" :title="st('sd_legend_issue_high_help')"><span class="legend-dot" style="background:#f87171"></span>{{ st('sd_legend_issue_high') }}</span>
+        <span class="legend-chip" :title="st('sd_legend_issue_low_help')"><span class="legend-dot" style="background:#AFA9EC"></span>{{ st('sd_legend_issue_low') }}</span>
+        <span class="legend-chip" :title="st('sd_legend_issue_medium_help')"><span class="legend-dot" style="background:#EF9F27"></span>{{ st('sd_legend_issue_medium') }}</span>
+        <span class="legend-chip" :title="st('sd_legend_issue_high_help')"><span class="legend-dot" style="background:#F0997B"></span>{{ st('sd_legend_issue_high') }}</span>
       </div>
 
       <!-- Pulse strip: what is happening right now -->
@@ -416,9 +416,9 @@ watchEffect(() => {
   white-space: nowrap;
 }
 .health-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-.health-dot.healthy { background: #34d399; box-shadow: 0 0 8px rgba(52, 211, 153, 0.5); }
-.health-dot.warning { background: #fbbf24; box-shadow: 0 0 8px rgba(251, 191, 36, 0.5); }
-.health-dot.critical { background: #f87171; box-shadow: 0 0 8px rgba(248, 113, 113, 0.5); }
+.health-dot.healthy { background: #5DCAA5; box-shadow: 0 0 8px rgba(93, 202, 165, 0.5); }
+.health-dot.warning { background: #EF9F27; box-shadow: 0 0 8px rgba(239, 159, 39, 0.5); }
+.health-dot.critical { background: #F0997B; box-shadow: 0 0 8px rgba(240, 153, 123, 0.5); }
 .health-dot.polling { animation: health-pulse 2s ease-in-out infinite; }
 @keyframes health-pulse {
   0%, 100% { transform: scale(1); opacity: 1; }
@@ -438,12 +438,12 @@ watchEffect(() => {
   font-size: 0.78rem;
   font-weight: 700;
 }
-.room-chip.warn { color: #fbbf24; border-color: rgba(251, 191, 36, 0.3); background: rgba(251, 191, 36, 0.08); }
+.room-chip.warn { color: #EF9F27; border-color: rgba(239, 159, 39, 0.3); background: rgba(239, 159, 39, 0.08); }
 .room-chip.traffic { text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.68rem; }
-.room-chip.traffic.low { color: #34d399; border-color: rgba(52, 211, 153, 0.22); background: rgba(16, 185, 129, 0.08); }
-.room-chip.traffic.medium { color: #fbbf24; border-color: rgba(251, 191, 36, 0.24); background: rgba(251, 191, 36, 0.1); }
-.room-chip.traffic.high { color: #f87171; border-color: rgba(248, 113, 113, 0.24); background: rgba(248, 113, 113, 0.1); }
-.room-chip.traffic.critical { color: #c084fc; border-color: rgba(192, 132, 252, 0.24); background: rgba(192, 132, 252, 0.1); }
+.room-chip.traffic.low { color: #5DCAA5; border-color: rgba(93, 202, 165, 0.22); background: rgba(29, 158, 117, 0.08); }
+.room-chip.traffic.medium { color: #EF9F27; border-color: rgba(239, 159, 39, 0.24); background: rgba(239, 159, 39, 0.1); }
+.room-chip.traffic.high { color: #F0997B; border-color: rgba(240, 153, 123, 0.24); background: rgba(240, 153, 123, 0.1); }
+.room-chip.traffic.critical { color: #AFA9EC; border-color: rgba(175, 169, 236, 0.24); background: rgba(175, 169, 236, 0.1); }
 
 .room-actions { margin-left: auto; display: inline-flex; gap: 8px; }
 .icon-button {
@@ -461,7 +461,7 @@ watchEffect(() => {
   transition: all 0.15s ease;
 }
 .icon-button:hover, .icon-button.active { color: var(--ink); border-color: var(--hover-line); background: var(--soft); }
-.icon-button.danger:hover { color: #f87171; border-color: rgba(248, 113, 113, 0.4); background: rgba(248, 113, 113, 0.08); }
+.icon-button.danger:hover { color: #F0997B; border-color: rgba(240, 153, 123, 0.4); background: rgba(240, 153, 123, 0.08); }
 
 /* Error + loading */
 .room-error {
@@ -471,10 +471,10 @@ watchEffect(() => {
   gap: 12px;
   flex-wrap: wrap;
   padding: 10px 16px;
-  border: 1px solid rgba(248, 113, 113, 0.3);
+  border: 1px solid rgba(240, 153, 123, 0.3);
   border-radius: 14px;
-  background: rgba(248, 113, 113, 0.08);
-  color: #f87171;
+  background: rgba(240, 153, 123, 0.08);
+  color: #F0997B;
   font-size: 0.88rem;
 }
 .room-loading {
@@ -495,7 +495,7 @@ watchEffect(() => {
 .legend-line { width: 18px; height: 3px; border-radius: 2px; }
 .legend-dot { width: 8px; height: 8px; border-radius: 50%; }
 .legend-work { display: inline-flex; align-items: flex-end; gap: 3px; height: 14px; }
-.legend-work span { display: inline-block; width: 4px; border-radius: 999px; background: #34d399; animation: work-bars 1s steps(3, end) infinite; transform-origin: bottom; }
+.legend-work span { display: inline-block; width: 4px; border-radius: 999px; background: #5DCAA5; animation: work-bars 1s steps(3, end) infinite; transform-origin: bottom; }
 .legend-work span:nth-child(1) { height: 5px; animation-delay: 0s; }
 .legend-work span:nth-child(2) { height: 11px; animation-delay: 0.16s; }
 .legend-work span:nth-child(3) { height: 7px; animation-delay: 0.32s; }
@@ -505,12 +505,12 @@ watchEffect(() => {
 /* Pulse strip */
 .pulse-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .pulse-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--soft); color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
-.pulse-chip.task { color: #fbbf24; border-color: rgba(251, 191, 36, 0.24); background: rgba(251, 191, 36, 0.1); }
-.pulse-chip.info { color: #22d3ee; border-color: rgba(34, 211, 238, 0.24); background: rgba(34, 211, 238, 0.1); }
-.pulse-chip.reply { color: #a78bfa; border-color: rgba(167, 139, 250, 0.24); background: rgba(167, 139, 250, 0.1); }
-.pulse-chip.busy { color: #34d399; border-color: rgba(52, 211, 153, 0.22); background: rgba(52, 211, 153, 0.1); }
-.pulse-chip.immediate { color: #67e8f9; border-color: rgba(103, 232, 249, 0.24); background: rgba(34, 211, 238, 0.08); }
-.pulse-chip.queued { color: #fbbf24; border-color: rgba(251, 191, 36, 0.2); background: rgba(251, 191, 36, 0.08); opacity: 0.88; }
+.pulse-chip.task { color: #EF9F27; border-color: rgba(239, 159, 39, 0.24); background: rgba(239, 159, 39, 0.1); }
+.pulse-chip.info { color: #85B7EB; border-color: rgba(133, 183, 235, 0.24); background: rgba(133, 183, 235, 0.1); }
+.pulse-chip.reply { color: #AFA9EC; border-color: rgba(175, 169, 236, 0.24); background: rgba(175, 169, 236, 0.1); }
+.pulse-chip.busy { color: #5DCAA5; border-color: rgba(93, 202, 165, 0.22); background: rgba(93, 202, 165, 0.1); }
+.pulse-chip.immediate { color: #B5D4F4; border-color: rgba(181, 212, 244, 0.24); background: rgba(133, 183, 235, 0.08); }
+.pulse-chip.queued { color: #EF9F27; border-color: rgba(239, 159, 39, 0.2); background: rgba(239, 159, 39, 0.08); opacity: 0.88; }
 .pulse-chip.dequeued { color: #f8fafc; border-color: rgba(248, 250, 252, 0.22); background: rgba(148, 163, 184, 0.12); }
 
 /* Cockpit */

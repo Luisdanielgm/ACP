@@ -208,7 +208,7 @@ textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent
   transition: all 0.15s ease;
 }
 .icon-button:hover { color: var(--ink); border-color: var(--hover-line); }
-.icon-button.danger:hover { color: #f87171; border-color: rgba(248, 113, 113, 0.4); }
+.icon-button.danger:hover { color: #F0997B; border-color: rgba(240, 153, 123, 0.4); }
 .icon-button:disabled { opacity: 0.5; cursor: default; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>

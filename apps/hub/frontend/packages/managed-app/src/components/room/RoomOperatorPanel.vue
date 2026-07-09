@@ -131,9 +131,9 @@ select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-s
   cursor: pointer;
   transition: all 0.15s ease;
 }
-.action-chip.active.task { color: #fbbf24; border-color: rgba(251, 191, 36, 0.4); background: rgba(251, 191, 36, 0.1); }
-.action-chip.active.info { color: #22d3ee; border-color: rgba(34, 211, 238, 0.4); background: rgba(34, 211, 238, 0.1); }
-.action-chip.active.reply { color: #a78bfa; border-color: rgba(167, 139, 250, 0.4); background: rgba(167, 139, 250, 0.1); }
+.action-chip.active.task { color: #EF9F27; border-color: rgba(239, 159, 39, 0.4); background: rgba(239, 159, 39, 0.1); }
+.action-chip.active.info { color: #85B7EB; border-color: rgba(133, 183, 235, 0.4); background: rgba(133, 183, 235, 0.1); }
+.action-chip.active.reply { color: #AFA9EC; border-color: rgba(175, 169, 236, 0.4); background: rgba(175, 169, 236, 0.1); }
 .action-chip:disabled { opacity: 0.5; cursor: default; }
 textarea {
   width: 100%;

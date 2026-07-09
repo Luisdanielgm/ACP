@@ -262,7 +262,7 @@ input[type='file']::file-selector-button:hover { border-color: var(--accent); co
   transition: all 0.15s ease;
 }
 .icon-button:hover { color: var(--ink); border-color: var(--hover-line); }
-.icon-button.danger:hover { color: #f87171; border-color: rgba(248, 113, 113, 0.4); }
+.icon-button.danger:hover { color: #F0997B; border-color: rgba(240, 153, 123, 0.4); }
 .icon-button:disabled { opacity: 0.5; cursor: default; }
 @media (max-width: 720px) {
   .file-form-row { flex-direction: column; align-items: stretch; }

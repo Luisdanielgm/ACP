@@ -32,9 +32,9 @@ defineProps<{
   border-radius: 50%;
   background: currentColor;
 }
-.success { color: var(--success, #10b981); }
-.warning { color: var(--warning, #f59e0b); }
-.danger { color: var(--danger, #ef4444); }
-.info { color: var(--info, #8b5cf6); }
+.success { color: var(--success, #1D9E75); }
+.warning { color: var(--warning, #EF9F27); }
+.danger { color: var(--danger, #D85A30); }
+.info { color: var(--info, #7F77DD); }
 .muted { color: var(--muted, #8b94a7); }
 </style>

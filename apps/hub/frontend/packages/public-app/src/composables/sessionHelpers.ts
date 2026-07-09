@@ -25,16 +25,16 @@ export function roleIcon(role: string | undefined): string {
 
 export function roleTone(role: string | undefined): string {
   const r = normalizedRole(role)
-  if (r === 'chief') return '#facc15'
-  if (r === 'collaborator') return '#818cf8'
-  return '#22d3ee'
+  if (r === 'chief') return '#EF9F27'
+  if (r === 'collaborator') return '#1D9E75'
+  return '#85B7EB'
 }
 
 export function statusTone(status: string | undefined): string {
   const s = String(status || '').toLowerCase()
-  if (s === 'busy') return '#f87171'
-  if (s === 'waiting') return '#fbbf24'
-  return '#34d399'
+  if (s === 'busy') return '#F0997B'
+  if (s === 'waiting') return '#EF9F27'
+  return '#5DCAA5'
 }
 
 // ── Heartbeat ──
@@ -115,9 +115,9 @@ export function primaryIssueLabel(issues: Issue[]): string {
 }
 
 export function issueAccent(level: string): string {
-  if (level === 'high') return '#f87171'
-  if (level === 'medium') return '#fbbf24'
-  if (level === 'low') return '#c084fc'
+  if (level === 'high') return '#F0997B'
+  if (level === 'medium') return '#EF9F27'
+  if (level === 'low') return '#AFA9EC'
   return 'transparent'
 }
 
@@ -144,18 +144,19 @@ export function deliveryMode(event: SessionEvent): string {
 }
 
 export function actionTone(action: string): string {
+  // Map route strokes read better one ramp-stop deeper than the chip tints.
   const a = String(action || '').toUpperCase()
-  if (a === 'TASK') return '#fbbf24'
-  if (a === 'REPLY') return '#a78bfa'
-  if (a === 'INFO') return '#22d3ee'
+  if (a === 'TASK') return '#EF9F27'
+  if (a === 'REPLY') return '#7F77DD'
+  if (a === 'INFO') return '#378ADD'
   return '#a1a1aa'
 }
 
 export function actionSoft(action: string): string {
   const a = String(action || '').toUpperCase()
-  if (a === 'TASK') return 'rgba(251,191,36,0.12)'
-  if (a === 'REPLY') return 'rgba(167,139,250,0.12)'
-  if (a === 'INFO') return 'rgba(34,211,238,0.12)'
+  if (a === 'TASK') return 'rgba(239,159,39,0.12)'
+  if (a === 'REPLY') return 'rgba(175,169,236,0.12)'
+  if (a === 'INFO') return 'rgba(133,183,235,0.12)'
   return 'rgba(161,161,170,0.08)'
 }
 

@@ -14,7 +14,7 @@ const { copy, copied } = useClipboard()
 
 <style scoped>
 .copy-btn {
-  background: var(--accent, #22d3ee);
+  background: var(--accent, #85B7EB);
   color: var(--button-ink, #000);
   border: none;
   border-radius: 999px;

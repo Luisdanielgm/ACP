@@ -19,11 +19,11 @@ export function roleGlyph(role: string | undefined): string {
 
 export function roleTone(role: string | undefined): string {
   const r = String(role || '').toLowerCase()
-  if (r === 'chief') return '#22d3ee'
-  if (r === 'planner') return '#fbbf24'
+  if (r === 'chief') return '#85B7EB'
+  if (r === 'planner') return '#EF9F27'
   if (r === 'reviewer') return '#fb7185'
-  if (r === 'admin') return '#c084fc'
-  return '#34d399'
+  if (r === 'admin') return '#AFA9EC'
+  return '#5DCAA5'
 }
 
 export function memberIssues(member: MemberData, connectedSet: Set<string> = new Set()): string[] {

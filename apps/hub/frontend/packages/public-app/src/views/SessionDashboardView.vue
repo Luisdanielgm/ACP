@@ -76,16 +76,16 @@
           <div class="panel-body">
             <!-- Signal legend -->
             <div class="signal-legend" role="img" :aria-label="t('sd_squad_map_title')">
-              <span class="legend-chip"><span class="legend-line" style="background:#fbbf24"></span>{{ t('sd_legend_task') }}</span>
-              <span class="legend-chip"><span class="legend-line" style="background:#22d3ee"></span>{{ t('sd_legend_info') }}</span>
-              <span class="legend-chip"><span class="legend-line" style="background:#a78bfa"></span>{{ t('sd_legend_reply') }}</span>
+              <span class="legend-chip"><span class="legend-line" style="background:#EF9F27"></span>{{ t('sd_legend_task') }}</span>
+              <span class="legend-chip"><span class="legend-line" style="background:#85B7EB"></span>{{ t('sd_legend_info') }}</span>
+              <span class="legend-chip"><span class="legend-line" style="background:#AFA9EC"></span>{{ t('sd_legend_reply') }}</span>
               <span class="legend-chip">
                 <span class="legend-work" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
                 {{ t('sd_legend_working') }}
               </span>
-              <span class="legend-chip" :title="t('sd_legend_issue_low_help')"><span class="legend-dot" style="background:#c084fc"></span>{{ t('sd_legend_issue_low') }}</span>
-              <span class="legend-chip" :title="t('sd_legend_issue_medium_help')"><span class="legend-dot" style="background:#fbbf24"></span>{{ t('sd_legend_issue_medium') }}</span>
-              <span class="legend-chip" :title="t('sd_legend_issue_high_help')"><span class="legend-dot" style="background:#f87171"></span>{{ t('sd_legend_issue_high') }}</span>
+              <span class="legend-chip" :title="t('sd_legend_issue_low_help')"><span class="legend-dot" style="background:#AFA9EC"></span>{{ t('sd_legend_issue_low') }}</span>
+              <span class="legend-chip" :title="t('sd_legend_issue_medium_help')"><span class="legend-dot" style="background:#EF9F27"></span>{{ t('sd_legend_issue_medium') }}</span>
+              <span class="legend-chip" :title="t('sd_legend_issue_high_help')"><span class="legend-dot" style="background:#F0997B"></span>{{ t('sd_legend_issue_high') }}</span>
             </div>
             <div v-if="pulseChips.length" class="pulse-strip">
               <span class="pulse-strip-label">{{ t('sd_session_cockpit_title') }}</span>
@@ -385,10 +385,10 @@ watchEffect(() => {
 /* Traffic */
 .traffic-status { display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:flex-end; }
 .traffic-chip { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:999px; border:1px solid var(--line); background:var(--soft); font-size:10px; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; color:var(--muted); }
-.traffic-chip.low { color:#34d399; border-color:rgba(52,211,153,0.22); background:rgba(16,185,129,0.08); }
-.traffic-chip.medium { color:#fbbf24; border-color:rgba(251,191,36,0.24); background:rgba(251,191,36,0.1); }
-.traffic-chip.high { color:#f87171; border-color:rgba(248,113,113,0.24); background:rgba(248,113,113,0.1); }
-.traffic-chip.critical { color:#c084fc; border-color:rgba(192,132,252,0.24); background:rgba(192,132,252,0.1); }
+.traffic-chip.low { color:#5DCAA5; border-color:rgba(93,202,165,0.22); background:rgba(29,158,117,0.08); }
+.traffic-chip.medium { color:#EF9F27; border-color:rgba(239,159,39,0.24); background:rgba(239,159,39,0.1); }
+.traffic-chip.high { color:#F0997B; border-color:rgba(240,153,123,0.24); background:rgba(240,153,123,0.1); }
+.traffic-chip.critical { color:#AFA9EC; border-color:rgba(175,169,236,0.24); background:rgba(175,169,236,0.1); }
 
 /* Signal legend */
 .signal-legend { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:18px; padding:12px 16px; border:1px solid var(--line); border-radius:12px; background:var(--card-bg-soft); }
@@ -396,7 +396,7 @@ watchEffect(() => {
 .legend-line { width:18px; height:3px; border-radius:2px; }
 .legend-dot { width:8px; height:8px; border-radius:50%; }
 .legend-work { display:inline-flex; align-items:flex-end; gap:3px; height:14px; }
-.legend-work span { display:inline-block; width:4px; border-radius:999px; background:#34d399; box-shadow:0 0 12px rgba(52,211,153,0.26); animation:work-bars 1s steps(3, end) infinite; transform-origin:bottom; }
+.legend-work span { display:inline-block; width:4px; border-radius:999px; background:#5DCAA5; box-shadow:0 0 12px rgba(93,202,165,0.26); animation:work-bars 1s steps(3, end) infinite; transform-origin:bottom; }
 .legend-work span:nth-child(1) { height:5px; animation-delay:0s; }
 .legend-work span:nth-child(2) { height:11px; animation-delay:0.16s; }
 .legend-work span:nth-child(3) { height:7px; animation-delay:0.32s; }
@@ -404,12 +404,12 @@ watchEffect(() => {
 .pulse-strip { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:-2px 0 18px; padding:10px 14px; border:1px solid var(--line); border-radius:14px; background:linear-gradient(180deg,var(--card-bg-soft),transparent); }
 .pulse-strip-label { font-size:10px; font-weight:800; letter-spacing:0.12em; text-transform:uppercase; color:var(--muted); margin-right:4px; }
 .pulse-chip { display:inline-flex; align-items:center; gap:6px; min-height:28px; padding:6px 12px; border-radius:999px; border:1px solid var(--line); background:var(--soft); color:var(--muted); font-size:10px; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; }
-.pulse-chip.task { color:#fbbf24; border-color:rgba(251,191,36,0.24); background:rgba(251,191,36,0.1); }
-.pulse-chip.info { color:#22d3ee; border-color:rgba(34,211,238,0.24); background:rgba(34,211,238,0.1); }
-.pulse-chip.reply { color:#a78bfa; border-color:rgba(167,139,250,0.24); background:rgba(167,139,250,0.1); }
-.pulse-chip.busy { color:#34d399; border-color:rgba(52,211,153,0.22); background:rgba(52,211,153,0.1); }
-.pulse-chip.immediate { color:#67e8f9; border-color:rgba(103,232,249,0.24); background:rgba(34,211,238,0.08); }
-.pulse-chip.queued { color:#fbbf24; border-color:rgba(251,191,36,0.2); background:rgba(251,191,36,0.08); opacity:0.88; }
+.pulse-chip.task { color:#EF9F27; border-color:rgba(239,159,39,0.24); background:rgba(239,159,39,0.1); }
+.pulse-chip.info { color:#85B7EB; border-color:rgba(133,183,235,0.24); background:rgba(133,183,235,0.1); }
+.pulse-chip.reply { color:#AFA9EC; border-color:rgba(175,169,236,0.24); background:rgba(175,169,236,0.1); }
+.pulse-chip.busy { color:#5DCAA5; border-color:rgba(93,202,165,0.22); background:rgba(93,202,165,0.1); }
+.pulse-chip.immediate { color:#B5D4F4; border-color:rgba(181,212,244,0.24); background:rgba(133,183,235,0.08); }
+.pulse-chip.queued { color:#EF9F27; border-color:rgba(239,159,39,0.2); background:rgba(239,159,39,0.08); opacity:0.88; }
 .pulse-chip.dequeued { color:#f8fafc; border-color:rgba(248,250,252,0.22); background:rgba(148,163,184,0.12); }
 .pulse-chip.neutral { color:var(--ink); }
 

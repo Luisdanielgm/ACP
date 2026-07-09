@@ -178,13 +178,13 @@ const accessGuide = computed(() => {
 .access-form { display:block; }
 .access-mode-row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
 .access-guide { margin-bottom:14px; padding:12px 14px; border-radius:14px; border:1px solid var(--line); background:var(--card-bg-soft); display:grid; gap:6px; }
-.access-guide.mode-member { border-color:rgba(34,211,238,0.22); background:rgba(34,211,238,0.08); }
-.access-guide.mode-admin { border-color:rgba(251,191,36,0.22); background:rgba(251,191,36,0.08); }
-.access-guide.mode-hybrid { border-color:rgba(167,139,250,0.22); background:rgba(167,139,250,0.08); }
+.access-guide.mode-member { border-color:rgba(133,183,235,0.22); background:rgba(133,183,235,0.08); }
+.access-guide.mode-admin { border-color:rgba(239,159,39,0.22); background:rgba(239,159,39,0.08); }
+.access-guide.mode-hybrid { border-color:rgba(175,169,236,0.22); background:rgba(175,169,236,0.08); }
 .access-guide-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; color:var(--ink); }
 .access-guide-head strong { font-size:12px; letter-spacing:0.02em; }
 .access-guide p { margin:0; color:var(--muted-strong, var(--muted)); font-size:12px; line-height:1.6; }
-.access-guide-badge { display:inline-flex; align-items:center; padding:4px 10px; border-radius:999px; border:1px solid rgba(34,211,238,0.22); background:rgba(34,211,238,0.14); color:var(--accent); font-size:10px; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; }
+.access-guide-badge { display:inline-flex; align-items:center; padding:4px 10px; border-radius:999px; border:1px solid rgba(133,183,235,0.22); background:rgba(133,183,235,0.14); color:var(--accent); font-size:10px; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; }
 .access-grid { display:grid; gap:10px; }
 .access-credentials { display:grid; gap:12px; grid-template-columns:repeat(2, minmax(0,1fr)); min-width:0; }
 .access-form[data-mode="member"] .admin-access-field { display:none; }

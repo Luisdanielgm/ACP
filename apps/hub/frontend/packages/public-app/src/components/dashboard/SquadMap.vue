@@ -153,12 +153,12 @@ const squadMapSvg = computed(() => {
 .cockpit-card { border:1px solid var(--line); border-radius:18px; padding:20px; background:linear-gradient(180deg,var(--card-bg-soft),var(--soft)); position:relative; overflow:hidden; }
 .cockpit-card::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent,var(--accent-glow),transparent); }
 .cockpit-card::after { content:''; position:absolute; inset:-20% auto auto -10%; width:180px; height:180px; border-radius:50%; background:radial-gradient(circle, color-mix(in srgb, var(--accent) 16%, transparent) 0%, transparent 70%); opacity:0.22; pointer-events:none; filter:blur(6px); transition:transform 0.4s ease, opacity 0.3s ease; }
-.cockpit-card[data-load="medium"] { border-color:rgba(251,191,36,0.24); box-shadow:0 10px 28px rgba(251,191,36,0.08); }
-.cockpit-card[data-load="high"] { border-color:rgba(248,113,113,0.28); box-shadow:0 12px 32px rgba(248,113,113,0.1); }
-.cockpit-card[data-load="critical"] { border-color:rgba(192,132,252,0.3); box-shadow:0 14px 40px rgba(192,132,252,0.14); }
-.cockpit-card[data-load="medium"]::after { background:radial-gradient(circle, rgba(251,191,36,0.18) 0%, transparent 72%); opacity:0.26; }
-.cockpit-card[data-load="high"]::after { background:radial-gradient(circle, rgba(248,113,113,0.2) 0%, transparent 74%); opacity:0.3; transform:translate3d(16px, 8px, 0); }
-.cockpit-card[data-load="critical"]::after { background:radial-gradient(circle, rgba(192,132,252,0.24) 0%, transparent 76%); opacity:0.34; transform:translate3d(24px, 12px, 0) scale(1.05); }
+.cockpit-card[data-load="medium"] { border-color:rgba(239,159,39,0.24); box-shadow:0 10px 28px rgba(239,159,39,0.08); }
+.cockpit-card[data-load="high"] { border-color:rgba(240,153,123,0.28); box-shadow:0 12px 32px rgba(240,153,123,0.1); }
+.cockpit-card[data-load="critical"] { border-color:rgba(175,169,236,0.3); box-shadow:0 14px 40px rgba(175,169,236,0.14); }
+.cockpit-card[data-load="medium"]::after { background:radial-gradient(circle, rgba(239,159,39,0.18) 0%, transparent 72%); opacity:0.26; }
+.cockpit-card[data-load="high"]::after { background:radial-gradient(circle, rgba(240,153,123,0.2) 0%, transparent 74%); opacity:0.3; transform:translate3d(16px, 8px, 0); }
+.cockpit-card[data-load="critical"]::after { background:radial-gradient(circle, rgba(175,169,236,0.24) 0%, transparent 76%); opacity:0.34; transform:translate3d(24px, 12px, 0) scale(1.05); }
 .cockpit-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:16px; }
 .cockpit-title { font-size:15px; font-weight:700; letter-spacing:-0.02em; }
 .cockpit-sub { font-size:12px; color:var(--muted); line-height:1.5; margin-top:4px; }
@@ -174,14 +174,14 @@ const squadMapSvg = computed(() => {
 .squad-canvas :deep(.node-subtext) { font-size:11px; fill:var(--muted); }
 .squad-canvas :deep(.radar-ring) { fill:none; stroke:var(--signal-line); stroke-width:1; stroke-dasharray:3 7; opacity:0.55; }
 .squad-canvas :deep(.node-status) { stroke:var(--node-core); stroke-width:2; }
-.squad-canvas :deep(.node-pending circle) { fill:#fbbf24; stroke:var(--node-core); stroke-width:2; }
+.squad-canvas :deep(.node-pending circle) { fill:#EF9F27; stroke:var(--node-core); stroke-width:2; }
 .squad-canvas :deep(.node-pending text) { fill:#231a02; font-size:10px; font-weight:800; }
 .squad-canvas :deep(.signal-line) { stroke:var(--signal-line); stroke-width:2; }
 .squad-canvas :deep(.signal-line.route-pulse) { stroke-width:3; stroke-dasharray:8 10; stroke-linecap:round; animation:route-pulse 1.45s cubic-bezier(0.22,1,0.36,1) infinite; }
 .squad-canvas :deep(.signal-line.route-pulse.queued) { opacity:0.42; animation-duration:1.95s; }
 .squad-canvas :deep(.signal-line.route-pulse.dequeued) { opacity:0.74; animation-duration:1.1s; }
 .squad-canvas :deep(.node-shell) { fill:var(--node-core); stroke:var(--shell-stroke); stroke-width:2; }
-.squad-canvas :deep(.node-ring.online) { filter:drop-shadow(0 0 8px rgba(34,211,238,0.2)); }
+.squad-canvas :deep(.node-ring.online) { filter:drop-shadow(0 0 8px rgba(133,183,235,0.2)); }
 .squad-canvas :deep(.node-ring.offline) { opacity:0.55; }
 .squad-canvas :deep(.node-ring.offline .node-shell) { stroke-dasharray:4 5; }
 .squad-canvas :deep(.node-aura) { fill:none; stroke:var(--member-accent, var(--accent)); stroke-width:2; opacity:0.2; transform-origin:center; }

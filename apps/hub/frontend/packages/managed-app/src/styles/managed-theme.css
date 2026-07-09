@@ -7,19 +7,19 @@
   --text-2: var(--muted);
   --text-3: var(--muted-strong);
 
-  --accent: var(--accent-color, #22d3ee);
+  --accent: var(--accent-color, #85B7EB);
   --accent-glow: color-mix(in srgb, var(--accent) 35%, transparent);
   --accent-subtle: color-mix(in srgb, var(--accent) 12%, transparent);
 
-  --success: #22c55e;
+  --success: #1D9E75;
   --success-glow: color-mix(in srgb, var(--success) 35%, transparent);
   --success-subtle: color-mix(in srgb, var(--success) 12%, transparent);
 
-  --danger: #ef4444;
+  --danger: #D85A30;
   --danger-glow: color-mix(in srgb, var(--danger) 35%, transparent);
   --danger-subtle: color-mix(in srgb, var(--danger) 12%, transparent);
 
-  --warning: #f59e0b;
+  --warning: #EF9F27;
   --warning-glow: color-mix(in srgb, var(--warning) 35%, transparent);
   --warning-subtle: color-mix(in srgb, var(--warning) 12%, transparent);
 

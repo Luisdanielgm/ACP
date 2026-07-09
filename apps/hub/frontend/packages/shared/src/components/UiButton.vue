@@ -53,7 +53,7 @@ defineEmits<{ click: [event: MouseEvent] }>()
   background: var(--accent-hover);
   transform: translateY(-2px);
   /* NOTE: hardcoded glow shadow preserved verbatim from source (not tokenized) */
-  box-shadow: 0 6px 20px rgba(34, 211, 238, 0.35);
+  box-shadow: 0 6px 20px rgba(133, 183, 235, 0.35);
 }
 
 /* .ghost from both views */
@@ -77,13 +77,13 @@ defineEmits<{ click: [event: MouseEvent] }>()
    the source, so they are preserved here too. Hardcoded hex preserved verbatim. */
 .ui-btn.danger-ghost {
   background: var(--soft);
-  color: #f87171;
-  border: 1px solid rgba(248, 113, 113, 0.3);
+  color: #F0997B;
+  border: 1px solid rgba(240, 153, 123, 0.3);
   box-shadow: none;
 }
 .ui-btn.danger-ghost:hover {
-  background: rgba(248, 113, 113, 0.08);
-  border-color: #f87171;
+  background: rgba(240, 153, 123, 0.08);
+  border-color: #F0997B;
   box-shadow: var(--shadow-glow);
   transform: translateY(-1px);
 }

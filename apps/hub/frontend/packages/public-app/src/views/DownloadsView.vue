@@ -276,7 +276,7 @@ watchEffect(() => {
   height: 14px;
   border-radius: 999px;
   background: radial-gradient(circle at 30% 30%, #dff9ff 0%, var(--accent) 45%, var(--accent-deep) 100%);
-  box-shadow: 0 0 18px rgba(34, 211, 238, 0.35);
+  box-shadow: 0 0 18px rgba(133, 183, 235, 0.35);
 }
 
 .controls, .links, .hero-actions {
@@ -317,8 +317,8 @@ p { color: var(--muted); line-height: 1.7; }
   gap: 8px;
   padding: 7px 12px;
   border-radius: 999px;
-  border: 1px solid rgba(34, 211, 238, 0.24);
-  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(133, 183, 235, 0.24);
+  background: rgba(133, 183, 235, 0.1);
   color: var(--accent);
   font-size: 0.78rem;
   letter-spacing: 0.08em;
@@ -356,8 +356,8 @@ p { color: var(--muted); line-height: 1.7; }
   gap: 8px;
   padding: 7px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(34, 211, 238, 0.22);
-  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(133, 183, 235, 0.22);
+  background: rgba(133, 183, 235, 0.1);
   color: var(--accent);
   font-size: 0.78rem;
   font-weight: 700;
@@ -386,7 +386,7 @@ p { color: var(--muted); line-height: 1.7; }
   margin-top: 10px;
   padding: 12px 14px;
   border-radius: 14px;
-  border: 1px solid rgba(34, 211, 238, 0.16);
+  border: 1px solid rgba(133, 183, 235, 0.16);
   background: rgba(0, 0, 0, 0.18);
   color: #b8f4ff;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -404,8 +404,8 @@ html[data-theme="light"] .code {
   margin-top: 12px;
   padding: 12px 14px;
   border-radius: 14px;
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(216, 90, 48, 0.2);
+  background: rgba(216, 90, 48, 0.08);
   color: var(--text);
   font-size: 0.9rem;
 }
@@ -429,8 +429,8 @@ html[data-theme="light"] .code {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: linear-gradient(135deg, var(--accent-soft), rgba(34, 211, 238, 0.06));
-  border: 1px solid rgba(34, 211, 238, 0.12);
+  background: linear-gradient(135deg, var(--accent-soft), rgba(133, 183, 235, 0.06));
+  border: 1px solid rgba(133, 183, 235, 0.12);
   display: flex;
   align-items: center;
   justify-content: center;
