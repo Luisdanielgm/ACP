@@ -20,6 +20,7 @@ export default defineConfig({
       '/managed/admin': 'http://localhost:8000',
       '/managed/agent': 'http://localhost:8000',
       '/managed/dashboard/auth': 'http://localhost:8000',
+      '/dashboard/session': 'http://localhost:8000',
       '/ws': { target: 'http://localhost:8000', ws: true },
       '/health': 'http://localhost:8000',
       '/sessions': 'http://localhost:8000',

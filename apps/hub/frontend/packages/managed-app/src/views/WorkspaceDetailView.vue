@@ -360,7 +360,6 @@ import {
   type WorkspaceSession,
 } from '../api/managed'
 import { ApiError, getApiErrorMessage } from '../api/client'
-import { buildManagedSessionDashboardPath } from '../lib/sessionLive'
 
 const route = useRoute()
 const router = useRouter()
@@ -436,14 +435,6 @@ function sessionStatusTooltip(session: WorkspaceSession): string {
   }
   if (parts.length === 0) return t('session_status_active_tooltip')
   return parts.join(', ')
-}
-
-function livePath(session: WorkspaceSession) {
-  return buildManagedSessionDashboardPath({
-    sessionId: session.session_id,
-    agentName: session.owner_agent_name,
-    memberToken: session.owner_member_token,
-  })
 }
 
 function sessionDetailPath(session: WorkspaceSession) {
@@ -611,7 +602,7 @@ async function openCreatedSession(data: { workspace_session: WorkspaceSession },
   if (requestedAgentName) {
     notifyResolvedAgentName(requestedAgentName, data.workspace_session)
   }
-  await router.push(livePath(data.workspace_session))
+  await router.push(sessionDetailPath(data.workspace_session))
 }
 
 async function quickCreate(agentName: string) {

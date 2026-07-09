@@ -65,12 +65,20 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/managed/ui/workspaces/:slug/sessions/:sessionId',
     name: 'session-detail',
-    component: () => import('../views/SessionDetailView.vue'),
+    component: () => import('../views/SessionRoomView.vue'),
   },
   {
+    // The live dashboard and the session detail merged into the session room;
+    // old /live links land on the unified view.
     path: '/managed/ui/workspaces/:slug/sessions/:sessionId/live',
     name: 'session-live',
-    component: () => import('../views/SessionLiveView.vue'),
+    redirect: to => ({
+      name: 'session-detail',
+      params: {
+        slug: String(to.params.slug ?? ''),
+        sessionId: String(to.params.sessionId ?? ''),
+      },
+    }),
   },
   {
     path: '/managed/invitations/:token',

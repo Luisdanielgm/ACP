@@ -18,6 +18,7 @@ export default defineConfig({
       '/agents': 'http://localhost:8000',
       '/sessions': 'http://localhost:8000',
       '/dashboard/auth': 'http://localhost:8000',
+      '/dashboard/session': 'http://localhost:8000',
       '/dashboard/overview': 'http://localhost:8000',
       '/api': 'http://localhost:8000',
     },

@@ -11,18 +11,31 @@ import {
 
 export type AccessMode = 'member' | 'admin' | 'hybrid'
 export type TimelineFilter = 'all' | 'session' | 'message' | 'wait' | 'status'
-export type TimelineDensity = 'detailed' | 'compact'
 
 const STORAGE_KEY = 'acp_session_dashboard_access'
+
+// Lets a host view (e.g. managed-app embedding this dashboard) supply access
+// directly instead of relying on the standalone dashboard's URL query/hash/
+// sessionStorage resolution. See `applyProgrammaticContext` below.
+export interface DashboardContext {
+  sessionId: string
+  agentName?: string
+  memberToken?: string
+  adminToken?: string
+}
 
 export interface UseSessionDashboardOptions {
   authEndpoint?: string
   redirectPath?: string
+  context?: DashboardContext
 }
 
 export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
   const authEndpoint = options.authEndpoint || '/dashboard/auth/session'
   const redirectPath = options.redirectPath || '/dashboard'
+  // Captured once: a static, programmatically-supplied access context. When
+  // present it takes over `loadFromQueryOrStorage` entirely (see below).
+  const programmaticContext = options.context || null
 
   const route = useRoute()
   const router = useRouter()
@@ -49,7 +62,6 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
 
   // ── Filters ──
   const timelineFilter = ref<TimelineFilter>('all')
-  const timelineDensity = ref<TimelineDensity>('detailed')
   const agentFilter = ref('')
   const problemMode = ref(false)
   const showRawJson = ref(false)
@@ -124,6 +136,9 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
   // ── Access persistence ──
 
   function persistAccess() {
+    // Programmatic context is supplied fresh by the host view on every mount;
+    // never stash it under this dashboard's own sessionStorage key.
+    if (programmaticContext) return
     try {
       // member_token is intentionally NOT persisted: it is exchanged once for an
       // httpOnly cookie that survives reload and authenticates the poll. Only
@@ -365,25 +380,41 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
 
   // ── Lifecycle ──
 
+  function applyProgrammaticContext() {
+    if (!programmaticContext) return
+    sessionIdInput.value = programmaticContext.sessionId
+    agentNameInput.value = programmaticContext.agentName || ''
+    memberTokenInput.value = programmaticContext.memberToken || ''
+    adminTokenInput.value = programmaticContext.adminToken || ''
+  }
+
   async function loadFromQueryOrStorage() {
-    const hasQueryContext = Boolean(
-      route.query.session_id ||
-      route.query.agent_name ||
-      route.query.member_token ||
-      route.query.token ||
-      readMemberTokenFromHash(),
-    )
-    if (hasQueryContext) {
-      applyQueryParams()
+    if (programmaticContext) {
+      // Host view supplies access directly: skip URL query/hash and
+      // sessionStorage resolution entirely. The member token (if any) still
+      // goes through the same one-time authMemberSession exchange below via
+      // loadSession(), and is dropped from memory right after.
+      applyProgrammaticContext()
     } else {
-      restoreAccess()
-      // Resuming from storage after a reload: the member token was never
-      // persisted, but the httpOnly cookie survives the reload. Treat the
-      // member session as already exchanged so the poll rides the cookie with
-      // no token. If the cookie is gone/expired, the first poll's 401/403
-      // routes back to the access form.
-      if (sessionIdInput.value.trim() && agentNameInput.value.trim() && !memberTokenInput.value.trim()) {
-        memberSessionExchanged = true
+      const hasQueryContext = Boolean(
+        route.query.session_id ||
+        route.query.agent_name ||
+        route.query.member_token ||
+        route.query.token ||
+        readMemberTokenFromHash(),
+      )
+      if (hasQueryContext) {
+        applyQueryParams()
+      } else {
+        restoreAccess()
+        // Resuming from storage after a reload: the member token was never
+        // persisted, but the httpOnly cookie survives the reload. Treat the
+        // member session as already exchanged so the poll rides the cookie with
+        // no token. If the cookie is gone/expired, the first poll's 401/403
+        // routes back to the access form.
+        if (sessionIdInput.value.trim() && agentNameInput.value.trim() && !memberTokenInput.value.trim()) {
+          memberSessionExchanged = true
+        }
       }
     }
     if (sessionIdInput.value.trim()) {
@@ -453,7 +484,6 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
     problemSummary,
     // Filters
     timelineFilter,
-    timelineDensity,
     agentFilter,
     problemMode,
     showRawJson,
