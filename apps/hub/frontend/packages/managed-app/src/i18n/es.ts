@@ -340,6 +340,8 @@ export const es: Record<string, string> = {
   room_tab_timeline: 'Actividad',
   room_tab_json: 'JSON',
   room_dock_label: 'Paneles de la sala',
+  nav_collapse_sidebar: 'Contraer menu lateral',
+  nav_expand_sidebar: 'Expandir menu lateral',
   room_legend_toggle: 'Leyenda de senales',
   room_live_retry: 'Reintentar',
   session_room_missing: 'No se encontro la sesion en este workspace.',

@@ -5,12 +5,8 @@
     </header>
     <main id="main-content">
       <section class="room-page">
-        <div class="room-toolbar">
-          <RouterLink :to="`/managed/ui/workspaces/${encodeURIComponent(slug)}`" class="back-link">
-            <RoomIcon name="arrow-left" :size="15" />
-            {{ t('session_back_to_sessions') }}
-          </RouterLink>
-          <div v-if="session" class="toolbar-meta">
+        <div v-if="session" class="room-toolbar">
+          <div class="toolbar-meta">
             <span class="pill">{{ session.owner_agent_name }}</span>
             <span v-if="session.project" class="pill">{{ session.project }}</span>
             <span class="pill mono">{{ session.session_id }}</span>
@@ -47,7 +43,6 @@ import { computed, onMounted, ref, watch, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import ManagedNav from '../components/ManagedNav.vue'
 import SkeletonBlock from '../components/SkeletonBlock.vue'
-import RoomIcon from '../components/room/RoomIcon.vue'
 import RoomLive from '../components/room/RoomLive.vue'
 import { fetchSessionDetail, type WorkspaceSession } from '../api/managed'
 import { getApiErrorMessage } from '../api/client'
@@ -112,21 +107,10 @@ watchEffect(() => {
 .room-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   flex-wrap: wrap;
 }
-.back-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  text-decoration: none;
-  font-size: 0.86rem;
-  font-weight: 600;
-  transition: color 0.15s ease;
-}
-.back-link:hover { color: var(--ink); }
 .toolbar-meta { display: inline-flex; gap: 8px; flex-wrap: wrap; }
 .pill {
   display: inline-flex;

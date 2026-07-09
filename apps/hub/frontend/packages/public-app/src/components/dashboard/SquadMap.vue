@@ -36,6 +36,10 @@ const props = defineProps<{
 
 const { t } = useI18n(messages)
 
+function clipText(value: string, max = 26): string {
+  return value.length > max ? value.slice(0, max - 1) + '…' : value
+}
+
 const squadMapSvg = computed(() => {
   const p = props.payload
   if (!p || !p.members?.length) return ''
@@ -49,23 +53,38 @@ const squadMapSvg = computed(() => {
   if (!chiefMember) return ''
 
   const others = members.filter(m => m.agent_name !== chiefMember.agent_name)
-  const width = 1080
-  const height = Math.max(300, 160 + others.length * 30)
-  const chiefX = 200
-  const chiefY = height / 2
+
+  // Radial hub layout: the chief sits at the center and teammates orbit on a
+  // ring around it. Reads as a map at a glance and stays balanced whether the
+  // room has one member or twelve.
+  const ringRadius = others.length ? Math.min(240, 170 + others.length * 8) : 0
+  const width = 1000
+  const height = others.length ? ringRadius * 2 + 230 : 430
+  const cx = width / 2
+  const cy = height / 2
 
   const nodes = new Map<string, { x: number; y: number; member: SessionMember }>()
   let markup = ''
 
-  nodes.set(chiefMember.agent_name, { x: chiefX, y: chiefY, member: chiefMember })
+  // Radar rings give the canvas spatial context even when the room is quiet.
+  const rings = others.length
+    ? [ringRadius * 0.45, ringRadius * 0.75, ringRadius * 1.06]
+    : [70, 120, 170]
+  rings.forEach(r => {
+    markup += `<circle class="radar-ring" cx="${cx}" cy="${cy}" r="${r.toFixed(1)}" />`
+  })
 
+  nodes.set(chiefMember.agent_name, { x: cx, y: cy, member: chiefMember })
+
+  // One or two teammates read best on the horizontal axis; three or more
+  // start at 12 o'clock and distribute evenly.
+  const startAngle = others.length <= 2 ? 0 : -Math.PI / 2
   others.forEach((member, mi) => {
-    const total = Math.max(1, others.length - 1)
-    const baseX = others.length === 1 ? 760 : 470 + (mi * 420) / total
-    const offset = others.length === 1 ? 0 : (mi % 2 === 0 ? -40 : 40)
-    const y = chiefY + offset
-    nodes.set(member.agent_name, { x: baseX, y, member })
-    markup += `<line class="signal-line" x1="${chiefX}" y1="${chiefY}" x2="${baseX}" y2="${y}" />`
+    const angle = startAngle + (mi * 2 * Math.PI) / others.length
+    const x = cx + ringRadius * Math.cos(angle)
+    const y = cy + ringRadius * Math.sin(angle)
+    nodes.set(member.agent_name, { x, y, member })
+    markup += `<line class="signal-line" x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" />`
   })
 
   // Animated routes
@@ -90,6 +109,7 @@ const squadMapSvg = computed(() => {
   // Nodes
   nodes.forEach(node => {
     const m = node.member
+    const isChief = m.agent_name === chiefMember.agent_name
     const palette = memberPalette(m)
     const hbState = heartbeatState(m, cs)
     const liveClass = hbState === 'stale' ? 'offline' : 'online'
@@ -99,15 +119,28 @@ const squadMapSvg = computed(() => {
       activity.hasOutgoing ? 'message-send' : '',
       activity.hasIncoming ? 'message-receive' : '',
     ].filter(Boolean).join(' ')
+    const coreR = isChief ? 23 : 19
+    const shellR = isChief ? 33 : 28
+    const auraR = isChief ? 41 : 36
+    const pending = Number(m.pending_count || 0)
+    const statusLabel = translateStatus(t, m.status) || m.status || '-'
+    const pendingBadge = pending
+      ? `<g class="node-pending">
+          <circle cx="${(node.x - shellR + 4).toFixed(1)}" cy="${(node.y - shellR + 6).toFixed(1)}" r="9.5"/>
+          <text x="${(node.x - shellR + 4).toFixed(1)}" y="${(node.y - shellR + 9.5).toFixed(1)}" text-anchor="middle">${pending > 9 ? '9+' : pending}</text>
+        </g>`
+      : ''
     markup += `
-      <g class="node-ring ${liveClass} ${activityClasses}">
-        <circle class="node-aura" cx="${node.x}" cy="${node.y}" r="36"/>
-        <circle class="node-shell" cx="${node.x}" cy="${node.y}" r="28"/>
-        <circle cx="${node.x}" cy="${node.y}" r="19" fill="${palette.accent}"/>
-        <circle cx="${node.x + 22}" cy="${node.y - 18}" r="5" fill="${statusTone(m.status)}"/>
+      <g class="node-ring ${liveClass} ${activityClasses}" style="--member-accent:${palette.accent}">
+        <title>${escapeHtml(m.agent_name || '-')} · ${escapeHtml(statusLabel)}${pending ? ` · +${pending}` : ''}</title>
+        <circle class="node-aura" cx="${node.x}" cy="${node.y}" r="${auraR}"/>
+        <circle class="node-shell" cx="${node.x}" cy="${node.y}" r="${shellR}"/>
+        <circle cx="${node.x}" cy="${node.y}" r="${coreR}" fill="${palette.accent}"/>
+        <circle class="node-status" cx="${(node.x + shellR - 8).toFixed(1)}" cy="${(node.y - shellR + 8).toFixed(1)}" r="5.5" fill="${statusTone(m.status)}"/>
+        ${pendingBadge}
         <text class="node-glyph" x="${node.x}" y="${node.y + 4}" text-anchor="middle">${escapeHtml(roleGlyph(m.role))}</text>
-        <text class="node-label" x="${node.x}" y="${node.y + 50}" text-anchor="middle">${escapeHtml(m.agent_name || '-')}</text>
-        <text class="node-subtext" x="${node.x}" y="${node.y + 66}" text-anchor="middle">${escapeHtml(m.current_task || translateStatus(t, m.status) || '-')}</text>
+        <text class="node-label" x="${node.x}" y="${node.y + shellR + 22}" text-anchor="middle">${escapeHtml(m.agent_name || '-')}</text>
+        <text class="node-subtext" x="${node.x}" y="${node.y + shellR + 39}" text-anchor="middle">${escapeHtml(clipText(m.current_task || statusLabel))}</text>
       </g>`
   })
 
@@ -137,16 +170,22 @@ const squadMapSvg = computed(() => {
 .squad-canvas :deep(svg) { width:100%; height:auto; display:block; }
 .squad-canvas :deep(.squad-title) { font-size:12px; font-weight:700; fill:var(--ink); }
 .squad-canvas :deep(.squad-subtitle) { font-size:11px; fill:var(--muted); }
-.squad-canvas :deep(.node-label) { font-size:12px; font-weight:700; fill:var(--ink); }
-.squad-canvas :deep(.node-subtext) { font-size:10px; fill:var(--muted); }
+.squad-canvas :deep(.node-label) { font-size:13.5px; font-weight:700; fill:var(--ink); letter-spacing:-0.01em; }
+.squad-canvas :deep(.node-subtext) { font-size:11px; fill:var(--muted); }
+.squad-canvas :deep(.radar-ring) { fill:none; stroke:var(--signal-line); stroke-width:1; stroke-dasharray:3 7; opacity:0.55; }
+.squad-canvas :deep(.node-status) { stroke:var(--node-core); stroke-width:2; }
+.squad-canvas :deep(.node-pending circle) { fill:#fbbf24; stroke:var(--node-core); stroke-width:2; }
+.squad-canvas :deep(.node-pending text) { fill:#231a02; font-size:10px; font-weight:800; }
 .squad-canvas :deep(.signal-line) { stroke:var(--signal-line); stroke-width:2; }
 .squad-canvas :deep(.signal-line.route-pulse) { stroke-width:3; stroke-dasharray:8 10; stroke-linecap:round; animation:route-pulse 1.45s cubic-bezier(0.22,1,0.36,1) infinite; }
 .squad-canvas :deep(.signal-line.route-pulse.queued) { opacity:0.42; animation-duration:1.95s; }
 .squad-canvas :deep(.signal-line.route-pulse.dequeued) { opacity:0.74; animation-duration:1.1s; }
 .squad-canvas :deep(.node-shell) { fill:var(--node-core); stroke:var(--shell-stroke); stroke-width:2; }
-.squad-canvas :deep(.node-ring.online) { filter:drop-shadow(0 0 10px rgba(34,211,238,0.35)); }
+.squad-canvas :deep(.node-ring.online) { filter:drop-shadow(0 0 8px rgba(34,211,238,0.2)); }
 .squad-canvas :deep(.node-ring.offline) { opacity:0.55; }
+.squad-canvas :deep(.node-ring.offline .node-shell) { stroke-dasharray:4 5; }
 .squad-canvas :deep(.node-aura) { fill:none; stroke:var(--member-accent, var(--accent)); stroke-width:2; opacity:0.2; transform-origin:center; }
+.squad-canvas :deep(.node-ring.online .node-aura) { animation:node-aura-breathe 2.2s ease-in-out infinite; }
 .squad-canvas :deep(.node-ring.busy .node-aura) { animation:node-aura-pulse 1.8s ease-in-out infinite; }
 .squad-canvas :deep(.node-ring.message-send .node-aura) { animation:node-aura-ripple 1.2s ease-out infinite; }
 .squad-canvas :deep(.node-ring.message-receive .node-aura) { animation:node-aura-ripple 1.35s ease-out infinite reverse; }
@@ -169,6 +208,7 @@ const squadMapSvg = computed(() => {
 /* Animations */
 @keyframes dashboard-scan { 0% { transform:translate3d(0, -18%, 0); opacity:0.08; } 30% { opacity:0.24; } 100% { transform:translate3d(0, 210%, 0); opacity:0; } }
 @keyframes route-pulse { 0% { stroke-dashoffset:0; opacity:0.18; } 18% { opacity:0.95; } 100% { stroke-dashoffset:-36; opacity:0.24; } }
+@keyframes node-aura-breathe { 0%, 100% { transform:scale(0.96); opacity:0.12; } 50% { transform:scale(1.06); opacity:0.3; } }
 @keyframes node-aura-pulse { 0% { transform:scale(0.92); opacity:0.14; } 55% { transform:scale(1.12); opacity:0.34; } 100% { transform:scale(1.22); opacity:0; } }
 @keyframes node-aura-ripple { 0% { transform:scale(0.88); opacity:0.2; } 50% { transform:scale(1.08); opacity:0.3; } 100% { transform:scale(1.26); opacity:0; } }
 @keyframes node-impact-task { 0% { r:18; opacity:0.45; } 100% { r:44; opacity:0; } }

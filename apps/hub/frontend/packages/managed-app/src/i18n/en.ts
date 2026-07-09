@@ -340,6 +340,8 @@ export const en: Record<string, string> = {
   room_tab_timeline: 'Activity',
   room_tab_json: 'JSON',
   room_dock_label: 'Room panels',
+  nav_collapse_sidebar: 'Collapse sidebar',
+  nav_expand_sidebar: 'Expand sidebar',
   room_legend_toggle: 'Signal legend',
   room_live_retry: 'Retry',
   session_room_missing: 'Session not found in this workspace.',

@@ -9,7 +9,11 @@
     @click="closeSidebar"
   ></div>
 
-  <aside class="shell-sidebar" :class="{ 'shell-sidebar-open': sidebarOpen }" :aria-label="t('nav_menu')">
+  <aside
+    class="shell-sidebar"
+    :class="{ 'shell-sidebar-open': sidebarOpen, 'shell-sidebar-collapsed': sidebarCollapsed }"
+    :aria-label="t('nav_menu')"
+  >
     <div class="sidebar-head">
       <RouterLink to="/managed/ui/workspaces" class="brand">
         <span class="mark" aria-hidden="true"></span>
@@ -22,6 +26,17 @@
         &times;
       </button>
     </div>
+
+    <button
+      class="sidebar-collapse"
+      type="button"
+      :aria-label="t(sidebarCollapsed ? 'nav_expand_sidebar' : 'nav_collapse_sidebar')"
+      :title="t(sidebarCollapsed ? 'nav_expand_sidebar' : 'nav_collapse_sidebar')"
+      :aria-expanded="!sidebarCollapsed"
+      @click="toggleCollapsed"
+    >
+      <RoomIcon :name="sidebarCollapsed ? 'chevron-right' : 'chevron-left'" :size="15" />
+    </button>
 
     <div class="sidebar-section">
       <p class="sidebar-label">{{ t('nav_menu') }}</p>
@@ -75,6 +90,10 @@
         <strong class="topbar-title">{{ pageTitle }}</strong>
         <Breadcrumbs />
       </div>
+      <RouterLink v-if="backLink" :to="backLink.to" class="topbar-back">
+        <RoomIcon name="arrow-left" :size="15" />
+        <span class="topbar-back-label">{{ backLink.label }}</span>
+      </RouterLink>
     </div>
 
     <div class="topbar-actions">
@@ -92,8 +111,11 @@ import { useRoute, RouterLink } from 'vue-router'
 import { ThemeToggle, LangToggle } from '@acp/shared'
 import ToastContainer from './ToastContainer.vue'
 import Breadcrumbs from './Breadcrumbs.vue'
+import RoomIcon from './room/RoomIcon.vue'
 import { useManagedAuth } from '../composables/useManagedAuth'
 import { useManagedI18n, messages } from '../i18n'
+
+const SIDEBAR_COLLAPSED_KEY = 'acp_managed_sidebar_collapsed'
 
 type NavItem = {
   to: string
@@ -108,6 +130,38 @@ const { t } = useManagedI18n()
 
 const routeAnnouncement = ref('')
 const sidebarOpen = ref(false)
+const sidebarCollapsed = ref(readCollapsedPreference())
+
+function readCollapsedPreference(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function toggleCollapsed() {
+  sidebarCollapsed.value = !sidebarCollapsed.value
+  try {
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed.value ? '1' : '0')
+  } catch {
+    // Preference persistence is best-effort.
+  }
+}
+
+watch(sidebarCollapsed, value => {
+  document.body.classList.toggle('managed-sidebar-collapsed', value)
+})
+
+const backLink = computed(() => {
+  if (String(route.name ?? '') !== 'session-detail') return null
+  const slug = String(route.params.slug ?? '').trim()
+  if (!slug) return null
+  return {
+    to: `/managed/ui/workspaces/${encodeURIComponent(slug)}`,
+    label: t('session_back_to_sessions'),
+  }
+})
 
 const singleWorkspaceHomePath = computed(() => {
   const slug = user.value?.default_workspace?.slug
@@ -163,10 +217,12 @@ watch(
 
 onMounted(() => {
   document.body.classList.add('managed-shell')
+  document.body.classList.toggle('managed-sidebar-collapsed', sidebarCollapsed.value)
 })
 
 onBeforeUnmount(() => {
   document.body.classList.remove('managed-shell')
+  document.body.classList.remove('managed-sidebar-collapsed')
 })
 
 function toggleSidebar() {
@@ -491,6 +547,30 @@ function formatSlug(value: string): string {
   gap: 12px;
   flex-shrink: 0;
 }
+.topbar-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 15px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text-2);
+  text-decoration: none;
+  font-size: 0.84rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+.topbar-back:hover {
+  border-color: var(--accent-glow);
+  color: var(--text-1);
+}
+.topbar-back:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
 
 .ghost-button {
   background: var(--glass-bg);
@@ -530,17 +610,47 @@ function formatSlug(value: string): string {
   padding-top: 78px;
 }
 
+/* Collapse toggle: desktop-only affordance on the sidebar edge */
+.sidebar-collapse {
+  display: none;
+  position: absolute;
+  top: 30px;
+  right: -14px;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: var(--surface-1);
+  color: var(--text-2);
+  cursor: pointer;
+  z-index: 2;
+  transition: all var(--transition-fast);
+}
+.sidebar-collapse:hover {
+  color: var(--text-1);
+  border-color: var(--accent-glow);
+}
+.sidebar-collapse:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
 @media (min-width: 941px) {
   .shell-overlay {
     display: none;
   }
   .shell-sidebar {
     transform: translateX(0);
+    transition: width var(--transition-spring);
   }
   .shell-topbar {
     left: var(--managed-sidebar-width);
     padding: 16px 24px;
-    justify-content: flex-end;
+    transition: left var(--transition-spring);
   }
   .menu-button,
   .sidebar-close {
@@ -549,9 +659,45 @@ function formatSlug(value: string): string {
   .topbar-copy {
     display: none;
   }
+  .sidebar-collapse {
+    display: inline-flex;
+  }
   :global(body.managed-shell main#main-content) {
     padding-top: 78px;
     padding-left: var(--managed-sidebar-width);
+    transition: padding-left var(--transition-spring);
+  }
+  :global(body.managed-shell.managed-sidebar-collapsed) {
+    --managed-sidebar-width: 76px;
+  }
+  .shell-sidebar-collapsed {
+    width: 76px;
+    padding: 22px 12px 18px;
+    align-items: center;
+  }
+  .shell-sidebar-collapsed .brand-copy,
+  .shell-sidebar-collapsed .sidebar-label,
+  .shell-sidebar-collapsed .sidebar-link-text,
+  .shell-sidebar-collapsed .sidebar-context,
+  .shell-sidebar-collapsed .user-card {
+    display: none;
+  }
+  .shell-sidebar-collapsed .sidebar-head {
+    justify-content: center;
+  }
+  .shell-sidebar-collapsed .sidebar-nav {
+    align-items: center;
+  }
+  .shell-sidebar-collapsed .sidebar-link {
+    padding: 8px;
+    border-radius: 12px;
+  }
+  .shell-sidebar-collapsed .sidebar-footer {
+    align-items: center;
+  }
+  .shell-sidebar-collapsed .sidebar-logout {
+    padding: 10px;
+    font-size: 0.68rem;
   }
 }
 

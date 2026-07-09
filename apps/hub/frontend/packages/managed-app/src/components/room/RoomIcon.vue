@@ -33,6 +33,8 @@ export type RoomIconName =
   | 'x'
   | 'upload'
   | 'list'
+  | 'chevron-left'
+  | 'chevron-right'
 
 const ICON_PATHS: Record<RoomIconName, string[]> = {
   users: [
@@ -116,6 +118,12 @@ const ICON_PATHS: Record<RoomIconName, string[]> = {
     'M5 6v.01',
     'M5 12v.01',
     'M5 18v.01',
+  ],
+  'chevron-left': [
+    'M15 6l-6 6 6 6',
+  ],
+  'chevron-right': [
+    'M9 6l6 6-6 6',
   ],
 }
 
