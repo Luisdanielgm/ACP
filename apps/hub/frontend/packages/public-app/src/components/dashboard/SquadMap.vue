@@ -24,18 +24,122 @@
       </button>
     </div>
     <div class="squad-map">
-      <div v-if="!payload?.members?.length" class="empty-state">
+      <div v-if="!graph" class="empty-state">
         <span>{{ t('sd_map_empty') }}</span>
         <button v-if="payload" class="map-invite-cta" type="button" @click="$emit('invite')">
           {{ t('sd_invite_prompt_btn') }}
         </button>
       </div>
-      <div v-else class="squad-canvas" v-html="squadMapSvg" @click="onCanvasClick"></div>
+      <!--
+        Template-rendered SVG with keyed elements: the DOM PERSISTS across the
+        2s poll, so looping animations never restart mid-cycle, nodes GLIDE
+        between orbits via a CSS transition, and per-event effects (envelope,
+        ripples) play exactly once when their event first appears.
+      -->
+      <div v-else class="squad-canvas" @click="onCanvasClick">
+        <svg :viewBox="`0 0 ${graph.width} ${graph.height}`" role="img" :aria-label="t('sd_squad_map_title')">
+          <circle
+            v-for="(ring, ri) in graph.rings"
+            :key="'ring-' + ri"
+            class="radar-ring"
+            :cx="graph.cx"
+            :cy="graph.cy"
+            :r="ring"
+          />
+
+          <g v-for="edge in graph.edges" :key="edge.id" class="relation" :class="[edge.heat, { held: edge.held }]">
+            <title>{{ edge.title }}</title>
+            <path :d="edge.path" />
+          </g>
+
+          <circle
+            v-for="dot in graph.queueDots"
+            :key="dot.id"
+            class="queue-dot"
+            :cx="dot.x"
+            :cy="dot.y"
+            r="3"
+            :style="{ animationDelay: dot.delay }"
+          />
+
+          <g
+            v-for="node in graph.nodes"
+            :key="node.name"
+            class="node-pos"
+            :data-agent="node.name"
+            :style="{ transform: `translate(${node.x}px, ${node.y}px)` }"
+          >
+            <g
+              class="node-ring"
+              :class="node.classes"
+              :style="{ '--member-accent': node.accent, '--dx': node.dx, '--dy': node.dy, animationDelay: node.driftDelay }"
+            >
+              <title>{{ node.title }}</title>
+              <circle class="node-aura" :r="node.auraR" />
+              <circle class="node-shell" :r="node.shellR" />
+              <circle class="node-core" :r="node.coreR" :fill="node.accent" :style="{ '--core-accent': node.accent }" />
+              <circle
+                class="node-status"
+                :class="{ stale: node.isGhost }"
+                :cx="node.shellR - 8"
+                :cy="-node.shellR + 8"
+                r="5.5"
+                :fill="node.isGhost ? 'none' : node.statusColor"
+              />
+              <circle
+                v-if="node.showHalo"
+                class="node-live-halo"
+                :cx="node.shellR - 8"
+                :cy="-node.shellR + 8"
+                r="5.5"
+                :style="{ stroke: node.statusColor }"
+              />
+              <g v-if="node.pending" class="node-pending" :transform="`translate(${-node.shellR + 4}, ${-node.shellR + 6})`">
+                <circle r="9.5" />
+                <text y="3.5" text-anchor="middle">{{ node.pendingLabel }}</text>
+              </g>
+              <path v-if="node.isChief" class="node-crown" :transform="`translate(0, ${-node.shellR - 10})`" d="M-9 4 L-6 -4 L-3 0 L0 -6 L3 0 L6 -4 L9 4 Z" />
+              <g v-if="node.busy" class="node-workbars" :transform="`translate(${node.shellR - 7}, ${node.shellR - 5})`">
+                <rect x="-6" y="-5" width="2.4" height="5" rx="1.2" />
+                <rect x="-2.2" y="-9" width="2.4" height="9" rx="1.2" />
+                <rect x="1.6" y="-7" width="2.4" height="7" rx="1.2" />
+              </g>
+              <g v-if="node.isOperator" class="node-person">
+                <circle cy="-4.5" r="3.4" />
+                <path d="M-6.5 8c0-4.2 2.9-6.6 6.5-6.6s6.5 2.4 6.5 6.6" />
+              </g>
+              <text v-else class="node-glyph" y="4" text-anchor="middle">{{ node.initials }}</text>
+              <text class="node-label" :x="node.label.nameX" :y="node.label.nameY" :text-anchor="node.label.anchor">{{ node.labelName }}</text>
+              <text class="node-subtext" :x="node.label.subX" :y="node.label.subY" :text-anchor="node.label.anchor">{{ node.labelSub }}</text>
+            </g>
+          </g>
+
+          <g v-for="flight in graph.flights" :key="flight.id" class="flight" :class="flight.classes" :style="{ '--impact-accent': flight.tone }">
+            <path class="flight-route" :d="flight.path" :style="{ stroke: flight.tone }" />
+            <circle class="flight-impact" :cx="flight.toX" :cy="flight.toY" r="20" />
+            <g class="flight-tag" :transform="`translate(${flight.tagX}, ${flight.tagY})`">
+              <rect class="node-float-pill" x="-4" y="-14" :width="flight.pillW" height="20" rx="10" />
+              <text class="node-float-text" :x="flight.pillW / 2 - 4" y="0" text-anchor="middle">{{ flight.tag }}</text>
+            </g>
+            <g class="mail-glyph">
+              <title>{{ flight.title }}</title>
+              <rect x="-8" y="-5.5" width="16" height="11" rx="2.5" />
+              <path d="M-8 -5.5 L0 1.5 L8 -5.5" />
+              <!-- SMIL clocks run on the SVG ROOT's timeline, not the element's
+                   insertion time: with begin="0s" a late-mounted flight would
+                   appear already frozen at its end. begin="indefinite" +
+                   beginElement() on mount makes each envelope fly when ITS
+                   event arrives. -->
+              <animateMotion :ref="startFlightMotion" dur="1.35s" fill="freeze" begin="indefinite" :path="flight.path" />
+            </g>
+          </g>
+        </svg>
+      </div>
     </div>
 
     <!-- Member quick card: teleported to <body> with fixed positioning so the
-         card's overflow:hidden can never clip it, and the 2s poll re-render
-         never blinks it away; its data recomputes live from the payload. -->
+         card's overflow:hidden can never clip it; its data recomputes live
+         from the payload. -->
     <Teleport to="body">
     <div
       v-if="selectedMember"
@@ -84,8 +188,8 @@ import { messages } from '../../i18n'
 import {
   normalizedRole, memberPalette, heartbeatState, statusTone, nameInitials, isWebOperator,
   messageActionType, actionChipClass, deliveryMode, deliveryClass, actionTone, floatTagLabel,
-  recentMemberActivity, memberActivity, mapRoutePath, mapAnimationEvents, sortedMembers,
-  eventClass, escapeHtml, type TrafficLevel,
+  recentMemberActivity, memberActivity, mapRoutePath, sortedMembers,
+  eventClass, type TrafficLevel,
 } from '../../composables/sessionHelpers'
 import { translateStatus } from '../../composables/dashboardTranslations'
 import type { SessionMember, SessionDetailPayload } from '../../api/sessions'
@@ -131,13 +235,26 @@ const selectedAccent = computed(() => {
 
 const selectedInitials = computed(() => nameInitials(selectedMember.value?.agent_name || ''))
 
+type FlightMotionEl = SVGElement & { beginElement?: () => void; __begun?: boolean }
+
+// Function refs re-fire on every patch with the same element — the __begun
+// flag makes the kick-off strictly once per mounted flight.
+function startFlightMotion(el: unknown) {
+  const node = el as FlightMotionEl | null
+  if (!node || node.__begun || typeof node.beginElement !== 'function') return
+  node.__begun = true
+  try {
+    node.beginElement()
+  } catch {
+    // SMIL unavailable (some headless engines): the envelope simply stays put.
+  }
+}
+
 function onCanvasClick(event: MouseEvent) {
   const target = (event.target as HTMLElement).closest('[data-agent]')
   if (!target) return
   const agentName = target.getAttribute('data-agent') || ''
   if (!agentName) return
-  // Fixed positioning against the viewport: immune to card overflow clipping
-  // and correct in both the inline card and war-room mode.
   const POPOVER_W = 280
   const POPOVER_H = 230
   popoverX.value = Math.max(8, Math.min(event.clientX + 8, window.innerWidth - POPOVER_W - 8))
@@ -191,6 +308,8 @@ onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
 })
 
+// ── Graph model ──
+
 interface NodeLabel {
   anchor: 'start' | 'middle' | 'end'
   nameX: number
@@ -200,50 +319,105 @@ interface NodeLabel {
   clip: number
 }
 
-// Labels sit on the OUTER side of each node (away from the hub) so they can
-// never collide with a neighbor's label — the fix for overlapping names.
-// Crowded rings push more labels to the sides, where vertical spacing is wide.
-function labelFor(x: number, y: number, cx: number, cy: number, shellR: number, isChief: boolean, ringSize: number): NodeLabel {
+// Labels sit on the OUTER side of each node (relative coordinates: the node
+// group is translated to its position, so labels are offsets from 0,0).
+function labelFor(ux: number, uy: number, shellR: number, isChief: boolean, ringSize: number): NodeLabel {
   if (!isChief) {
-    const dx = x - cx
-    const dy = y - cy
-    const len = Math.max(1, Math.hypot(dx, dy))
-    const ux = dx / len
-    const uy = dy / len
     const sideThreshold = ringSize > 8 ? 0.25 : 0.55
     if (Math.abs(ux) > sideThreshold) {
       const side = ux > 0 ? 1 : -1
-      const lx = x + side * (shellR + 16)
-      return { anchor: side > 0 ? 'start' : 'end', nameX: lx, nameY: y - 2, subX: lx, subY: y + 15, clip: 22 }
+      const lx = side * (shellR + 16)
+      return { anchor: side > 0 ? 'start' : 'end', nameX: lx, nameY: -2, subX: lx, subY: 15, clip: 22 }
     }
     if (uy < 0) {
-      return { anchor: 'middle', nameX: x, nameY: y - shellR - 26, subX: x, subY: y - shellR - 10, clip: 26 }
+      return { anchor: 'middle', nameX: 0, nameY: -shellR - 26, subX: 0, subY: -shellR - 10, clip: 26 }
     }
   }
-  return { anchor: 'middle', nameX: x, nameY: y + shellR + 22, subX: x, subY: y + shellR + 39, clip: 26 }
+  return { anchor: 'middle', nameX: 0, nameY: shellR + 22, subX: 0, subY: shellR + 39, clip: 26 }
 }
 
-const squadMapSvg = computed(() => {
+function pointToSegmentDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const abx = bx - ax
+  const aby = by - ay
+  const lenSq = abx * abx + aby * aby
+  if (lenSq === 0) return Math.hypot(px - ax, py - ay)
+  const u = Math.max(0, Math.min(1, ((px - ax) * abx + (py - ay) * aby) / lenSq))
+  return Math.hypot(px - (ax + abx * u), py - (ay + aby * u))
+}
+
+interface MapNode {
+  name: string
+  x: number
+  y: number
+  isChief: boolean
+  isOperator: boolean
+  isGhost: boolean
+  busy: boolean
+  classes: string
+  accent: string
+  statusColor: string
+  showHalo: boolean
+  pending: number
+  pendingLabel: string
+  initials: string
+  coreR: number
+  shellR: number
+  auraR: number
+  label: NodeLabel
+  labelName: string
+  labelSub: string
+  title: string
+  dx: string
+  dy: string
+  driftDelay: string
+}
+
+interface MapEdge {
+  id: string
+  path: string
+  heat: 'fresh' | 'warm' | 'cold'
+  held: boolean
+  title: string
+}
+
+interface MapFlight {
+  id: string
+  path: string
+  tone: string
+  classes: string
+  title: string
+  tag: string
+  pillW: number
+  tagX: number
+  tagY: number
+  toX: number
+  toY: number
+}
+
+interface MapDot {
+  id: string
+  x: number
+  y: number
+  delay: string
+}
+
+const graph = computed(() => {
   const p = props.payload
-  if (!p || !p.members?.length) return ''
+  if (!p || !p.members?.length) return null
 
   const members = sortedMembers(p)
   const cs = props.connectedSet
   const activityMap = recentMemberActivity(p)
-  const animEvents = mapAnimationEvents(p)
 
   const chiefMember = members.find(m => normalizedRole(m.role) === 'chief') || members[0]
-  if (!chiefMember) return ''
+  if (!chiefMember) return null
 
   const others = members.filter(m => m.agent_name !== chiefMember.agent_name)
-
-  // ── Relationships from the actual message history ──
-  // The map draws CONVERSATIONS, not topology: an edge exists only when two
-  // members exchanged messages recently, and a member's orbital radius encodes
-  // how recently they took part in one (inner = talking now, outer = quiet).
   const now = Date.now()
   const EDGE_WINDOW = 10 * 60_000
 
+  // ── Relationships from the actual message history: the map draws
+  // CONVERSATIONS, not topology ──
   interface PairStat { a: string; b: string; lastTs: number; count: number; queuedTo: string }
   const pairs = new Map<string, PairStat>()
   const lastActivity = new Map<string, number>()
@@ -283,9 +457,6 @@ const squadMapSvg = computed(() => {
   const cx = width / 2
   const cy = height / 2
 
-  const nodes = new Map<string, { x: number; y: number; member: SessionMember; tier: number }>()
-  let markup = ''
-
   // Orbit radii ARE the semantics: inner = conversing, mid = recent or with
   // pending work, outer = quiet. The dashed rings mark those bands.
   const tight = others.length > 6
@@ -295,189 +466,193 @@ const squadMapSvg = computed(() => {
     ringRadius * 1.05,
   ]
   const rings = others.length ? tierRadii : [70, 120, 170]
-  rings.forEach(r => {
-    markup += `<circle class="radar-ring" cx="${cx}" cy="${cy}" r="${r.toFixed(1)}" />`
-  })
 
-  nodes.set(chiefMember.agent_name, { x: cx, y: cy, member: chiefMember, tier: 0 })
+  const positions = new Map<string, { x: number; y: number; tier: number; member: SessionMember }>()
+  positions.set(chiefMember.agent_name, { x: cx, y: cy, tier: 0, member: chiefMember })
 
-  // Angles stay STABLE (alphabetical) so members never swap places between
-  // polls — only their distance to the center moves as relationships heat
-  // and cool. One or two teammates read best on the horizontal axis.
-  const positioned = [...others].sort((a, b) => a.agent_name.localeCompare(b.agent_name))
-  const startAngle = positioned.length <= 2 ? 0 : -Math.PI / 2
-  positioned.forEach((member, mi) => {
-    const angle = startAngle + (mi * 2 * Math.PI) / positioned.length
+  // Angles stay STABLE (alphabetical) so members never swap places — only
+  // their distance to the center glides as relationships heat and cool.
+  const orbiting = [...others].sort((a, b) => a.agent_name.localeCompare(b.agent_name))
+  const startAngle = orbiting.length <= 2 ? 0 : -Math.PI / 2
+  orbiting.forEach((member, mi) => {
+    const angle = startAngle + (mi * 2 * Math.PI) / orbiting.length
     const tier = activityTier(member)
-    const radius = tierRadii[tier]
-    const x = cx + radius * Math.cos(angle)
-    const y = cy + radius * Math.sin(angle)
-    nodes.set(member.agent_name, { x, y, member, tier })
+    positions.set(member.agent_name, {
+      x: cx + tierRadii[tier] * Math.cos(angle),
+      y: cy + tierRadii[tier] * Math.sin(angle),
+      tier,
+      member,
+    })
   })
 
-  // ── Relationship edges: bright while fresh, fading as they cool, and held
-  // warm while the receiver still has unread queued messages ──
-  pairs.forEach(pair => {
-    const na = nodes.get(pair.a)
-    const nb = nodes.get(pair.b)
+  // ── Relationship edges ──
+  // Chief-involved edges radiate from the center and stay straight; edges
+  // between two orbiting members ARC AWAY from the center so they never cut
+  // through the chief sitting in the middle.
+  const edges: MapEdge[] = []
+  pairs.forEach((pair, key) => {
+    const na = positions.get(pair.a)
+    const nb = positions.get(pair.b)
     if (!na || !nb) return
     const age = now - pair.lastTs
-    const queuedTarget = pair.queuedTo ? nodes.get(pair.queuedTo) : undefined
-    const heldByPending = Boolean(queuedTarget && Number(queuedTarget.member.pending_count || 0) > 0)
-    if (age > EDGE_WINDOW && !heldByPending) return
-    let heat = age <= 45_000 ? 'fresh' : age <= 3 * 60_000 ? 'warm' : 'cold'
-    if (heldByPending && heat === 'cold') heat = 'warm'
-    markup += `
-      <g class="relation ${heat}${heldByPending ? ' held' : ''}">
-        <title>${escapeHtml(`${pair.a} ⇄ ${pair.b} · ${pair.count}`)}</title>
-        <line x1="${na.x.toFixed(1)}" y1="${na.y.toFixed(1)}" x2="${nb.x.toFixed(1)}" y2="${nb.y.toFixed(1)}" />
-      </g>`
+    const queuedTarget = pair.queuedTo ? positions.get(pair.queuedTo) : undefined
+    const held = Boolean(queuedTarget && Number(queuedTarget.member.pending_count || 0) > 0)
+    if (age > EDGE_WINDOW && !held) return
+    let heat: MapEdge['heat'] = age <= 45_000 ? 'fresh' : age <= 3 * 60_000 ? 'warm' : 'cold'
+    if (held && heat === 'cold') heat = 'warm'
+
+    const involvesChief = pair.a === chiefMember.agent_name || pair.b === chiefMember.agent_name
+    let path: string
+    if (involvesChief) {
+      path = `M ${na.x.toFixed(1)} ${na.y.toFixed(1)} L ${nb.x.toFixed(1)} ${nb.y.toFixed(1)}`
+    } else {
+      const midX = (na.x + nb.x) / 2
+      const midY = (na.y + nb.y) / 2
+      let vx = midX - cx
+      let vy = midY - cy
+      let vlen = Math.hypot(vx, vy)
+      if (vlen < 1) {
+        // Nodes are diametrically opposed: bulge perpendicular to the segment.
+        vx = -(nb.y - na.y)
+        vy = nb.x - na.x
+        vlen = Math.hypot(vx, vy) || 1
+      }
+      const clearance = pointToSegmentDistance(cx, cy, na.x, na.y, nb.x, nb.y)
+      const bulge = Math.max(20, 78 - clearance * 0.4)
+      const ctrlX = midX + (vx / vlen) * bulge
+      const ctrlY = midY + (vy / vlen) * bulge
+      path = `M ${na.x.toFixed(1)} ${na.y.toFixed(1)} Q ${ctrlX.toFixed(1)} ${ctrlY.toFixed(1)} ${nb.x.toFixed(1)} ${nb.y.toFixed(1)}`
+    }
+    edges.push({ id: key, path, heat, held, title: `${pair.a} ⇄ ${pair.b} · ${pair.count}` })
   })
 
   // Pending messages queue up as amber dots on the freshest INBOUND edge of
-  // the member that has unread work — you see where it piles up.
+  // the member with unread work.
   const inbound = new Map<string, PairStat>()
   pairs.forEach(pair => {
     const current = inbound.get(pair.b)
     if (!current || pair.lastTs > current.lastTs) inbound.set(pair.b, pair)
   })
-  nodes.forEach(node => {
-    const pendingN = Math.min(5, Number(node.member.pending_count || 0))
+  const queueDots: MapDot[] = []
+  positions.forEach(pos => {
+    const pendingN = Math.min(5, Number(pos.member.pending_count || 0))
     if (!pendingN) return
-    const pair = inbound.get(node.member.agent_name)
+    const pair = inbound.get(pos.member.agent_name)
     if (!pair) return
-    const from = nodes.get(pair.a === node.member.agent_name ? pair.b : pair.a)
+    const from = positions.get(pair.a === pos.member.agent_name ? pair.b : pair.a)
     if (!from) return
     for (let d = 0; d < pendingN; d++) {
       const tPos = 0.82 - d * 0.07
-      const qx = from.x + (node.x - from.x) * tPos
-      const qy = from.y + (node.y - from.y) * tPos
-      markup += `<circle class="queue-dot" style="animation-delay:${(d * 0.18).toFixed(2)}s" cx="${qx.toFixed(1)}" cy="${qy.toFixed(1)}" r="3"/>`
+      queueDots.push({
+        id: `${pos.member.agent_name}-q${d}`,
+        x: from.x + (pos.x - from.x) * tPos,
+        y: from.y + (pos.y - from.y) * tPos,
+        delay: `${(d * 0.18).toFixed(2)}s`,
+      })
     }
   })
 
-  // Animated routes: pulse dashes along the wire, impact ripples on arrival,
-  // and a little envelope that rides the route and rests on the receiver.
-  // Capped at the last 4 events — motion is a signal, not wallpaper.
-  let mailMarkup = ''
-  animEvents.slice(-4).forEach((event, ri) => {
-    const from = nodes.get(String(event.actor || ''))
-    const to = nodes.get(String(event.target || ''))
-    if (!from || !to || event.actor === event.target) return
+  // ── Per-event flights: keyed by the full event identity (ts + type +
+  // endpoints — SENT and DELIVERED of the same message must not collide), so
+  // each one mounts ONCE, flies its envelope once, ripples once, and expires
+  // when it leaves the 30s window ──
+  const flights: MapFlight[] = []
+  const seenFlightIds = new Set<string>()
+  const flightEvents = (p.history || []).filter(event => {
+    if (eventClass(String(event.event || '')) !== 'message') return false
+    if (!event.actor || !event.target || event.actor === event.target) return false
+    const ts = Date.parse(String(event.ts || ''))
+    return !Number.isNaN(ts) && now - ts <= 30_000
+  })
+  flightEvents.slice(-4).forEach((event, ri) => {
+    const from = positions.get(String(event.actor || ''))
+    const to = positions.get(String(event.target || ''))
+    if (!from || !to) return
+    const id = `${event.ts}|${event.event}|${event.actor}|${event.target}`
+    if (seenFlightIds.has(id)) return
+    seenFlightIds.add(id)
+    const ts = Date.parse(String(event.ts || ''))
+    // Curvature seed derives from the event itself, not the slice index, so a
+    // flight's route never changes shape as the window slides under it.
+    const seed = Number.isNaN(ts) ? ri : Math.abs(ts) % 6
     const action = messageActionType(event)
     const delivery = deliveryMode(event)
-    const path = mapRoutePath(from, to, ri)
-    const tone = actionTone(action)
-    // A short slice of the message itself makes the float tag informative:
-    // "TASK · revisar costos…" instead of a bare action glyph.
     const preview = clipText(String(event.payload_preview || '').trim(), 16)
-    const tagText = preview ? `${floatTagLabel(action, delivery)} ${preview}` : floatTagLabel(action, delivery)
-    const pillWidth = Math.max(42, 14 + tagText.length * 5.6)
-    markup += `<path class="signal-line route-pulse ${actionChipClass(action)} ${deliveryClass(delivery)}" style="animation-delay:${ri * 120}ms;stroke:${tone}" d="${path}" />`
-    markup += `
-      <circle class="node-impact ${actionChipClass(action)} ${deliveryClass(delivery)}" style="animation-delay:${ri * 120}ms;--impact-accent:${tone}" cx="${to.x}" cy="${to.y}" r="32"></circle>
-      <circle class="node-impact spark ${actionChipClass(action)} ${deliveryClass(delivery)}" style="animation-delay:${ri * 120 + 120}ms;--impact-accent:${tone}" cx="${to.x}" cy="${to.y}" r="24"></circle>
-      <g class="node-float-tag ${actionChipClass(action)} ${deliveryClass(delivery)}" style="animation-delay:${ri * 120 + 40}ms;--impact-accent:${tone}" transform="translate(${to.x + 30}, ${to.y - 34})">
-        <rect class="node-float-pill" x="-4" y="-14" width="${pillWidth.toFixed(1)}" height="20" rx="10"></rect>
-        <text class="node-float-text" x="${(pillWidth / 2 - 4).toFixed(1)}" y="0" text-anchor="middle">${escapeHtml(tagText)}</text>
-      </g>`
-    mailMarkup += `
-      <g class="mail-glyph ${deliveryClass(delivery)}" style="--impact-accent:${tone}">
-        <title>${escapeHtml(preview ? `${action || 'MSG'} · ${preview}` : action || 'MSG')}</title>
-        <rect x="-8" y="-5.5" width="16" height="11" rx="2.5"/>
-        <path d="M-8 -5.5 L0 1.5 L8 -5.5"/>
-        <animateMotion dur="1.35s" fill="freeze" path="${path}"/>
-      </g>`
+    const tag = preview ? `${floatTagLabel(action, delivery)} ${preview}` : floatTagLabel(action, delivery)
+    flights.push({
+      id,
+      path: mapRoutePath(from, to, seed),
+      tone: actionTone(action),
+      classes: `${actionChipClass(action)} ${deliveryClass(delivery)}`,
+      title: preview ? `${action || 'MSG'} · ${preview}` : action || 'MSG',
+      tag,
+      pillW: Math.max(42, 14 + tag.length * 5.6),
+      tagX: to.x + 30,
+      tagY: Math.max(24, to.y - 34),
+      toX: to.x,
+      toY: to.y,
+    })
   })
 
-  // Nodes
+  // ── Nodes ──
+  const nodes: MapNode[] = []
   let nodeIndex = 0
-  nodes.forEach(node => {
-    const m = node.member
+  positions.forEach(pos => {
+    const m = pos.member
     const isChief = m.agent_name === chiefMember.agent_name
     const isOperator = isWebOperator(m.agent_name)
     const isConnected = cs.has(m.agent_name)
     const palette = memberPalette(m)
     const accent = isOperator ? '#a1aab5' : palette.accent
-    const hbState = heartbeatState(m, cs)
-    const isGhost = hbState === 'stale'
-    const liveClass = isGhost ? 'offline ghost' : 'online'
+    const isGhost = heartbeatState(m, cs) === 'stale'
     const activity = memberActivity(m, activityMap)
-    // Motion budget: only nodes that are part of something (recent
-    // conversation, pending work, or actively busy) drift; quiet ones and
-    // ghosts hold still. Rest-to-rest keyframes survive the 2s re-render.
-    const drifts = !isGhost && (node.tier <= 1 || activity.isBusy)
-    const driftX = [0, 1.6, -1.6][nodeIndex % 3]
-    const driftY = nodeIndex % 2 === 0 ? -2.4 : 2.4
-    nodeIndex += 1
-    const activityClasses = [
-      drifts ? 'drift' : '',
-      activity.isBusy ? 'busy' : '',
-      activity.hasOutgoing ? 'message-send' : '',
-      activity.hasIncoming ? 'message-receive' : '',
-    ].filter(Boolean).join(' ')
+    // Motion budget: only nodes that are part of something drift.
+    const drifts = !isGhost && (pos.tier <= 1 || activity.isBusy)
     const coreR = isChief ? 24 : 20
     const shellR = isChief ? 34 : 29
-    const auraR = isChief ? 42 : 37
     const pending = Number(m.pending_count || 0)
     const statusLabel = translateStatus(t, m.status) || m.status || '-'
-    const label = labelFor(node.x, node.y, cx, cy, shellR, isChief, others.length)
-    const pendingBadge = pending
-      ? `<g class="node-pending">
-          <circle cx="${(node.x - shellR + 4).toFixed(1)}" cy="${(node.y - shellR + 6).toFixed(1)}" r="9.5"/>
-          <text x="${(node.x - shellR + 4).toFixed(1)}" y="${(node.y - shellR + 9.5).toFixed(1)}" text-anchor="middle">${pending > 9 ? '9+' : pending}</text>
-        </g>`
-      : ''
-    const crown = isChief
-      ? `<path class="node-crown" transform="translate(${node.x}, ${(node.y - shellR - 10).toFixed(1)})" d="M-9 4 L-6 -4 L-3 0 L0 -6 L3 0 L6 -4 L9 4 Z"/>`
-      : ''
-    const dotX = (node.x + shellR - 8).toFixed(1)
-    const dotY = (node.y - shellR + 8).toFixed(1)
-    // Live websocket connection = pulsing halo around the status dot; a lost
-    // heartbeat hollows the dot out. Simple, glanceable connection states.
-    const statusDot = hbState === 'stale'
-      ? `<circle class="node-status stale" cx="${dotX}" cy="${dotY}" r="5.5"/>`
-      : `<circle class="node-status" cx="${dotX}" cy="${dotY}" r="5.5" fill="${statusTone(m.status)}"/>`
-    const liveHalo = isConnected && hbState !== 'stale'
-      ? `<circle class="node-live-halo" cx="${dotX}" cy="${dotY}" r="5.5" style="stroke:${statusTone(m.status)}"/>`
-      : ''
-    // The web operator is a person, not an agent runtime — draw it as one.
-    const glyph = isOperator
-      ? `<g class="node-person" transform="translate(${node.x}, ${node.y})">
-          <circle cy="-4.5" r="3.4"/>
-          <path d="M-6.5 8c0-4.2 2.9-6.6 6.5-6.6s6.5 2.4 6.5 6.6"/>
-        </g>`
-      : `<text class="node-glyph" x="${node.x}" y="${node.y + 4}" text-anchor="middle">${escapeHtml(nameInitials(m.agent_name))}</text>`
-    // Busy agents show explicit working bars at the shell's edge — the aura
-    // pulse alone was too subtle to read as "processing right now".
-    const workBadge = activity.isBusy
-      ? `<g class="node-workbars" transform="translate(${(node.x + shellR - 7).toFixed(1)}, ${(node.y + shellR - 5).toFixed(1)})">
-          <rect x="-6" y="-5" width="2.4" height="5" rx="1.2"/>
-          <rect x="-2.2" y="-9" width="2.4" height="9" rx="1.2"/>
-          <rect x="1.6" y="-7" width="2.4" height="7" rx="1.2"/>
-        </g>`
-      : ''
-    markup += `
-      <g class="node-ring ${liveClass} ${activityClasses}${isOperator ? ' operator' : ''}" data-agent="${escapeHtml(m.agent_name || '')}" style="--member-accent:${accent};--dx:${driftX}px;--dy:${driftY}px">
-        <title>${escapeHtml(m.agent_name || '-')} · ${escapeHtml(statusLabel)}${pending ? ` · +${pending}` : ''}</title>
-        <circle class="node-aura" cx="${node.x}" cy="${node.y}" r="${auraR}"/>
-        <circle class="node-shell" cx="${node.x}" cy="${node.y}" r="${shellR}"/>
-        <circle class="node-core" cx="${node.x}" cy="${node.y}" r="${coreR}" fill="${accent}" style="--core-accent:${accent}"/>
-        ${statusDot}
-        ${liveHalo}
-        ${pendingBadge}
-        ${crown}
-        ${workBadge}
-        ${glyph}
-        <text class="node-label" x="${label.nameX.toFixed(1)}" y="${label.nameY.toFixed(1)}" text-anchor="${label.anchor}">${escapeHtml(clipText(m.agent_name || '-', label.clip))}</text>
-        <text class="node-subtext" x="${label.subX.toFixed(1)}" y="${label.subY.toFixed(1)}" text-anchor="${label.anchor}">${escapeHtml(clipText(m.current_task || statusLabel, label.clip))}</text>
-      </g>`
+    const dxRaw = pos.x - cx
+    const dyRaw = pos.y - cy
+    const len = Math.max(1, Math.hypot(dxRaw, dyRaw))
+    const idx = nodeIndex
+    nodeIndex += 1
+    nodes.push({
+      name: m.agent_name,
+      x: pos.x,
+      y: pos.y,
+      isChief,
+      isOperator,
+      isGhost,
+      busy: activity.isBusy,
+      classes: [
+        isGhost ? 'offline ghost' : 'online',
+        drifts ? 'drift' : '',
+        activity.isBusy ? 'busy' : '',
+        activity.hasOutgoing ? 'message-send' : '',
+        activity.hasIncoming ? 'message-receive' : '',
+        isOperator ? 'operator' : '',
+      ].filter(Boolean).join(' '),
+      accent,
+      statusColor: statusTone(m.status),
+      showHalo: isConnected && !isGhost,
+      pending,
+      pendingLabel: pending > 9 ? '9+' : String(pending),
+      initials: nameInitials(m.agent_name),
+      coreR,
+      shellR,
+      auraR: isChief ? 42 : 37,
+      label: labelFor(dxRaw / len, dyRaw / len, shellR, isChief, others.length),
+      labelName: clipText(m.agent_name || '-', 26),
+      labelSub: clipText(m.current_task || statusLabel, 26),
+      title: `${m.agent_name || '-'} · ${statusLabel}${pending ? ` · +${pending}` : ''}`,
+      dx: `${[0, 1.6, -1.6][idx % 3]}px`,
+      dy: `${idx % 2 === 0 ? -2.4 : 2.4}px`,
+      driftDelay: `${-(idx * 0.9).toFixed(1)}s`,
+    })
   })
 
-  // Envelopes render last so a landed letter rests ON TOP of the receiver.
-  markup += mailMarkup
-
-  return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(t('sd_squad_map_title'))}">${markup}</svg>`
+  return { width, height, cx, cy, rings, nodes, edges, queueDots, flights }
 })
 </script>
 
@@ -485,13 +660,9 @@ const squadMapSvg = computed(() => {
 /* Cockpit card */
 .cockpit-card { border:1px solid var(--line); border-radius:18px; padding:20px; background:linear-gradient(180deg,var(--card-bg-soft),var(--soft)); position:relative; overflow:hidden; }
 .cockpit-card::before { content:''; position:absolute; top:0; left:0; right:0; height:1px; background:linear-gradient(90deg,transparent,var(--accent-glow),transparent); }
-.cockpit-card::after { content:''; position:absolute; inset:-20% auto auto -10%; width:180px; height:180px; border-radius:50%; background:radial-gradient(circle, color-mix(in srgb, var(--accent) 16%, transparent) 0%, transparent 70%); opacity:0.22; pointer-events:none; filter:blur(6px); transition:transform 0.4s ease, opacity 0.3s ease; }
-.cockpit-card[data-load="medium"] { border-color:rgba(239,159,39,0.24); box-shadow:0 10px 28px rgba(239,159,39,0.08); }
-.cockpit-card[data-load="high"] { border-color:rgba(240,153,123,0.28); box-shadow:0 12px 32px rgba(240,153,123,0.1); }
-.cockpit-card[data-load="critical"] { border-color:rgba(175,169,236,0.3); box-shadow:0 14px 40px rgba(175,169,236,0.14); }
-.cockpit-card[data-load="medium"]::after { background:radial-gradient(circle, rgba(239,159,39,0.18) 0%, transparent 72%); opacity:0.26; }
-.cockpit-card[data-load="high"]::after { background:radial-gradient(circle, rgba(240,153,123,0.2) 0%, transparent 74%); opacity:0.3; transform:translate3d(16px, 8px, 0); }
-.cockpit-card[data-load="critical"]::after { background:radial-gradient(circle, rgba(175,169,236,0.24) 0%, transparent 76%); opacity:0.34; transform:translate3d(24px, 12px, 0) scale(1.05); }
+.cockpit-card[data-load="medium"] { border-color:rgba(239,159,39,0.24); }
+.cockpit-card[data-load="high"] { border-color:rgba(240,153,123,0.28); }
+.cockpit-card[data-load="critical"] { border-color:rgba(175,169,236,0.3); }
 .cockpit-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:16px; }
 .cockpit-title { font-size:15px; font-weight:700; letter-spacing:-0.02em; }
 .cockpit-sub { font-size:12px; color:var(--muted); line-height:1.5; margin-top:4px; }
@@ -560,134 +731,146 @@ const squadMapSvg = computed(() => {
 /* Squad map */
 .squad-map { min-height:300px; }
 .squad-canvas { width:100%; min-height:300px; border:1px solid var(--canvas-border); border-radius:18px; background:radial-gradient(circle at top,var(--accent-soft),transparent 45%),linear-gradient(180deg,var(--canvas-top),var(--canvas-bottom)); overflow:hidden; position:relative; }
-.squad-canvas :deep(svg) { width:100%; height:auto; display:block; }
-.squad-canvas :deep(.squad-title) { font-size:12px; font-weight:700; fill:var(--ink); }
-.squad-canvas :deep(.squad-subtitle) { font-size:11px; fill:var(--muted); }
-.squad-canvas :deep(.node-label) { font-size:13.5px; font-weight:700; fill:var(--ink); letter-spacing:-0.01em; }
-.squad-canvas :deep(.node-subtext) { font-size:11px; fill:var(--muted); }
-.squad-canvas :deep(.radar-ring) { fill:none; stroke:var(--signal-line); stroke-width:1; stroke-dasharray:3 7; opacity:0.55; }
-.squad-canvas :deep(.node-status) { stroke:var(--node-core); stroke-width:2; }
-.squad-canvas :deep(.node-status.stale) { fill:none; stroke:var(--muted); stroke-width:2; }
-.squad-canvas :deep(.node-live-halo) {
+.squad-canvas svg { width:100%; height:auto; display:block; }
+.node-label { font-size:13.5px; font-weight:700; fill:var(--ink); letter-spacing:-0.01em; }
+.node-subtext { font-size:11px; fill:var(--muted); }
+.radar-ring { fill:none; stroke:var(--signal-line); stroke-width:1; stroke-dasharray:3 7; opacity:0.55; }
+
+/* Node positioning: the outer group carries the orbit position and GLIDES
+   between tiers; the inner group carries state animations. */
+.node-pos { cursor:pointer; transition:transform 0.9s cubic-bezier(0.22, 1, 0.36, 1); }
+.node-ring.drift { animation:node-drift 4.6s ease-in-out infinite; }
+
+.node-shell { fill:var(--node-core); stroke:var(--shell-stroke); stroke-width:2; }
+.node-ring.online { filter:drop-shadow(0 0 8px rgba(133,183,235,0.2)); }
+.node-ring.offline { opacity:0.55; }
+.node-ring.offline .node-shell { stroke-dasharray:4 5; }
+/* Ghost: presence reads from the FILL — a stale member is hollow and still. */
+.node-ring.ghost { opacity:0.45; }
+.node-ring.ghost .node-core { fill:transparent !important; stroke:var(--core-accent, var(--muted)); stroke-width:2; stroke-dasharray:3 4; }
+.node-ring.ghost .node-glyph { fill:var(--muted); }
+.node-ring.ghost .node-person { stroke:var(--muted); }
+.node-ring.ghost .node-person circle { fill:var(--muted); }
+.node-aura { fill:none; stroke:var(--member-accent, var(--accent)); stroke-width:2; opacity:0.16; transform-origin:center; transform-box:fill-box; }
+.node-ring.busy .node-aura { animation:node-aura-pulse 1.8s ease-in-out infinite; }
+.node-ring.message-send .node-aura { animation:node-aura-ripple 1.2s ease-out infinite; }
+.node-ring.message-receive .node-aura { animation:node-aura-ripple 1.35s ease-out infinite reverse; }
+.node-status { stroke:var(--node-core); stroke-width:2; }
+.node-status.stale { fill:none; stroke:var(--muted); stroke-width:2; }
+.node-live-halo {
   fill:none;
   stroke-width:1.6;
   transform-box:fill-box;
   transform-origin:center;
   animation:node-live-halo 2.1s ease-out infinite;
 }
-.squad-canvas :deep(.node-pending circle) { fill:#EF9F27; stroke:var(--node-core); stroke-width:2; }
-.squad-canvas :deep(.node-pending text) { fill:#231a02; font-size:10px; font-weight:800; }
-.squad-canvas :deep(.node-crown) { fill:#EF9F27; stroke:var(--node-core); stroke-width:1; }
-.squad-canvas :deep(.node-person) { fill:none; stroke:var(--glyph-ink); stroke-width:1.8; stroke-linecap:round; }
-.squad-canvas :deep(.node-person circle) { fill:var(--glyph-ink); stroke:none; }
-.squad-canvas :deep(.node-ring.operator .node-shell) { stroke-dasharray:3 4; }
-.squad-canvas :deep(.mail-glyph rect) { fill:var(--impact-accent, var(--accent)); stroke:var(--node-core); stroke-width:1.4; }
-.squad-canvas :deep(.mail-glyph > path) { fill:none; stroke:var(--node-core); stroke-width:1.4; stroke-linejoin:round; }
-.squad-canvas :deep(.mail-glyph) { opacity:0.95; }
-.squad-canvas :deep(.mail-glyph.queued) { opacity:0.55; }
-.squad-canvas :deep(.signal-line) { stroke:var(--signal-line); stroke-width:2; }
-/* Relationship edges: heat = recency. Fresh conversations glow, cooling ones
-   fade to a thin dashed whisper, held ones stay warm while work is unread. */
-.squad-canvas :deep(.relation line) { stroke-linecap:round; }
-.squad-canvas :deep(.relation.fresh line) { stroke:rgba(93, 202, 165, 0.75); stroke-width:2.6; }
-.squad-canvas :deep(.relation.warm line) { stroke:rgba(93, 202, 165, 0.38); stroke-width:1.8; }
-.squad-canvas :deep(.relation.cold line) { stroke:var(--signal-line); stroke-width:1.2; stroke-dasharray:5 7; }
-.squad-canvas :deep(.relation.held line) { stroke:rgba(239, 159, 39, 0.5); }
-.squad-canvas :deep(.queue-dot) {
-  fill:#EF9F27; stroke:var(--node-core); stroke-width:1;
-  transform-box:fill-box; transform-origin:center;
-  animation:queue-dot 1.6s ease-in-out infinite;
-}
-.squad-canvas :deep(.node-workbars rect) {
+.node-pending circle { fill:#EF9F27; stroke:var(--node-core); stroke-width:2; }
+.node-pending text { fill:#231a02; font-size:10px; font-weight:800; }
+.node-crown { fill:#EF9F27; stroke:var(--node-core); stroke-width:1; }
+.node-person { fill:none; stroke:var(--glyph-ink); stroke-width:1.8; stroke-linecap:round; }
+.node-person circle { fill:var(--glyph-ink); stroke:none; }
+.node-ring.operator .node-shell { stroke-dasharray:3 4; }
+.node-glyph { font-size:11px; font-weight:800; fill:var(--glyph-ink); letter-spacing:0.06em; }
+.node-workbars rect {
   fill:#5DCAA5;
   transform-box:fill-box; transform-origin:bottom;
   animation:map-work-bars 1s steps(3, end) infinite;
 }
-.squad-canvas :deep(.node-workbars rect:nth-child(2)) { animation-delay:0.16s; }
-.squad-canvas :deep(.node-workbars rect:nth-child(3)) { animation-delay:0.32s; }
-.squad-canvas :deep(.node-ring) { cursor:pointer; }
-.squad-canvas :deep(.node-ring.drift) { animation:node-drift 2.6s ease-in-out infinite; }
-.squad-canvas :deep(.signal-line.route-pulse) { stroke-width:3; stroke-dasharray:8 10; stroke-linecap:round; animation:route-pulse 1.45s cubic-bezier(0.22,1,0.36,1) infinite; }
-.squad-canvas :deep(.signal-line.route-pulse.queued) { opacity:0.42; animation-duration:1.95s; }
-.squad-canvas :deep(.signal-line.route-pulse.dequeued) { opacity:0.74; animation-duration:1.1s; }
-.squad-canvas :deep(.node-shell) { fill:var(--node-core); stroke:var(--shell-stroke); stroke-width:2; }
-.squad-canvas :deep(.node-ring.online) { filter:drop-shadow(0 0 8px rgba(133,183,235,0.2)); }
-.squad-canvas :deep(.node-ring.offline) { opacity:0.55; }
-.squad-canvas :deep(.node-ring.offline .node-shell) { stroke-dasharray:4 5; }
-/* Ghost: presence reads from the FILL — a stale member is hollow and still. */
-.squad-canvas :deep(.node-ring.ghost) { opacity:0.45; }
-.squad-canvas :deep(.node-ring.ghost .node-core) { fill:transparent; stroke:var(--core-accent, var(--muted)); stroke-width:2; stroke-dasharray:3 4; }
-.squad-canvas :deep(.node-ring.ghost .node-glyph) { fill:var(--muted); }
-.squad-canvas :deep(.node-ring.ghost .node-person) { stroke:var(--muted); }
-.squad-canvas :deep(.node-ring.ghost .node-person circle) { fill:var(--muted); }
-.squad-canvas :deep(.node-aura) { fill:none; stroke:var(--member-accent, var(--accent)); stroke-width:2; opacity:0.16; transform-origin:center; }
-.squad-canvas :deep(.node-ring.busy .node-aura) { animation:node-aura-pulse 1.8s ease-in-out infinite; }
-.squad-canvas :deep(.node-ring.message-send .node-aura) { animation:node-aura-ripple 1.2s ease-out infinite; }
-.squad-canvas :deep(.node-ring.message-receive .node-aura) { animation:node-aura-ripple 1.35s ease-out infinite reverse; }
-.squad-canvas :deep(.node-impact) { fill:none; stroke:var(--impact-accent, var(--accent)); stroke-width:3; opacity:0; }
-.squad-canvas :deep(.node-impact.task) { animation:node-impact-task 1.2s ease-out infinite; }
-.squad-canvas :deep(.node-impact.info) { stroke-dasharray:2 8; animation:node-impact-info 1.4s ease-out infinite; }
-.squad-canvas :deep(.node-impact.reply) { stroke-dasharray:12 8; animation:node-impact-reply 1.3s ease-out infinite; }
-.squad-canvas :deep(.node-impact.spark) { stroke-width:1.6; opacity:0.32; animation:node-impact-spark 1s ease-out infinite; }
-.squad-canvas :deep(.node-impact.queued) { opacity:0.28; animation-duration:1.9s; }
-.squad-canvas :deep(.node-impact.dequeued) { opacity:0.48; animation-duration:1.15s; }
-.squad-canvas :deep(.node-float-tag) { opacity:0; animation:node-float-tag 1.05s ease-out infinite; }
-.squad-canvas :deep(.node-float-pill) { fill:var(--impact-accent, var(--accent)); fill-opacity:0.88; }
-.squad-canvas :deep(.node-float-text) { fill:#03131a; font-size:10px; font-weight:800; letter-spacing:0.05em; }
-.squad-canvas :deep(.node-glyph) { font-size:11px; font-weight:800; fill:var(--glyph-ink); letter-spacing:0.06em; }
+.node-workbars rect:nth-child(2) { animation-delay:0.16s; }
+.node-workbars rect:nth-child(3) { animation-delay:0.32s; }
+
+/* Relationship edges: heat = recency. Fresh conversations glow, cooling ones
+   fade to a thin dashed whisper, held ones stay warm while work is unread.
+   New edges ease in instead of popping. */
+.relation path { fill:none; stroke-linecap:round; animation:edge-in 0.5s ease both; transition:stroke 0.6s ease, stroke-width 0.6s ease; }
+.relation.fresh path { stroke:rgba(93, 202, 165, 0.75); stroke-width:2.6; }
+.relation.warm path { stroke:rgba(93, 202, 165, 0.38); stroke-width:1.8; }
+.relation.cold path { stroke:var(--signal-line); stroke-width:1.2; stroke-dasharray:5 7; }
+.relation.held path { stroke:rgba(239, 159, 39, 0.5); }
+.queue-dot {
+  fill:#EF9F27; stroke:var(--node-core); stroke-width:1;
+  transform-box:fill-box; transform-origin:center;
+  animation:queue-dot 1.6s ease-in-out infinite;
+  transition:cx 0.9s cubic-bezier(0.22, 1, 0.36, 1), cy 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Per-event flight: mounts once when its event appears, so every animation
+   here plays a FINITE run — no restarting loops. */
+.flight-route { stroke-width:2.5; stroke-dasharray:8 10; stroke-linecap:round; fill:none; animation:route-pulse 1.45s cubic-bezier(0.22,1,0.36,1) 2 both; }
+.flight.queued .flight-route { opacity:0.42; }
+.flight-impact { fill:none; stroke:var(--impact-accent, var(--accent)); stroke-width:3; opacity:0; animation:flight-impact 1.2s ease-out 2 both; }
+/* Opacity-only fade-in: animating transform here would override the tag's
+   positioning transform attribute and fling it to the SVG origin. */
+.flight-tag { animation:flight-tag-in 0.5s ease-out 1.2s both; }
+.node-float-pill { fill:var(--impact-accent, var(--accent)); fill-opacity:0.88; }
+.node-float-text { fill:#03131a; font-size:10px; font-weight:800; letter-spacing:0.05em; }
+.mail-glyph rect { fill:var(--impact-accent, var(--accent)); stroke:var(--node-core); stroke-width:1.4; }
+.mail-glyph > path { fill:none; stroke:var(--node-core); stroke-width:1.4; stroke-linejoin:round; }
+.mail-glyph { opacity:0.95; }
+.flight.queued .mail-glyph { opacity:0.55; }
 
 /* Empty state */
 .empty-state { display:flex; flex-direction:column; align-items:center; gap:16px; padding:60px 24px; text-align:center; }
 .empty-state span { color:var(--muted); font-size:14px; }
 
 /* Animations */
+@keyframes edge-in { from { opacity:0; } to { opacity:1; } }
 @keyframes route-pulse { 0% { stroke-dashoffset:0; opacity:0.18; } 18% { opacity:0.95; } 100% { stroke-dashoffset:-36; opacity:0.24; } }
+@keyframes flight-impact { 0% { r:16; opacity:0.45; } 100% { r:44; opacity:0; } }
+@keyframes flight-tag-in { from { opacity:0; } to { opacity:1; } }
 @keyframes node-live-halo { 0% { transform:scale(0.7); opacity:0.75; } 100% { transform:scale(2.1); opacity:0; } }
 @keyframes node-drift { 0%, 100% { transform:translate(0, 0); } 50% { transform:translate(var(--dx, 0px), var(--dy, -2.4px)); } }
 @keyframes queue-dot { 0%, 100% { transform:scale(0.85); opacity:0.55; } 50% { transform:scale(1.1); opacity:1; } }
 @keyframes map-work-bars { 0%, 100% { transform:scaleY(0.7); opacity:0.55; } 45% { transform:scaleY(1.05); opacity:1; } }
 @keyframes node-aura-pulse { 0% { transform:scale(0.92); opacity:0.14; } 55% { transform:scale(1.12); opacity:0.34; } 100% { transform:scale(1.22); opacity:0; } }
 @keyframes node-aura-ripple { 0% { transform:scale(0.88); opacity:0.2; } 50% { transform:scale(1.08); opacity:0.3; } 100% { transform:scale(1.26); opacity:0; } }
-@keyframes node-impact-task { 0% { r:18; opacity:0.45; } 100% { r:44; opacity:0; } }
-@keyframes node-impact-info { 0% { r:16; opacity:0.38; } 100% { r:42; opacity:0; } }
-@keyframes node-impact-reply { 0% { r:14; opacity:0.42; } 100% { r:40; opacity:0; } }
-@keyframes node-impact-spark { 0% { r:10; opacity:0.18; } 100% { r:34; opacity:0; } }
-@keyframes node-float-tag { 0% { opacity:0; transform:translateY(10px); } 16% { opacity:1; } 100% { opacity:0; transform:translateY(-8px); } }
 
-html[data-motion="reduced"] .squad-canvas::after,
-html[data-motion="reduced"] .squad-canvas :deep(.route-pulse),
-html[data-motion="reduced"] .squad-canvas :deep(.node-aura),
-html[data-motion="reduced"] .squad-canvas :deep(.node-impact),
-html[data-motion="reduced"] .squad-canvas :deep(.node-live-halo),
-html[data-motion="reduced"] .squad-canvas :deep(.queue-dot),
-html[data-motion="reduced"] .squad-canvas :deep(.node-workbars rect),
-html[data-motion="reduced"] .squad-canvas :deep(.node-float-tag) {
+html[data-motion="reduced"] .flight-route,
+html[data-motion="reduced"] .flight-impact,
+html[data-motion="reduced"] .node-aura,
+html[data-motion="reduced"] .node-live-halo,
+html[data-motion="reduced"] .queue-dot,
+html[data-motion="reduced"] .node-workbars rect {
   animation-duration: 1.8s !important;
 }
-html[data-motion="reduced"] .squad-canvas :deep(.node-ring) {
+html[data-motion="reduced"] .node-ring,
+html[data-motion="reduced"] .node-pos {
   animation: none !important;
+  transition: none !important;
+}
+html[data-motion="reduced"] .relation path,
+html[data-motion="off"] .relation path {
+  animation: none !important;
+  transition: none !important;
+}
+html[data-motion="reduced"] .queue-dot,
+html[data-motion="off"] .queue-dot {
+  transition: none !important;
 }
 
-html[data-motion="off"] .squad-canvas::after,
-html[data-motion="off"] .squad-canvas :deep(.route-pulse),
-html[data-motion="off"] .squad-canvas :deep(.node-aura),
-html[data-motion="off"] .squad-canvas :deep(.node-impact),
-html[data-motion="off"] .squad-canvas :deep(.node-live-halo),
-html[data-motion="off"] .squad-canvas :deep(.queue-dot),
-html[data-motion="off"] .squad-canvas :deep(.node-workbars rect),
-html[data-motion="off"] .squad-canvas :deep(.node-ring),
-html[data-motion="off"] .squad-canvas :deep(.node-float-tag) {
+html[data-motion="off"] .flight-route,
+html[data-motion="off"] .flight-impact,
+html[data-motion="off"] .flight-tag,
+html[data-motion="off"] .node-aura,
+html[data-motion="off"] .node-live-halo,
+html[data-motion="off"] .queue-dot,
+html[data-motion="off"] .node-workbars rect,
+html[data-motion="off"] .node-ring {
   animation: none !important;
 }
+html[data-motion="off"] .node-pos {
+  transition: none !important;
+}
+html[data-motion="off"] .flight-tag { opacity:1; }
 
 /* The envelope rides an SMIL animateMotion, which CSS animation rules can't
    slow down — hide it outright when motion is reduced or off. */
-html[data-motion="off"] .squad-canvas :deep(.mail-glyph),
-html[data-motion="reduced"] .squad-canvas :deep(.mail-glyph) {
+html[data-motion="off"] .mail-glyph,
+html[data-motion="reduced"] .mail-glyph {
   display: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .squad-canvas :deep(.mail-glyph) { display: none; }
+  .mail-glyph { display: none; }
 }
 
 /* Responsive */
