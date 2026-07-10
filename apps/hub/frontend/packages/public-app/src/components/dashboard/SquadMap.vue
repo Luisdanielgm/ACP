@@ -85,7 +85,7 @@ import {
   normalizedRole, memberPalette, heartbeatState, statusTone, nameInitials, isWebOperator,
   messageActionType, actionChipClass, deliveryMode, deliveryClass, actionTone, floatTagLabel,
   recentMemberActivity, memberActivity, mapRoutePath, mapAnimationEvents, sortedMembers,
-  escapeHtml, type TrafficLevel,
+  eventClass, escapeHtml, type TrafficLevel,
 } from '../../composables/sessionHelpers'
 import { translateStatus } from '../../composables/dashboardTranslations'
 import type { SessionMember, SessionDetailPayload } from '../../api/sessions'
@@ -237,59 +237,130 @@ const squadMapSvg = computed(() => {
 
   const others = members.filter(m => m.agent_name !== chiefMember.agent_name)
 
-  // Radial hub layout: the chief sits at the center and teammates orbit on a
-  // ring around it. Reads as a map at a glance and stays balanced whether the
-  // room has one member or twelve. Side labels let one or two teammates sit on
-  // the horizontal axis inside a much shorter canvas.
+  // ── Relationships from the actual message history ──
+  // The map draws CONVERSATIONS, not topology: an edge exists only when two
+  // members exchanged messages recently, and a member's orbital radius encodes
+  // how recently they took part in one (inner = talking now, outer = quiet).
+  const now = Date.now()
+  const EDGE_WINDOW = 10 * 60_000
+
+  interface PairStat { a: string; b: string; lastTs: number; count: number; queuedTo: string }
+  const pairs = new Map<string, PairStat>()
+  const lastActivity = new Map<string, number>()
+
+  for (const event of p.history || []) {
+    if (eventClass(String(event.event || '')) !== 'message') continue
+    const actor = String(event.actor || '')
+    const target = String(event.target || '')
+    const ts = Date.parse(String(event.ts || ''))
+    if (Number.isNaN(ts)) continue
+    if (actor) lastActivity.set(actor, Math.max(lastActivity.get(actor) || 0, ts))
+    if (target) lastActivity.set(target, Math.max(lastActivity.get(target) || 0, ts))
+    if (!actor || !target || actor === target) continue
+    const key = actor < target ? `${actor}|${target}` : `${target}|${actor}`
+    const stat = pairs.get(key) || { a: actor, b: target, lastTs: 0, count: 0, queuedTo: '' }
+    stat.count += 1
+    if (ts >= stat.lastTs) {
+      stat.lastTs = ts
+      stat.a = actor
+      stat.b = target
+    }
+    if (deliveryMode(event) === 'queued') stat.queuedTo = target
+    pairs.set(key, stat)
+  }
+
+  function activityTier(member: SessionMember): number {
+    const age = now - (lastActivity.get(member.agent_name) || 0)
+    let tier = age <= 90_000 ? 0 : age <= 5 * 60_000 ? 1 : 2
+    // Unread work keeps a member close: they are part of a live relationship.
+    if (Number(member.pending_count || 0) > 0) tier = Math.min(tier, 1)
+    return tier
+  }
+
   const ringRadius = others.length ? Math.min(240, 170 + others.length * 8) : 0
   const width = 1000
   const height = others.length <= 2 ? 400 : ringRadius * 2 + 230
   const cx = width / 2
   const cy = height / 2
 
-  const nodes = new Map<string, { x: number; y: number; member: SessionMember }>()
+  const nodes = new Map<string, { x: number; y: number; member: SessionMember; tier: number }>()
   let markup = ''
 
-  // Radar rings give the canvas spatial context even when the room is quiet.
-  const rings = others.length
-    ? [ringRadius * 0.45, ringRadius * 0.75, ringRadius * 1.06]
-    : [70, 120, 170]
+  // Orbit radii ARE the semantics: inner = conversing, mid = recent or with
+  // pending work, outer = quiet. The dashed rings mark those bands.
+  const tight = others.length > 6
+  const tierRadii = [
+    ringRadius * (tight ? 0.75 : 0.6),
+    ringRadius * (tight ? 0.9 : 0.82),
+    ringRadius * 1.05,
+  ]
+  const rings = others.length ? tierRadii : [70, 120, 170]
   rings.forEach(r => {
     markup += `<circle class="radar-ring" cx="${cx}" cy="${cy}" r="${r.toFixed(1)}" />`
   })
 
-  nodes.set(chiefMember.agent_name, { x: cx, y: cy, member: chiefMember })
+  nodes.set(chiefMember.agent_name, { x: cx, y: cy, member: chiefMember, tier: 0 })
 
-  // One or two teammates read best on the horizontal axis; three or more
-  // start at 12 o'clock and distribute evenly.
-  const startAngle = others.length <= 2 ? 0 : -Math.PI / 2
-  others.forEach((member, mi) => {
-    const angle = startAngle + (mi * 2 * Math.PI) / others.length
-    const x = cx + ringRadius * Math.cos(angle)
-    const y = cy + ringRadius * Math.sin(angle)
-    nodes.set(member.agent_name, { x, y, member })
-    const isOperator = isWebOperator(member.agent_name)
-    const spokeClasses = [
-      'signal-line',
-      cs.has(member.agent_name) ? 'live' : '',
-      isOperator ? 'operator-spoke' : '',
-    ].filter(Boolean).join(' ')
-    markup += `<line class="${spokeClasses}" x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" />`
-    // Pending messages queue up as amber dots ON the wire, right before the
-    // agent — you can see WHERE work is piling up at a glance.
-    const queued = Math.min(5, Number(member.pending_count || 0))
-    for (let d = 0; d < queued; d++) {
-      const tPos = 0.82 - d * 0.06
-      const qx = cx + (x - cx) * tPos
-      const qy = cy + (y - cy) * tPos
+  // Angles stay STABLE (alphabetical) so members never swap places between
+  // polls — only their distance to the center moves as relationships heat
+  // and cool. One or two teammates read best on the horizontal axis.
+  const positioned = [...others].sort((a, b) => a.agent_name.localeCompare(b.agent_name))
+  const startAngle = positioned.length <= 2 ? 0 : -Math.PI / 2
+  positioned.forEach((member, mi) => {
+    const angle = startAngle + (mi * 2 * Math.PI) / positioned.length
+    const tier = activityTier(member)
+    const radius = tierRadii[tier]
+    const x = cx + radius * Math.cos(angle)
+    const y = cy + radius * Math.sin(angle)
+    nodes.set(member.agent_name, { x, y, member, tier })
+  })
+
+  // ── Relationship edges: bright while fresh, fading as they cool, and held
+  // warm while the receiver still has unread queued messages ──
+  pairs.forEach(pair => {
+    const na = nodes.get(pair.a)
+    const nb = nodes.get(pair.b)
+    if (!na || !nb) return
+    const age = now - pair.lastTs
+    const queuedTarget = pair.queuedTo ? nodes.get(pair.queuedTo) : undefined
+    const heldByPending = Boolean(queuedTarget && Number(queuedTarget.member.pending_count || 0) > 0)
+    if (age > EDGE_WINDOW && !heldByPending) return
+    let heat = age <= 45_000 ? 'fresh' : age <= 3 * 60_000 ? 'warm' : 'cold'
+    if (heldByPending && heat === 'cold') heat = 'warm'
+    markup += `
+      <g class="relation ${heat}${heldByPending ? ' held' : ''}">
+        <title>${escapeHtml(`${pair.a} ⇄ ${pair.b} · ${pair.count}`)}</title>
+        <line x1="${na.x.toFixed(1)}" y1="${na.y.toFixed(1)}" x2="${nb.x.toFixed(1)}" y2="${nb.y.toFixed(1)}" />
+      </g>`
+  })
+
+  // Pending messages queue up as amber dots on the freshest INBOUND edge of
+  // the member that has unread work — you see where it piles up.
+  const inbound = new Map<string, PairStat>()
+  pairs.forEach(pair => {
+    const current = inbound.get(pair.b)
+    if (!current || pair.lastTs > current.lastTs) inbound.set(pair.b, pair)
+  })
+  nodes.forEach(node => {
+    const pendingN = Math.min(5, Number(node.member.pending_count || 0))
+    if (!pendingN) return
+    const pair = inbound.get(node.member.agent_name)
+    if (!pair) return
+    const from = nodes.get(pair.a === node.member.agent_name ? pair.b : pair.a)
+    if (!from) return
+    for (let d = 0; d < pendingN; d++) {
+      const tPos = 0.82 - d * 0.07
+      const qx = from.x + (node.x - from.x) * tPos
+      const qy = from.y + (node.y - from.y) * tPos
       markup += `<circle class="queue-dot" style="animation-delay:${(d * 0.18).toFixed(2)}s" cx="${qx.toFixed(1)}" cy="${qy.toFixed(1)}" r="3"/>`
     }
   })
 
   // Animated routes: pulse dashes along the wire, impact ripples on arrival,
   // and a little envelope that rides the route and rests on the receiver.
+  // Capped at the last 4 events — motion is a signal, not wallpaper.
   let mailMarkup = ''
-  animEvents.slice(-10).forEach((event, ri) => {
+  animEvents.slice(-4).forEach((event, ri) => {
     const from = nodes.get(String(event.actor || ''))
     const to = nodes.get(String(event.target || ''))
     if (!from || !to || event.actor === event.target) return
@@ -326,18 +397,21 @@ const squadMapSvg = computed(() => {
     const isChief = m.agent_name === chiefMember.agent_name
     const isOperator = isWebOperator(m.agent_name)
     const isConnected = cs.has(m.agent_name)
-    // Organic drift: each node sways on its own tiny vector so the room feels
-    // alive. Keyframes start and end at rest, so the 2s poll re-render never
-    // produces a visible jump.
-    const driftX = [0, 1.6, -1.6][nodeIndex % 3]
-    const driftY = nodeIndex % 2 === 0 ? -2.4 : 2.4
-    nodeIndex += 1
     const palette = memberPalette(m)
     const accent = isOperator ? '#a1aab5' : palette.accent
     const hbState = heartbeatState(m, cs)
-    const liveClass = hbState === 'stale' ? 'offline' : 'online'
+    const isGhost = hbState === 'stale'
+    const liveClass = isGhost ? 'offline ghost' : 'online'
     const activity = memberActivity(m, activityMap)
+    // Motion budget: only nodes that are part of something (recent
+    // conversation, pending work, or actively busy) drift; quiet ones and
+    // ghosts hold still. Rest-to-rest keyframes survive the 2s re-render.
+    const drifts = !isGhost && (node.tier <= 1 || activity.isBusy)
+    const driftX = [0, 1.6, -1.6][nodeIndex % 3]
+    const driftY = nodeIndex % 2 === 0 ? -2.4 : 2.4
+    nodeIndex += 1
     const activityClasses = [
+      drifts ? 'drift' : '',
       activity.isBusy ? 'busy' : '',
       activity.hasOutgoing ? 'message-send' : '',
       activity.hasIncoming ? 'message-receive' : '',
@@ -388,7 +462,7 @@ const squadMapSvg = computed(() => {
         <title>${escapeHtml(m.agent_name || '-')} · ${escapeHtml(statusLabel)}${pending ? ` · +${pending}` : ''}</title>
         <circle class="node-aura" cx="${node.x}" cy="${node.y}" r="${auraR}"/>
         <circle class="node-shell" cx="${node.x}" cy="${node.y}" r="${shellR}"/>
-        <circle cx="${node.x}" cy="${node.y}" r="${coreR}" fill="${accent}"/>
+        <circle class="node-core" cx="${node.x}" cy="${node.y}" r="${coreR}" fill="${accent}" style="--core-accent:${accent}"/>
         ${statusDot}
         ${liveHalo}
         ${pendingBadge}
@@ -486,7 +560,6 @@ const squadMapSvg = computed(() => {
 /* Squad map */
 .squad-map { min-height:300px; }
 .squad-canvas { width:100%; min-height:300px; border:1px solid var(--canvas-border); border-radius:18px; background:radial-gradient(circle at top,var(--accent-soft),transparent 45%),linear-gradient(180deg,var(--canvas-top),var(--canvas-bottom)); overflow:hidden; position:relative; }
-.squad-canvas::after { content:''; position:absolute; inset:-20% 0 auto; height:55%; background:linear-gradient(180deg, rgba(255,255,255,0.06), transparent 72%); opacity:0.22; pointer-events:none; mix-blend-mode:screen; animation:dashboard-scan 8s linear infinite; }
 .squad-canvas :deep(svg) { width:100%; height:auto; display:block; }
 .squad-canvas :deep(.squad-title) { font-size:12px; font-weight:700; fill:var(--ink); }
 .squad-canvas :deep(.squad-subtitle) { font-size:11px; fill:var(--muted); }
@@ -513,8 +586,13 @@ const squadMapSvg = computed(() => {
 .squad-canvas :deep(.mail-glyph) { opacity:0.95; }
 .squad-canvas :deep(.mail-glyph.queued) { opacity:0.55; }
 .squad-canvas :deep(.signal-line) { stroke:var(--signal-line); stroke-width:2; }
-.squad-canvas :deep(line.signal-line.live) { stroke:rgba(93, 202, 165, 0.3); }
-.squad-canvas :deep(line.signal-line.operator-spoke) { stroke-dasharray:3 6; }
+/* Relationship edges: heat = recency. Fresh conversations glow, cooling ones
+   fade to a thin dashed whisper, held ones stay warm while work is unread. */
+.squad-canvas :deep(.relation line) { stroke-linecap:round; }
+.squad-canvas :deep(.relation.fresh line) { stroke:rgba(93, 202, 165, 0.75); stroke-width:2.6; }
+.squad-canvas :deep(.relation.warm line) { stroke:rgba(93, 202, 165, 0.38); stroke-width:1.8; }
+.squad-canvas :deep(.relation.cold line) { stroke:var(--signal-line); stroke-width:1.2; stroke-dasharray:5 7; }
+.squad-canvas :deep(.relation.held line) { stroke:rgba(239, 159, 39, 0.5); }
 .squad-canvas :deep(.queue-dot) {
   fill:#EF9F27; stroke:var(--node-core); stroke-width:1;
   transform-box:fill-box; transform-origin:center;
@@ -527,10 +605,8 @@ const squadMapSvg = computed(() => {
 }
 .squad-canvas :deep(.node-workbars rect:nth-child(2)) { animation-delay:0.16s; }
 .squad-canvas :deep(.node-workbars rect:nth-child(3)) { animation-delay:0.32s; }
-.squad-canvas :deep(.node-ring) {
-  cursor:pointer;
-  animation:node-drift 2.6s ease-in-out infinite;
-}
+.squad-canvas :deep(.node-ring) { cursor:pointer; }
+.squad-canvas :deep(.node-ring.drift) { animation:node-drift 2.6s ease-in-out infinite; }
 .squad-canvas :deep(.signal-line.route-pulse) { stroke-width:3; stroke-dasharray:8 10; stroke-linecap:round; animation:route-pulse 1.45s cubic-bezier(0.22,1,0.36,1) infinite; }
 .squad-canvas :deep(.signal-line.route-pulse.queued) { opacity:0.42; animation-duration:1.95s; }
 .squad-canvas :deep(.signal-line.route-pulse.dequeued) { opacity:0.74; animation-duration:1.1s; }
@@ -538,8 +614,13 @@ const squadMapSvg = computed(() => {
 .squad-canvas :deep(.node-ring.online) { filter:drop-shadow(0 0 8px rgba(133,183,235,0.2)); }
 .squad-canvas :deep(.node-ring.offline) { opacity:0.55; }
 .squad-canvas :deep(.node-ring.offline .node-shell) { stroke-dasharray:4 5; }
-.squad-canvas :deep(.node-aura) { fill:none; stroke:var(--member-accent, var(--accent)); stroke-width:2; opacity:0.2; transform-origin:center; }
-.squad-canvas :deep(.node-ring.online .node-aura) { animation:node-aura-breathe 2.2s ease-in-out infinite; }
+/* Ghost: presence reads from the FILL — a stale member is hollow and still. */
+.squad-canvas :deep(.node-ring.ghost) { opacity:0.45; }
+.squad-canvas :deep(.node-ring.ghost .node-core) { fill:transparent; stroke:var(--core-accent, var(--muted)); stroke-width:2; stroke-dasharray:3 4; }
+.squad-canvas :deep(.node-ring.ghost .node-glyph) { fill:var(--muted); }
+.squad-canvas :deep(.node-ring.ghost .node-person) { stroke:var(--muted); }
+.squad-canvas :deep(.node-ring.ghost .node-person circle) { fill:var(--muted); }
+.squad-canvas :deep(.node-aura) { fill:none; stroke:var(--member-accent, var(--accent)); stroke-width:2; opacity:0.16; transform-origin:center; }
 .squad-canvas :deep(.node-ring.busy .node-aura) { animation:node-aura-pulse 1.8s ease-in-out infinite; }
 .squad-canvas :deep(.node-ring.message-send .node-aura) { animation:node-aura-ripple 1.2s ease-out infinite; }
 .squad-canvas :deep(.node-ring.message-receive .node-aura) { animation:node-aura-ripple 1.35s ease-out infinite reverse; }
@@ -560,9 +641,7 @@ const squadMapSvg = computed(() => {
 .empty-state span { color:var(--muted); font-size:14px; }
 
 /* Animations */
-@keyframes dashboard-scan { 0% { transform:translate3d(0, -18%, 0); opacity:0.08; } 30% { opacity:0.24; } 100% { transform:translate3d(0, 210%, 0); opacity:0; } }
 @keyframes route-pulse { 0% { stroke-dashoffset:0; opacity:0.18; } 18% { opacity:0.95; } 100% { stroke-dashoffset:-36; opacity:0.24; } }
-@keyframes node-aura-breathe { 0%, 100% { transform:scale(0.96); opacity:0.12; } 50% { transform:scale(1.06); opacity:0.3; } }
 @keyframes node-live-halo { 0% { transform:scale(0.7); opacity:0.75; } 100% { transform:scale(2.1); opacity:0; } }
 @keyframes node-drift { 0%, 100% { transform:translate(0, 0); } 50% { transform:translate(var(--dx, 0px), var(--dy, -2.4px)); } }
 @keyframes queue-dot { 0%, 100% { transform:scale(0.85); opacity:0.55; } 50% { transform:scale(1.1); opacity:1; } }
