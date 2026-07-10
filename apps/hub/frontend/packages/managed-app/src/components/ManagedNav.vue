@@ -20,6 +20,7 @@
         <span class="brand-copy">
           <strong class="brand-title">{{ brandTitle }}</strong>
           <span class="brand-sub">{{ brandSub }}</span>
+          <span v-if="user" class="brand-user" :title="t('role_' + user.role)">{{ user.email }}</span>
         </span>
       </RouterLink>
       <button class="sidebar-close" type="button" :aria-label="t('nav_close_menu')" @click="closeSidebar">
@@ -70,11 +71,33 @@
     </div>
 
     <div class="sidebar-footer">
-      <div v-if="user" class="user-card" :title="user.email">
-        <span class="user-card-label">{{ t('role_' + user.role) }}</span>
-        <strong class="user-card-email">{{ user.email }}</strong>
-      </div>
-      <button class="ghost-button sidebar-logout" @click="logout" :aria-label="t('logout')">{{ t('logout') }}</button>
+      <button
+        class="footer-icon"
+        type="button"
+        :aria-label="t('nav_theme_toggle') + ': ' + theme"
+        :title="t('nav_theme_toggle') + ': ' + theme"
+        @click="cycleTheme"
+      >
+        <RoomIcon :name="themeIcon" :size="16" />
+      </button>
+      <button
+        class="footer-icon footer-lang"
+        type="button"
+        :aria-label="t('nav_lang_toggle')"
+        :title="t('nav_lang_toggle')"
+        @click="toggleLocale"
+      >
+        {{ locale.toUpperCase() }}
+      </button>
+      <button
+        class="footer-icon footer-logout"
+        type="button"
+        :aria-label="t('logout')"
+        :title="t('logout')"
+        @click="logout"
+      >
+        <RoomIcon name="power" :size="16" />
+      </button>
     </div>
   </aside>
 
@@ -85,21 +108,24 @@
         <span></span>
         <span></span>
       </button>
-      <div class="topbar-copy">
+      <RouterLink
+        v-if="backLink"
+        :to="backLink.to"
+        class="topbar-back"
+        :aria-label="backLink.label"
+        :title="backLink.label"
+      >
+        <RoomIcon name="arrow-left" :size="16" />
+      </RouterLink>
+      <div v-if="!isSessionRoute" class="topbar-copy">
         <span class="topbar-kicker">{{ pageKicker }}</span>
         <strong class="topbar-title">{{ pageTitle }}</strong>
         <Breadcrumbs />
       </div>
-      <RouterLink v-if="backLink" :to="backLink.to" class="topbar-back">
-        <RoomIcon name="arrow-left" :size="15" />
-        <span class="topbar-back-label">{{ backLink.label }}</span>
-      </RouterLink>
     </div>
 
-    <div class="topbar-actions">
-      <ThemeToggle />
-      <LangToggle :messages="messages" />
-    </div>
+    <!-- Session routes teleport the live room bar here (see RoomLive.vue). -->
+    <div id="managed-topbar-session" class="topbar-session"></div>
   </header>
 
   <ToastContainer :dismiss-label="t('dismiss')" />
@@ -108,12 +134,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
-import { ThemeToggle, LangToggle } from '@acp/shared'
+import { useTheme, type ThemeMode } from '@acp/shared'
 import ToastContainer from './ToastContainer.vue'
 import Breadcrumbs from './Breadcrumbs.vue'
-import RoomIcon from './room/RoomIcon.vue'
+import RoomIcon, { type RoomIconName } from './room/RoomIcon.vue'
 import { useManagedAuth } from '../composables/useManagedAuth'
-import { useManagedI18n, messages } from '../i18n'
+import { useManagedI18n } from '../i18n'
 
 const SIDEBAR_COLLAPSED_KEY = 'acp_managed_sidebar_collapsed'
 
@@ -126,7 +152,28 @@ type NavItem = {
 
 const route = useRoute()
 const { isSingleWorkspace, user, logout } = useManagedAuth()
-const { t } = useManagedI18n()
+const { t, locale, setLocale } = useManagedI18n()
+const { theme, setTheme } = useTheme()
+
+const THEME_CYCLE: ThemeMode[] = ['dark', 'light', 'system']
+const THEME_ICONS: Record<ThemeMode, RoomIconName> = {
+  dark: 'moon',
+  light: 'sun',
+  system: 'monitor',
+}
+
+const themeIcon = computed(() => THEME_ICONS[theme.value])
+
+function cycleTheme() {
+  const next = THEME_CYCLE[(THEME_CYCLE.indexOf(theme.value) + 1) % THEME_CYCLE.length]
+  setTheme(next)
+}
+
+function toggleLocale() {
+  setLocale(locale.value === 'es' ? 'en' : 'es')
+}
+
+const isSessionRoute = computed(() => String(route.name ?? '') === 'session-detail')
 
 const routeAnnouncement = ref('')
 const sidebarOpen = ref(false)
@@ -343,6 +390,14 @@ function formatSlug(value: string): string {
   letter-spacing: 0.12em;
   color: var(--text-3);
 }
+.brand-user {
+  margin-top: 6px;
+  font-size: 0.76rem;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .sidebar-close {
   width: 36px;
   height: 36px;
@@ -453,30 +508,36 @@ function formatSlug(value: string): string {
 .sidebar-footer {
   margin-top: auto;
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
 }
-.user-card {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 14px 16px;
-  border-radius: 18px;
-  background: var(--glass-bg);
+.footer-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border-radius: 12px;
   border: 1px solid var(--glass-border);
+  background: var(--glass-bg);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all var(--transition-fast);
 }
-.user-card-label {
-  font-size: 0.68rem;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-weight: 700;
-}
-.user-card-email {
+.footer-icon:hover {
   color: var(--text-1);
-  font-size: 0.88rem;
-  line-height: 1.4;
-  word-break: break-word;
+  border-color: var(--accent-glow);
+}
+.footer-lang {
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.footer-logout:hover {
+  color: var(--danger);
+  border-color: var(--danger-glow);
 }
 
 .shell-topbar {
@@ -541,25 +602,24 @@ function formatSlug(value: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.topbar-actions {
+.topbar-session {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
 }
 .topbar-back {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 9px 15px;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
   border-radius: var(--radius-md);
   border: 1px solid var(--glass-border);
   background: var(--glass-bg);
   color: var(--text-2);
   text-decoration: none;
-  font-size: 0.84rem;
-  font-weight: 600;
-  white-space: nowrap;
   transition: all var(--transition-fast);
 }
 .topbar-back:hover {
@@ -572,20 +632,6 @@ function formatSlug(value: string): string {
   box-shadow: 0 0 0 3px var(--accent-subtle);
 }
 
-.ghost-button {
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border);
-  color: var(--text-2);
-  padding: 10px 16px;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-size: 0.84rem;
-  font-weight: 600;
-  transition: all var(--transition-fast);
-}
-.ghost-button:hover,
 .sidebar-close:hover,
 .menu-button:hover {
   border-color: var(--accent-glow);
@@ -595,7 +641,7 @@ function formatSlug(value: string): string {
 
 .sidebar-link:focus-visible,
 .context-card:focus-visible,
-.ghost-button:focus-visible,
+.footer-icon:focus-visible,
 .sidebar-close:focus-visible,
 .menu-button:focus-visible {
   outline: none;
@@ -656,9 +702,6 @@ function formatSlug(value: string): string {
   .sidebar-close {
     display: none;
   }
-  .topbar-copy {
-    display: none;
-  }
   .sidebar-collapse {
     display: inline-flex;
   }
@@ -678,8 +721,7 @@ function formatSlug(value: string): string {
   .shell-sidebar-collapsed .brand-copy,
   .shell-sidebar-collapsed .sidebar-label,
   .shell-sidebar-collapsed .sidebar-link-text,
-  .shell-sidebar-collapsed .sidebar-context,
-  .shell-sidebar-collapsed .user-card {
+  .shell-sidebar-collapsed .sidebar-context {
     display: none;
   }
   .shell-sidebar-collapsed .sidebar-head {
@@ -693,17 +735,8 @@ function formatSlug(value: string): string {
     border-radius: 12px;
   }
   .shell-sidebar-collapsed .sidebar-footer {
+    flex-direction: column;
     align-items: center;
-  }
-  .shell-sidebar-collapsed .sidebar-logout {
-    padding: 10px;
-    font-size: 0.68rem;
-  }
-}
-
-@media (max-width: 940px) {
-  .topbar-actions {
-    gap: 8px;
   }
 }
 

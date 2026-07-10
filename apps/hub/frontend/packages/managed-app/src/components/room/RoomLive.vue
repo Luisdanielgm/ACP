@@ -1,6 +1,8 @@
 <template>
   <div class="room">
-    <!-- Live bar: status, title, vital chips, admin actions -->
+    <!-- Live bar: status, title, vital chips, admin actions.
+         Rendered inside the shell topbar so the header IS the room. -->
+    <Teleport to="#managed-topbar-session">
     <div class="room-bar">
       <span
         class="health-dot"
@@ -60,6 +62,32 @@
             <RoomIcon name="power" :size="16" />
           </button>
         </template>
+      </div>
+    </div>
+    </Teleport>
+
+    <!-- Invite prompt dialog: shows the full prompt (incl. session id) and copies it -->
+    <div v-if="inviteOpen" class="invite-overlay" @click.self="inviteOpen = false">
+      <div class="invite-dialog" role="dialog" aria-modal="true" :aria-label="t('room_invite_title')">
+        <div class="invite-head">
+          <RoomIcon name="user-plus" :size="16" />
+          <strong>{{ t('room_invite_title') }}</strong>
+          <button
+            class="icon-button"
+            type="button"
+            :aria-label="t('room_invite_close')"
+            @click="inviteOpen = false"
+          >
+            <RoomIcon name="x" :size="15" />
+          </button>
+        </div>
+        <p class="invite-help">{{ t('room_invite_help') }}</p>
+        <pre class="invite-text">{{ inviteText }}</pre>
+        <div class="invite-actions">
+          <button class="primary-button" type="button" @click="copyInviteText">
+            {{ t('room_invite_copy') }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -357,10 +385,18 @@ async function copyValue(value: string, label: string) {
   }
 }
 
+const inviteOpen = ref(false)
+const inviteText = ref('')
+
 async function copyInvite() {
   if (!session.payload.value) return
-  const text = buildInvitePrompt(session.payload.value, locale.value)
-  copyValue(text, st('sd_invite_prompt_label'))
+  inviteText.value = buildInvitePrompt(session.payload.value, locale.value)
+  inviteOpen.value = true
+  copyValue(inviteText.value, st('sd_invite_prompt_label'))
+}
+
+function copyInviteText() {
+  if (inviteText.value) copyValue(inviteText.value, st('sd_invite_prompt_label'))
 }
 
 async function confirmCloseSession() {
@@ -387,26 +423,17 @@ watchEffect(() => {
 <style scoped>
 .room { display: flex; flex-direction: column; gap: 14px; }
 
-/* Live bar */
+/* Live bar — teleported into the shell topbar, so no panel chrome of its own */
 .room-bar {
-  position: sticky;
-  top: 12px;
-  z-index: 5;
   display: flex;
   align-items: center;
   gap: 12px;
-  flex-wrap: wrap;
-  padding: 12px 18px;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: var(--panel);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  box-shadow: var(--shadow-elev);
+  width: 100%;
+  min-width: 0;
 }
 .room-title {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: 1.05rem;
   font-weight: 800;
   letter-spacing: -0.02em;
   color: var(--ink);
@@ -462,6 +489,62 @@ watchEffect(() => {
 }
 .icon-button:hover, .icon-button.active { color: var(--ink); border-color: var(--hover-line); background: var(--soft); }
 .icon-button.danger:hover { color: #F0997B; border-color: rgba(240, 153, 123, 0.4); background: rgba(240, 153, 123, 0.08); }
+
+/* Invite dialog */
+.invite-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.invite-dialog {
+  width: min(640px, 100%);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--bg);
+  box-shadow: var(--shadow-elev);
+}
+.invite-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+}
+.invite-head .icon-button { margin-left: auto; }
+.invite-help {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+.invite-text {
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card-bg);
+  color: var(--ink);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+.invite-actions {
+  display: flex;
+  justify-content: flex-end;
+}
 
 /* Error + loading */
 .room-error {
@@ -569,10 +652,10 @@ html[data-motion="reduced"] .legend-work span { animation-duration: 2.4s !import
 
 /* Responsive */
 @media (max-width: 1200px) { .cockpit-grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) {
+  .room-chips { display: none; }
+}
 @media (max-width: 768px) {
-  .room-bar { position: static; padding: 12px 14px; border-radius: 14px; }
-  .room-title { white-space: normal; }
-  .room-actions { margin-left: 0; }
   .dock-tab-label { display: none; }
   .dock-tab { padding: 9px 12px; }
 }

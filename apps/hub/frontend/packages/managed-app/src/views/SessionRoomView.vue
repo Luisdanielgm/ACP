@@ -5,14 +5,6 @@
     </header>
     <main id="main-content">
       <section class="room-page">
-        <div v-if="session" class="room-toolbar">
-          <div class="toolbar-meta">
-            <span class="pill">{{ session.owner_agent_name }}</span>
-            <span v-if="session.project" class="pill">{{ session.project }}</span>
-            <span class="pill mono">{{ session.session_id }}</span>
-          </div>
-        </div>
-
         <div v-if="loading" class="room-skeleton" role="status" :aria-label="t('loading')">
           <SkeletonBlock h="52px" width="100%" />
           <SkeletonBlock h="320px" width="100%" />
@@ -104,26 +96,6 @@ watchEffect(() => {
   flex-direction: column;
   gap: 14px;
 }
-.room-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.toolbar-meta { display: inline-flex; gap: 8px; flex-wrap: wrap; }
-.pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 10px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--soft);
-  color: var(--muted);
-  font-size: 0.74rem;
-  font-weight: 600;
-}
-.pill.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.7rem; }
 .room-skeleton { display: flex; flex-direction: column; gap: 14px; }
 .empty-state {
   display: flex;

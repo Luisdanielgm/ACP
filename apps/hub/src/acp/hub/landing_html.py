@@ -75,7 +75,7 @@ _LANDING_HTML = """<!doctype html>
         height: 16px;
         border-radius: 50%;
         background: radial-gradient(circle at 30% 30%, #dff9ff 0%, var(--accent) 45%, var(--accent-deep) 100%);
-        box-shadow: 0 0 22px rgba(34, 211, 238, 0.35);
+        box-shadow: 0 0 22px rgba(133, 183, 235, 0.35);
       }
 
       .nav-links,
@@ -206,8 +206,8 @@ _LANDING_HTML = """<!doctype html>
         padding: 7px 12px;
         border-radius: 999px;
         color: var(--accent);
-        background: rgba(34, 211, 238, 0.1);
-        border: 1px solid rgba(34, 211, 238, 0.2);
+        background: rgba(133, 183, 235, 0.1);
+        border: 1px solid rgba(133, 183, 235, 0.2);
         font-size: 0.78rem;
         letter-spacing: 0.08em;
         text-transform: uppercase;
@@ -273,8 +273,8 @@ _LANDING_HTML = """<!doctype html>
         inset: 0;
         pointer-events: none;
         background:
-          linear-gradient(145deg, rgba(34, 211, 238, 0.14), transparent 34%),
-          radial-gradient(circle at 85% 18%, rgba(34, 211, 238, 0.14), transparent 26%);
+          linear-gradient(145deg, rgba(133, 183, 235, 0.14), transparent 34%),
+          radial-gradient(circle at 85% 18%, rgba(133, 183, 235, 0.14), transparent 26%);
       }
 
       .hero-card > * {
@@ -355,8 +355,8 @@ _LANDING_HTML = """<!doctype html>
         gap: 8px;
         padding: 6px 10px;
         border-radius: 999px;
-        border: 1px solid rgba(34, 211, 238, 0.2);
-        background: rgba(34, 211, 238, 0.1);
+        border: 1px solid rgba(133, 183, 235, 0.2);
+        background: rgba(133, 183, 235, 0.1);
         color: var(--accent);
         font-size: 0.76rem;
         letter-spacing: 0.08em;
@@ -417,8 +417,8 @@ _LANDING_HTML = """<!doctype html>
         width: 52px;
         height: 52px;
         border-radius: 16px;
-        background: linear-gradient(135deg, var(--accent-soft), rgba(34, 211, 238, 0.08));
-        border: 1px solid rgba(34, 211, 238, 0.15);
+        background: linear-gradient(135deg, var(--accent-soft), rgba(133, 183, 235, 0.08));
+        border: 1px solid rgba(133, 183, 235, 0.15);
         display: flex;
         align-items: center;
         justify-content: center;

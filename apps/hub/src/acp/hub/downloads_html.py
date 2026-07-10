@@ -38,7 +38,7 @@ _DOWNLOADS_HTML = """<!doctype html>
       }
 
       .brand { display: flex; align-items: center; gap: 10px; font-family: "Outfit", sans-serif; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
-      .mark { width: 14px; height: 14px; border-radius: 999px; background: radial-gradient(circle at 30% 30%, #dff9ff 0%, var(--accent) 45%, var(--accent-deep) 100%); box-shadow: 0 0 18px rgba(34, 211, 238, 0.35); }
+      .mark { width: 14px; height: 14px; border-radius: 999px; background: radial-gradient(circle at 30% 30%, #dff9ff 0%, var(--accent) 45%, var(--accent-deep) 100%); box-shadow: 0 0 18px rgba(133, 183, 235, 0.35); }
       .controls, .links, .hero-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
       a { color: inherit; text-decoration: none; }
       .link { color: var(--muted); font-size: 0.9rem; font-weight: 500; transition: color 0.2s ease; }
@@ -91,8 +91,8 @@ _DOWNLOADS_HTML = """<!doctype html>
         gap: 8px;
         padding: 7px 12px;
         border-radius: 999px;
-        border: 1px solid rgba(34, 211, 238, 0.24);
-        background: rgba(34, 211, 238, 0.1);
+        border: 1px solid rgba(133, 183, 235, 0.24);
+        background: rgba(133, 183, 235, 0.1);
         color: var(--accent);
         font-size: 0.78rem;
         letter-spacing: 0.08em;
@@ -133,7 +133,7 @@ _DOWNLOADS_HTML = """<!doctype html>
         margin-top: 10px;
         padding: 12px 14px;
         border-radius: 14px;
-        border: 1px solid rgba(34, 211, 238, 0.16);
+        border: 1px solid rgba(133, 183, 235, 0.16);
         background: rgba(0, 0, 0, 0.18);
         color: #b8f4ff;
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -157,8 +157,8 @@ _DOWNLOADS_HTML = """<!doctype html>
         gap: 8px;
         padding: 7px 10px;
         border-radius: 999px;
-        border: 1px solid rgba(34, 211, 238, 0.22);
-        background: rgba(34, 211, 238, 0.1);
+        border: 1px solid rgba(133, 183, 235, 0.22);
+        background: rgba(133, 183, 235, 0.1);
         color: var(--accent);
         font-size: 0.78rem;
         font-weight: 700;
@@ -168,8 +168,8 @@ _DOWNLOADS_HTML = """<!doctype html>
         margin-top: 12px;
         padding: 12px 14px;
         border-radius: 14px;
-        border: 1px solid rgba(239, 68, 68, 0.2);
-        background: rgba(239, 68, 68, 0.08);
+        border: 1px solid rgba(216, 90, 48, 0.2);
+        background: rgba(216, 90, 48, 0.08);
         color: var(--text);
         font-size: 0.9rem;
       }
@@ -184,47 +184,47 @@ _DOWNLOADS_HTML = """<!doctype html>
       }
 
       html[data-theme="system"] {
-        --bg: #030303;
+        --bg: #0B0B0A;
         --panel: rgba(255, 255, 255, 0.02);
         --line: rgba(255, 255, 255, 0.06);
         --text: #f0f0f0;
         --muted: #888888;
-        --accent: #22d3ee;
-        --accent-deep: #06b6d4;
-        --accent-hover: #06b6d4;
-        --accent-glow: rgba(34, 211, 238, 0.25);
-        --accent-soft: rgba(34, 211, 238, 0.08);
-        --danger: #ef4444;
+        --accent: #85B7EB;
+        --accent-deep: #378ADD;
+        --accent-hover: #378ADD;
+        --accent-glow: rgba(133, 183, 235, 0.25);
+        --accent-soft: rgba(133, 183, 235, 0.08);
+        --danger: #D85A30;
         --toggle-bg: rgba(0, 0, 0, 0.3);
         --button-ink: #000;
         --shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-        --shadow-glow: 0 4px 24px rgba(34, 211, 238, 0.15);
-        --gradient-start: #1e1e3f;
-        --gradient-end: #0d0d1a;
+        --shadow-glow: 0 4px 24px rgba(133, 183, 235, 0.15);
+        --gradient-start: #232321;
+        --gradient-end: #121211;
       }
       @media (prefers-color-scheme: light) {
         html[data-theme="system"] {
-          --bg: #f4f7fb;
+          --bg: #F6F5F1;
           --panel: rgba(255, 255, 255, 0.78);
           --line: rgba(15, 23, 42, 0.08);
           --text: #0f172a;
           --muted: #5b6474;
-          --accent: #0891b2;
-          --accent-deep: #0e7490;
-          --accent-hover: #0e7490;
-          --accent-glow: rgba(8, 145, 178, 0.2);
-          --accent-soft: rgba(8, 145, 178, 0.08);
-          --danger: #dc2626;
+          --accent: #185FA5;
+          --accent-deep: #0C447C;
+          --accent-hover: #0C447C;
+          --accent-glow: rgba(24, 95, 165, 0.2);
+          --accent-soft: rgba(24, 95, 165, 0.08);
+          --danger: #D85A30;
           --toggle-bg: rgba(255, 255, 255, 0.6);
           --button-ink: #03131a;
           --shadow: 0 10px 40px rgba(15, 23, 42, 0.08);
-          --shadow-glow: 0 4px 20px rgba(8, 145, 178, 0.12);
-          --gradient-start: #f1f5f9;
-          --gradient-end: #e2e8f0;
+          --shadow-glow: 0 4px 20px rgba(24, 95, 165, 0.12);
+          --gradient-start: #F1F0EB;
+          --gradient-end: #E7E5DE;
         }
         html[data-theme="system"] body {
           background:
-            radial-gradient(circle at 50% -20%, rgba(34, 211, 238, 0.12) 0%, transparent 58%),
+            radial-gradient(circle at 50% -20%, rgba(133, 183, 235, 0.12) 0%, transparent 58%),
             linear-gradient(180deg, var(--gradient-start), var(--gradient-end));
         }
         html[data-theme="system"] .code {
@@ -238,7 +238,7 @@ _DOWNLOADS_HTML = """<!doctype html>
 
       html[data-theme="light"] body {
         background:
-          radial-gradient(circle at 50% -20%, rgba(34, 211, 238, 0.12) 0%, transparent 58%),
+          radial-gradient(circle at 50% -20%, rgba(133, 183, 235, 0.12) 0%, transparent 58%),
           linear-gradient(180deg, var(--gradient-start), var(--gradient-end));
       }
 
@@ -255,8 +255,8 @@ _DOWNLOADS_HTML = """<!doctype html>
         width: 44px;
         height: 44px;
         border-radius: 12px;
-        background: linear-gradient(135deg, var(--accent-soft), rgba(34, 211, 238, 0.06));
-        border: 1px solid rgba(34, 211, 238, 0.12);
+        background: linear-gradient(135deg, var(--accent-soft), rgba(133, 183, 235, 0.06));
+        border: 1px solid rgba(133, 183, 235, 0.12);
         display: flex;
         align-items: center;
         justify-content: center;
