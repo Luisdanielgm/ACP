@@ -20,7 +20,7 @@ import { computed } from 'vue'
 import { useI18n } from '@acp/shared'
 import { messages } from '../../i18n'
 import {
-  normalizedRole, roleGlyph, memberPalette, heartbeatState, statusTone,
+  normalizedRole, memberPalette, heartbeatState, statusTone,
   messageActionType, actionChipClass, deliveryMode, deliveryClass, actionTone, floatTagLabel,
   recentMemberActivity, memberActivity, mapRoutePath, mapAnimationEvents, sortedMembers,
   escapeHtml, type TrafficLevel,
@@ -40,6 +40,50 @@ function clipText(value: string, max = 26): string {
   return value.length > max ? value.slice(0, max - 1) + '…' : value
 }
 
+// Identity initials from the agent name (first + last meaningful segment),
+// skipping hex hash suffixes — so two collaborators don't both read "CO".
+function nameInitials(name: string): string {
+  const parts = String(name || '')
+    .split(/[-_.\s]+/)
+    .filter(Boolean)
+    .filter(part => !/^[0-9a-f]{6,}$/i.test(part))
+  if (!parts.length) return '?'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+}
+
+interface NodeLabel {
+  anchor: 'start' | 'middle' | 'end'
+  nameX: number
+  nameY: number
+  subX: number
+  subY: number
+  clip: number
+}
+
+// Labels sit on the OUTER side of each node (away from the hub) so they can
+// never collide with a neighbor's label — the fix for overlapping names.
+// Crowded rings push more labels to the sides, where vertical spacing is wide.
+function labelFor(x: number, y: number, cx: number, cy: number, shellR: number, isChief: boolean, ringSize: number): NodeLabel {
+  if (!isChief) {
+    const dx = x - cx
+    const dy = y - cy
+    const len = Math.max(1, Math.hypot(dx, dy))
+    const ux = dx / len
+    const uy = dy / len
+    const sideThreshold = ringSize > 8 ? 0.25 : 0.55
+    if (Math.abs(ux) > sideThreshold) {
+      const side = ux > 0 ? 1 : -1
+      const lx = x + side * (shellR + 16)
+      return { anchor: side > 0 ? 'start' : 'end', nameX: lx, nameY: y - 2, subX: lx, subY: y + 15, clip: 22 }
+    }
+    if (uy < 0) {
+      return { anchor: 'middle', nameX: x, nameY: y - shellR - 26, subX: x, subY: y - shellR - 10, clip: 26 }
+    }
+  }
+  return { anchor: 'middle', nameX: x, nameY: y + shellR + 22, subX: x, subY: y + shellR + 39, clip: 26 }
+}
+
 const squadMapSvg = computed(() => {
   const p = props.payload
   if (!p || !p.members?.length) return ''
@@ -56,10 +100,11 @@ const squadMapSvg = computed(() => {
 
   // Radial hub layout: the chief sits at the center and teammates orbit on a
   // ring around it. Reads as a map at a glance and stays balanced whether the
-  // room has one member or twelve.
+  // room has one member or twelve. Side labels let one or two teammates sit on
+  // the horizontal axis inside a much shorter canvas.
   const ringRadius = others.length ? Math.min(240, 170 + others.length * 8) : 0
   const width = 1000
-  const height = others.length ? ringRadius * 2 + 230 : 430
+  const height = others.length <= 2 ? 400 : ringRadius * 2 + 230
   const cx = width / 2
   const cy = height / 2
 
@@ -119,16 +164,20 @@ const squadMapSvg = computed(() => {
       activity.hasOutgoing ? 'message-send' : '',
       activity.hasIncoming ? 'message-receive' : '',
     ].filter(Boolean).join(' ')
-    const coreR = isChief ? 23 : 19
-    const shellR = isChief ? 33 : 28
-    const auraR = isChief ? 41 : 36
+    const coreR = isChief ? 24 : 20
+    const shellR = isChief ? 34 : 29
+    const auraR = isChief ? 42 : 37
     const pending = Number(m.pending_count || 0)
     const statusLabel = translateStatus(t, m.status) || m.status || '-'
+    const label = labelFor(node.x, node.y, cx, cy, shellR, isChief, others.length)
     const pendingBadge = pending
       ? `<g class="node-pending">
           <circle cx="${(node.x - shellR + 4).toFixed(1)}" cy="${(node.y - shellR + 6).toFixed(1)}" r="9.5"/>
           <text x="${(node.x - shellR + 4).toFixed(1)}" y="${(node.y - shellR + 9.5).toFixed(1)}" text-anchor="middle">${pending > 9 ? '9+' : pending}</text>
         </g>`
+      : ''
+    const crown = isChief
+      ? `<path class="node-crown" transform="translate(${node.x}, ${(node.y - shellR - 10).toFixed(1)})" d="M-9 4 L-6 -4 L-3 0 L0 -6 L3 0 L6 -4 L9 4 Z"/>`
       : ''
     markup += `
       <g class="node-ring ${liveClass} ${activityClasses}" style="--member-accent:${palette.accent}">
@@ -138,9 +187,10 @@ const squadMapSvg = computed(() => {
         <circle cx="${node.x}" cy="${node.y}" r="${coreR}" fill="${palette.accent}"/>
         <circle class="node-status" cx="${(node.x + shellR - 8).toFixed(1)}" cy="${(node.y - shellR + 8).toFixed(1)}" r="5.5" fill="${statusTone(m.status)}"/>
         ${pendingBadge}
-        <text class="node-glyph" x="${node.x}" y="${node.y + 4}" text-anchor="middle">${escapeHtml(roleGlyph(m.role))}</text>
-        <text class="node-label" x="${node.x}" y="${node.y + shellR + 22}" text-anchor="middle">${escapeHtml(m.agent_name || '-')}</text>
-        <text class="node-subtext" x="${node.x}" y="${node.y + shellR + 39}" text-anchor="middle">${escapeHtml(clipText(m.current_task || statusLabel))}</text>
+        ${crown}
+        <text class="node-glyph" x="${node.x}" y="${node.y + 4}" text-anchor="middle">${escapeHtml(nameInitials(m.agent_name))}</text>
+        <text class="node-label" x="${label.nameX.toFixed(1)}" y="${label.nameY.toFixed(1)}" text-anchor="${label.anchor}">${escapeHtml(clipText(m.agent_name || '-', label.clip))}</text>
+        <text class="node-subtext" x="${label.subX.toFixed(1)}" y="${label.subY.toFixed(1)}" text-anchor="${label.anchor}">${escapeHtml(clipText(m.current_task || statusLabel, label.clip))}</text>
       </g>`
   })
 
@@ -176,6 +226,7 @@ const squadMapSvg = computed(() => {
 .squad-canvas :deep(.node-status) { stroke:var(--node-core); stroke-width:2; }
 .squad-canvas :deep(.node-pending circle) { fill:#EF9F27; stroke:var(--node-core); stroke-width:2; }
 .squad-canvas :deep(.node-pending text) { fill:#231a02; font-size:10px; font-weight:800; }
+.squad-canvas :deep(.node-crown) { fill:#EF9F27; stroke:var(--node-core); stroke-width:1; }
 .squad-canvas :deep(.signal-line) { stroke:var(--signal-line); stroke-width:2; }
 .squad-canvas :deep(.signal-line.route-pulse) { stroke-width:3; stroke-dasharray:8 10; stroke-linecap:round; animation:route-pulse 1.45s cubic-bezier(0.22,1,0.36,1) infinite; }
 .squad-canvas :deep(.signal-line.route-pulse.queued) { opacity:0.42; animation-duration:1.95s; }
