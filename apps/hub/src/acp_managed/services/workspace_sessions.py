@@ -63,6 +63,7 @@ class ManagedWorkspaceSessionService:
                     title=title,
                     project=project,
                     capabilities=capabilities,
+                    lifecycle_mode="persistent",
                 )
                 resolved_agent_name = candidate
                 break

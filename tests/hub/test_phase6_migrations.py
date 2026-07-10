@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import sqlite3
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from acp.hub.migrations import (
     SCHEMA_VERSION_TABLE,
     apply_migrations,
     apply_sqlite_migrations,
+    default_migrations_dir,
     discover_sql_migrations,
 )
 
@@ -29,7 +31,7 @@ def test_discover_sql_migrations_is_deterministic() -> None:
     ids = [artifact.migration_id for artifact in artifacts]
 
     assert ids == sorted(ids)
-    assert ids == ["0001", "0002", "0003", "0004", "0005", "0006"]
+    assert ids == ["0001", "0002", "0003", "0004", "0005", "0006", "0007"]
 
 
 def test_apply_migrations_alias_matches_primary_runner(tmp_path: Path) -> None:
@@ -37,8 +39,8 @@ def test_apply_migrations_alias_matches_primary_runner(tmp_path: Path) -> None:
 
     result = apply_migrations(sqlite_path=db_path)
 
-    assert result.applied == ["0001", "0002", "0003", "0004", "0005", "0006"]
-    assert _sqlite_row_count(db_path, SCHEMA_VERSION_TABLE) == 6
+    assert result.applied == ["0001", "0002", "0003", "0004", "0005", "0006", "0007"]
+    assert _sqlite_row_count(db_path, SCHEMA_VERSION_TABLE) == 7
 
 
 def test_apply_sqlite_migrations_is_idempotent(tmp_path: Path) -> None:
@@ -47,11 +49,11 @@ def test_apply_sqlite_migrations_is_idempotent(tmp_path: Path) -> None:
     first = apply_sqlite_migrations(sqlite_path=db_path)
     second = apply_sqlite_migrations(sqlite_path=db_path)
 
-    assert first.applied == ["0001", "0002", "0003", "0004", "0005", "0006"]
+    assert first.applied == ["0001", "0002", "0003", "0004", "0005", "0006", "0007"]
     assert first.skipped == []
     assert second.applied == []
-    assert second.skipped == ["0001", "0002", "0003", "0004", "0005", "0006"]
-    assert _sqlite_row_count(db_path, "schema_migrations") == 6
+    assert second.skipped == ["0001", "0002", "0003", "0004", "0005", "0006", "0007"]
+    assert _sqlite_row_count(db_path, "schema_migrations") == 7
     assert _sqlite_row_count(db_path, "persisted_events") == 0
     assert _sqlite_row_count(db_path, "auth_principals") == 0
     assert _sqlite_row_count(db_path, "acl_rules") == 0
@@ -60,6 +62,41 @@ def test_apply_sqlite_migrations_is_idempotent(tmp_path: Path) -> None:
     assert _sqlite_row_count(db_path, "coordination_pending_messages") == 0
     assert _sqlite_row_count(db_path, "coordination_events") == 0
     assert _sqlite_row_count(db_path, "coordination_member_notices") == 0
+
+
+def test_session_lifecycle_migration_upgrades_existing_sessions_as_ephemeral(tmp_path: Path) -> None:
+    db_path = tmp_path / "upgrade.sqlite3"
+    legacy_migrations = tmp_path / "legacy-migrations"
+    legacy_migrations.mkdir()
+    for migration in discover_sql_migrations():
+        if migration.migration_id == "0007":
+            continue
+        shutil.copy2(migration.path, legacy_migrations / migration.path.name)
+
+    legacy = apply_sqlite_migrations(sqlite_path=db_path, migrations_dir=legacy_migrations)
+    assert legacy.applied == ["0001", "0002", "0003", "0004", "0005", "0006"]
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO coordination_sessions(session_id, join_code, created_by, created_at, title, project)
+            VALUES ('legacy-session', 'ABC123', 'legacy-chief', '2026-01-01T00:00:00Z', 'Legacy', 'ACP')
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    upgraded = apply_sqlite_migrations(sqlite_path=db_path, migrations_dir=default_migrations_dir())
+    assert upgraded.applied == ["0007"]
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT lifecycle_mode FROM coordination_sessions WHERE session_id = 'legacy-session'"
+        ).fetchone()
+        assert row == ("ephemeral",)
+    finally:
+        conn.close()
 
 
 def test_apply_sqlite_migrations_fails_when_unknown_migration_id_present(tmp_path: Path) -> None:
@@ -101,7 +138,7 @@ def test_create_runtime_from_env_runs_sqlite_migrations_before_ready(
     assert status["migration_ready"] is True
     assert status["storage_ready"] is True
     assert "sqlite" not in str(status)
-    assert _sqlite_row_count(db_path, "schema_migrations") == 6
+    assert _sqlite_row_count(db_path, "schema_migrations") == 7
 
 
 def test_create_runtime_from_env_fails_on_invalid_sqlite_state(

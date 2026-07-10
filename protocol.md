@@ -205,9 +205,15 @@ Request body:
 {
   "agent_name": "codex-chief",
   "title": "Auth Refactor",
-  "project": "my-project"
+  "project": "my-project",
+  "lifecycle_mode": "ephemeral | persistent"
 }
 ```
+
+`lifecycle_mode` defaults to `ephemeral` for backward-compatible CLI and core
+sessions. `persistent` sessions are not removed by stale-member cleanup and
+must be closed explicitly; their chief cannot leave or be disconnected as an
+implicit close. Managed workspace rooms are created as `persistent`.
 
 Success response:
 

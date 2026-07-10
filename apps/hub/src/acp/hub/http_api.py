@@ -64,6 +64,7 @@ _SAFE_AGENT_NAME = re.compile(AGENT_NAME_PATTERN)
 _SAFE_CAPABILITY = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,63}$")
 _SESSION_ALLOWED_STATUS = {"idle", "waiting", "busy"}
 _SESSION_ALLOWED_DELIVERY_MODES = {"attached", "runner"}
+_SESSION_ALLOWED_LIFECYCLE_MODES = {"ephemeral", "persistent"}
 _RUNNER_ALLOWED_EVENTS = {"RUN_STARTED", "RUN_LOG", "RUN_FINISHED", "RUN_REPLY_SENT", "RUN_INTERRUPTED"}
 _DASHBOARD_COOKIE_NAME = "acp_dashboard_session"
 _MEMBER_COOKIE_NAME = "acp_member_session"
@@ -363,6 +364,17 @@ def _normalize_delivery_mode(value: Any) -> str | None:
     cleaned = value.strip().lower()
     if cleaned not in _SESSION_ALLOWED_DELIVERY_MODES:
         raise ValueError("delivery_mode must be attached or runner.")
+    return cleaned
+
+
+def _normalize_lifecycle_mode(value: Any) -> str:
+    if value is None:
+        return "ephemeral"
+    if not isinstance(value, str):
+        raise ValueError("lifecycle_mode must be a string.")
+    cleaned = value.strip().lower()
+    if cleaned not in _SESSION_ALLOWED_LIFECYCLE_MODES:
+        raise ValueError("lifecycle_mode must be ephemeral or persistent.")
     return cleaned
 
 
@@ -680,6 +692,7 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
             agent_name = _normalize_agent_name(parsed.get("agent_name"))
             title = _normalize_optional_string(parsed.get("title"), field="title")
             project = _normalize_optional_string(parsed.get("project"), field="project")
+            lifecycle_mode = _normalize_lifecycle_mode(parsed.get("lifecycle_mode"))
             delivery_mode = _normalize_delivery_mode(parsed.get("delivery_mode")) or "attached"
             provider = _normalize_optional_string(parsed.get("provider"), field="provider")
             workspace_path = _normalize_workspace_path(parsed.get("workspace_path"))
@@ -693,6 +706,7 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
                 owner_agent=agent_name,
                 title=title,
                 project=project,
+                lifecycle_mode=lifecycle_mode,
                 capabilities=capabilities,
                 delivery_mode=delivery_mode,
                 provider=provider,

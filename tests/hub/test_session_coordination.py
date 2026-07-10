@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -23,6 +25,18 @@ def _join_session(client: Any, agent_name: str, join_code: str) -> dict[str, Any
     return response.json()
 
 
+def _make_session_members_stale(runtime: Any, session_id: str) -> None:
+    stale_at = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat().replace(
+        "+00:00", "Z"
+    )
+    store = runtime.coordination._store
+    session = store.get_session(session_id)
+    assert session is not None
+    for member in session.members.values():
+        member.last_seen_at = stale_at
+        store.update_member(session_id, member)
+
+
 def test_session_create_join_and_snapshot(api_client: Any) -> None:
     chief = _create_session(api_client, "chief")
     worker = _join_session(api_client, "worker", chief["join_code"])
@@ -37,6 +51,107 @@ def test_session_create_join_and_snapshot(api_client: Any) -> None:
     assert body["session"]["session_id"] == chief["session_id"]
     assert sorted(member["agent_name"] for member in body["session"]["members"]) == ["chief", "worker"]
     assert worker["session_id"] == chief["session_id"]
+
+
+def test_persistent_session_survives_stale_cleanup_while_ephemeral_default_is_removed(
+    api_client: Any,
+    hub_runtime: Any,
+) -> None:
+    persistent_response = api_client.post(
+        "/sessions",
+        json={"agent_name": "persistent-chief", "lifecycle_mode": "persistent"},
+    )
+    assert persistent_response.status_code == 201
+    persistent = persistent_response.json()
+    ephemeral = _create_session(api_client, "ephemeral-chief")
+
+    assert persistent["session"]["lifecycle_mode"] == "persistent"
+    assert ephemeral["session"]["lifecycle_mode"] == "ephemeral"
+    detail = api_client.get(
+        f"/sessions/{persistent['session_id']}/detail",
+        params={"agent_name": "persistent-chief", "member_token": persistent["member_token"]},
+    )
+    assert detail.status_code == 200
+    assert detail.json()["session"]["summary"]["lifecycle_mode"] == "persistent"
+
+    _make_session_members_stale(hub_runtime, persistent["session_id"])
+    _make_session_members_stale(hub_runtime, ephemeral["session_id"])
+
+    removed = asyncio.run(hub_runtime.coordination.cleanup_stale_sessions())
+
+    assert ephemeral["session_id"] in removed
+    assert persistent["session_id"] not in removed
+    assert hub_runtime.coordination._store.get_session(persistent["session_id"]) is not None
+    assert hub_runtime.coordination._store.get_session(ephemeral["session_id"]) is None
+
+
+def test_persistent_chief_must_close_explicitly_instead_of_leaving(api_client: Any) -> None:
+    created_response = api_client.post(
+        "/sessions",
+        json={"agent_name": "persistent-chief", "lifecycle_mode": "persistent"},
+    )
+    assert created_response.status_code == 201
+    created = created_response.json()
+
+    leave = api_client.post(
+        "/sessions/leave",
+        json={
+            "session_id": created["session_id"],
+            "agent_name": "persistent-chief",
+            "member_token": created["member_token"],
+        },
+    )
+
+    assert leave.status_code == 403
+    assert "close explicitly" in leave.json()["message"]
+
+    disconnect = api_client.post(
+        f"/sessions/{created['session_id']}/admin/members/persistent-chief/disconnect",
+        json={},
+    )
+    assert disconnect.status_code == 403
+    assert "closed explicitly" in disconnect.json()["message"]
+
+    snapshot = api_client.get(
+        f"/sessions/{created['session_id']}",
+        params={"agent_name": "persistent-chief", "member_token": created["member_token"]},
+    )
+    assert snapshot.status_code == 200
+
+    close = api_client.post(
+        f"/sessions/{created['session_id']}/admin/close",
+        json={"detail": "daily room retired"},
+    )
+    assert close.status_code == 200
+    assert close.json()["session_closed"] is True
+
+
+def test_session_rejects_unknown_lifecycle_mode(api_client: Any) -> None:
+    response = api_client.post(
+        "/sessions",
+        json={"agent_name": "chief", "lifecycle_mode": "forever"},
+    )
+
+    assert response.status_code == 400
+    assert "lifecycle_mode must be ephemeral or persistent" in response.json()["message"]
+
+
+def test_sqlite_persistent_session_survives_stale_cleanup_and_restart(sqlite_runtime_factory: Any) -> None:
+    runtime = sqlite_runtime_factory()
+    with TestClient(create_app(runtime=runtime)) as client:
+        created_response = client.post(
+            "/sessions",
+            json={"agent_name": "sqlite-persistent-chief", "lifecycle_mode": "persistent"},
+        )
+        assert created_response.status_code == 201
+        created = created_response.json()
+        _make_session_members_stale(runtime, created["session_id"])
+        assert asyncio.run(runtime.coordination.cleanup_stale_sessions()) == []
+
+    restarted = sqlite_runtime_factory()
+    restored = restarted.coordination._store.get_session(created["session_id"])
+    assert restored is not None
+    assert restored.lifecycle_mode == "persistent"
 
 
 def test_session_members_advertise_capabilities(api_client: Any) -> None:

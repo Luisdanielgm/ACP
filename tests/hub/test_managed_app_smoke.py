@@ -188,6 +188,7 @@ def test_workspace_admin_rotates_single_token_and_agent_uses_it(monkeypatch, tmp
     assert session_payload["status"] == "created"
     assert session_payload["workspace"]["slug"] == "team-one"
     assert session_payload["acp_session"]["join_code"]
+    assert session_payload["acp_session"]["session"]["lifecycle_mode"] == "persistent"
 
     duplicate_create = admin_client.post(
         "/managed/agent/workspaces/team-one/sessions",

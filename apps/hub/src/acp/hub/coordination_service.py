@@ -14,7 +14,15 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from acp.hub.coordination_state import CoordinationSession, SessionMember, heartbeat_age_seconds, utc_now_iso
+from acp.hub.coordination_state import (
+    SESSION_LIFECYCLE_EPHEMERAL,
+    SESSION_LIFECYCLE_MODES,
+    SESSION_LIFECYCLE_PERSISTENT,
+    CoordinationSession,
+    SessionMember,
+    heartbeat_age_seconds,
+    utc_now_iso,
+)
 from acp.hub.coordination_store import CoordinationStore, InMemoryCoordinationStore
 
 _SESSION_EVENT_LIMIT = 250
@@ -145,8 +153,11 @@ class SessionCoordinationService:
         delivery_mode: str = "attached",
         provider: str | None = None,
         workspace_path: str | None = None,
+        lifecycle_mode: str = SESSION_LIFECYCLE_EPHEMERAL,
     ) -> dict[str, Any]:
         async with self._lock:
+            if lifecycle_mode not in SESSION_LIFECYCLE_MODES:
+                raise SessionAccessError("session lifecycle_mode must be ephemeral or persistent.")
             self._ensure_agent_is_free(owner_agent)
             session_id = str(uuid4())
             join_code = self._unique_join_code()
@@ -166,6 +177,7 @@ class SessionCoordinationService:
                 created_by=owner_agent,
                 title=title,
                 project=project,
+                lifecycle_mode=lifecycle_mode,
                 members={owner_agent: member},
             )
             try:
@@ -227,6 +239,8 @@ class SessionCoordinationService:
     async def leave_session(self, *, session_id: str, agent_name: str, member_token: str) -> dict[str, Any]:
         async with self._lock:
             session, member = self._authorize(session_id=session_id, agent_name=agent_name, member_token=member_token)
+            if member.role == "chief" and session.lifecycle_mode == SESSION_LIFECYCLE_PERSISTENT:
+                raise SessionAccessError("persistent session chief must close explicitly instead of leaving.")
             closing_session = member.role == "chief" or len(session.members) <= 1
             if closing_session:
                 detail = "chief left session" if member.role == "chief" else "last member left session"
@@ -309,6 +323,8 @@ class SessionCoordinationService:
             member = session.members.get(agent_name)
             if member is None:
                 raise SessionAccessError("agent is not a member of this session.")
+            if member.role == "chief" and session.lifecycle_mode == SESSION_LIFECYCLE_PERSISTENT:
+                raise SessionAccessError("persistent session chief must be closed explicitly instead of disconnected.")
             closing_session = member.role == "chief" or len(session.members) <= 1
             if closing_session:
                 close_message = detail or "session closed by admin after member disconnect"
@@ -886,6 +902,7 @@ class SessionCoordinationService:
             "created_at": session.created_at,
             "title": session.title,
             "project": session.project,
+            "lifecycle_mode": session.lifecycle_mode,
             "member_count": len(members),
             "members": members,
             "pending_total": sum(pending_counts.values()),

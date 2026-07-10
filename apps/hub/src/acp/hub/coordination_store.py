@@ -12,7 +12,11 @@ from pathlib import Path
 from typing import Any, Iterator, Protocol
 from uuid import uuid4
 
-from acp.hub.coordination_state import CoordinationSession, SessionMember
+from acp.hub.coordination_state import (
+    SESSION_LIFECYCLE_PERSISTENT,
+    CoordinationSession,
+    SessionMember,
+)
 from acp.hub.idempotency import prune_older_than, record_if_new
 from acp.hub.sqlite_support import connect
 
@@ -321,6 +325,8 @@ class InMemoryCoordinationStore:
         now = datetime.now(timezone.utc)
         removed: list[str] = []
         for session_id, session in list(self._sessions.items()):
+            if session.lifecycle_mode == SESSION_LIFECYCLE_PERSISTENT:
+                continue
             if not session.members:
                 self.delete_session(session_id)
                 removed.append(session_id)
@@ -352,6 +358,7 @@ class InMemoryCoordinationStore:
             created_at=session.created_at,
             title=session.title,
             project=session.project,
+            lifecycle_mode=session.lifecycle_mode,
             members={
                 member.agent_name: SessionMember(
                     agent_name=member.agent_name,
@@ -431,8 +438,8 @@ class SqliteCoordinationStore:
             conn.execute(
                 """
                 INSERT INTO coordination_sessions(
-                    session_id, join_code, created_by, created_at, title, project
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    session_id, join_code, created_by, created_at, title, project, lifecycle_mode
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session.session_id,
@@ -441,6 +448,7 @@ class SqliteCoordinationStore:
                     session.created_at,
                     session.title,
                     session.project,
+                    session.lifecycle_mode,
                 ),
             )
             for member in session.members.values():
@@ -451,7 +459,7 @@ class SqliteCoordinationStore:
         with self._connection() as conn:
             row = conn.execute(
                 """
-                SELECT session_id, join_code, created_by, created_at, title, project
+                SELECT session_id, join_code, created_by, created_at, title, project, lifecycle_mode
                 FROM coordination_sessions
                 WHERE session_id = ?
                 LIMIT 1
@@ -466,7 +474,7 @@ class SqliteCoordinationStore:
         with self._connection() as conn:
             row = conn.execute(
                 """
-                SELECT session_id, join_code, created_by, created_at, title, project
+                SELECT session_id, join_code, created_by, created_at, title, project, lifecycle_mode
                 FROM coordination_sessions
                 WHERE join_code = ?
                 LIMIT 1
@@ -481,7 +489,7 @@ class SqliteCoordinationStore:
         with self._connection() as conn:
             rows = conn.execute(
                 """
-                SELECT session_id, join_code, created_by, created_at, title, project
+                SELECT session_id, join_code, created_by, created_at, title, project, lifecycle_mode
                 FROM coordination_sessions
                 ORDER BY created_at ASC, session_id ASC
                 """
@@ -496,6 +504,7 @@ class SqliteCoordinationStore:
                     created_at=str(row["created_at"]),
                     title=str(row["title"]) if row["title"] is not None else None,
                     project=str(row["project"]) if row["project"] is not None else None,
+                    lifecycle_mode=str(row["lifecycle_mode"]),
                     members=members_by_session.get(str(row["session_id"]), {}),
                 )
                 for row in rows
@@ -789,10 +798,12 @@ class SqliteCoordinationStore:
         removed: list[str] = []
         with self._connection() as conn:
             rows = conn.execute(
-                "SELECT session_id FROM coordination_sessions"
+                "SELECT session_id, lifecycle_mode FROM coordination_sessions"
             ).fetchall()
             for row in rows:
                 session_id = str(row["session_id"])
+                if str(row["lifecycle_mode"]) == SESSION_LIFECYCLE_PERSISTENT:
+                    continue
                 members = self._load_members(conn, session_id)
                 if not members:
                     self.delete_session(session_id)
@@ -823,6 +834,7 @@ class SqliteCoordinationStore:
             created_at=str(row["created_at"]),
             title=str(row["title"]) if row["title"] is not None else None,
             project=str(row["project"]) if row["project"] is not None else None,
+            lifecycle_mode=str(row["lifecycle_mode"]),
             members=self._load_members(conn, str(row["session_id"])),
         )
 

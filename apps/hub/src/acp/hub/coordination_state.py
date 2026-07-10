@@ -10,6 +10,11 @@ _HEARTBEAT_LIVE_SECONDS = 90
 _HEARTBEAT_QUIET_SECONDS = 360
 _SESSION_STALE_MEMBER_SECONDS = 1800  # 30 minutes without heartbeat = stale member
 _SESSION_MAX_IDLE_SECONDS = 7200  # 2 hours without any activity = session eligible for cleanup
+SESSION_LIFECYCLE_EPHEMERAL = "ephemeral"
+SESSION_LIFECYCLE_PERSISTENT = "persistent"
+SESSION_LIFECYCLE_MODES = frozenset(
+    {SESSION_LIFECYCLE_EPHEMERAL, SESSION_LIFECYCLE_PERSISTENT}
+)
 
 
 def utc_now_iso() -> str:
@@ -105,6 +110,7 @@ class CoordinationSession:
     created_at: str = field(default_factory=utc_now_iso)
     title: str | None = None
     project: str | None = None
+    lifecycle_mode: str = SESSION_LIFECYCLE_EPHEMERAL
     members: dict[str, SessionMember] = field(default_factory=dict)
 
     def as_payload(
@@ -121,6 +127,7 @@ class CoordinationSession:
             "created_at": self.created_at,
             "title": self.title,
             "project": self.project,
+            "lifecycle_mode": self.lifecycle_mode,
             "members": [
                 member.as_payload(pending_count=int(counts.get(member.agent_name, 0)), now=now)
                 for member in sorted(self.members.values(), key=lambda item: item.agent_name)
