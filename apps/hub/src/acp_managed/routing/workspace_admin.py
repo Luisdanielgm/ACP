@@ -801,6 +801,7 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
         slug: str,
         session_id: str,
         payload: SendRoomOperatorMessageRequest,
+        request: Request,
         acp_managed_session: str | None = Cookie(default=None),
     ) -> JSONResponse:
         principal, workspace, record = _require_workspace_session_record(
@@ -816,46 +817,57 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
             raise HTTPException(status_code=422, detail="payload is required")
 
         session_detail = await _active_session_detail_or_404(record.session_id)
-        operator = principal_store.get_room_operator(
-            session_id=record.session_id,
-            principal_email=principal.email,
-        )
         created = False
-        if operator is None:
-            operator_agent_name = _new_web_operator_agent_name()
-            member_token = await _join_web_operator(
-                session_detail=session_detail,
-                agent_name=operator_agent_name,
-            )
-            operator = principal_store.upsert_room_operator(
+        if record.owner_member_token:
+            operator_id = f"session-owner:{record.session_id}"
+            operator_agent_name = record.owner_agent_name
+            operator_member_token = record.owner_member_token
+            identity_source = "session_owner"
+        else:
+            operator = principal_store.get_room_operator(
                 session_id=record.session_id,
-                workspace_id=workspace.workspace_id,
                 principal_email=principal.email,
-                operator_agent_name=operator_agent_name,
-                member_token=member_token,
             )
-            created = True
-        elif not _session_has_member(session_detail, operator.operator_agent_name):
-            member_token = await _join_web_operator(
-                session_detail=session_detail,
-                agent_name=operator.operator_agent_name,
-            )
-            operator = principal_store.upsert_room_operator(
-                session_id=record.session_id,
-                workspace_id=workspace.workspace_id,
-                principal_email=principal.email,
-                operator_agent_name=operator.operator_agent_name,
-                member_token=member_token,
-            )
+            if operator is None:
+                operator_agent_name = _new_web_operator_agent_name()
+                member_token = await _join_web_operator(
+                    session_detail=session_detail,
+                    agent_name=operator_agent_name,
+                )
+                operator = principal_store.upsert_room_operator(
+                    session_id=record.session_id,
+                    workspace_id=workspace.workspace_id,
+                    principal_email=principal.email,
+                    operator_agent_name=operator_agent_name,
+                    member_token=member_token,
+                )
+                created = True
+            elif not _session_has_member(session_detail, operator.operator_agent_name):
+                member_token = await _join_web_operator(
+                    session_detail=session_detail,
+                    agent_name=operator.operator_agent_name,
+                )
+                operator = principal_store.upsert_room_operator(
+                    session_id=record.session_id,
+                    workspace_id=workspace.workspace_id,
+                    principal_email=principal.email,
+                    operator_agent_name=operator.operator_agent_name,
+                    member_token=member_token,
+                )
+            operator_id = operator.operator_id
+            operator_agent_name = operator.operator_agent_name
+            operator_member_token = operator.member_token
+            identity_source = "legacy_web_operator"
 
         message_id = str(uuid4())
+        action = payload.action.upper()
         envelope = {
             "type": "MSG",
             "id": message_id,
             "ts": datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z"),
-            "from": operator.operator_agent_name,
+            "from": operator_agent_name,
             "to": destination,
-            "action": payload.action.upper(),
+            "action": action,
             "payload": body,
             "thread_id": None,
             "in_reply_to": None,
@@ -864,8 +876,8 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
         try:
             sent = await runtime.coordination.send_message(
                 session_id=record.session_id,
-                agent_name=operator.operator_agent_name,
-                member_token=operator.member_token,
+                agent_name=operator_agent_name,
+                member_token=operator_member_token,
                 payload=envelope,
             )
         except SessionAccessError as exc:
@@ -873,20 +885,38 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
         except SessionNotFoundError as exc:
             raise HTTPException(status_code=404, detail="managed workspace session is not active") from exc
 
+        _audit(
+            request,
+            "managed.room_operator_message_sent",
+            actor_email=principal.email,
+            target_type="workspace_session",
+            target_id=record.session_id,
+            metadata={
+                "workspace_id": workspace.workspace_id,
+                "workspace_slug": workspace.slug,
+                "operator_agent_name": operator_agent_name,
+                "identity_source": identity_source,
+                "to": destination,
+                "action": action,
+                "message_id": message_id,
+            },
+        )
+
         return JSONResponse(
             {
                 "status": "sent",
                 "workspace": _sanitize_workspace(workspace),
                 "session_id": record.session_id,
                 "operator": {
-                    "operator_id": operator.operator_id,
-                    "agent_name": operator.operator_agent_name,
+                    "operator_id": operator_id,
+                    "agent_name": operator_agent_name,
                     "created": created,
+                    "identity_source": identity_source,
                 },
                 "message": {
                     "id": message_id,
                     "to": destination,
-                    "action": payload.action.upper(),
+                    "action": action,
                 },
                 "send_result": sent,
             }

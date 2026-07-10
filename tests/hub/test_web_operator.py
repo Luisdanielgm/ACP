@@ -1,21 +1,17 @@
-"""Managed Web operator — M3 slice 3.
-
-A browser workspace admin can operate inside a managed room as a server-side
-pseudo-member. The browser must never receive that pseudo-member token; the
-backend owns it and sends coordination messages on the admin's behalf.
-"""
+"""Managed room operator messages use the room's technical chief identity."""
 
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from fastapi.testclient import TestClient
 
 from test_managed_app_smoke import (
-    _login_workspace_admin,
     _bootstrap_env,
     _create_managed_app_with_spa,
     _load_managed_app,
+    _login_workspace_admin,
 )
 
 
@@ -52,7 +48,7 @@ def _join_worker(app: object, owner: TestClient, *, session_id: str, agent_name:
     }
 
 
-def test_web_operator_sends_as_server_side_pseudo_member_without_token_leak(monkeypatch, tmp_path) -> None:
+def test_web_operator_sends_as_room_chief_without_token_leak(monkeypatch, tmp_path) -> None:
     app, owner, session_id = _owner_with_session(monkeypatch, tmp_path)
     worker = _join_worker(app, owner, session_id=session_id)
 
@@ -62,10 +58,13 @@ def test_web_operator_sends_as_server_side_pseudo_member_without_token_leak(monk
     )
     assert sent.status_code == 200, sent.text
     sent_payload = sent.json()
-    operator_name = sent_payload["operator"]["agent_name"]
     assert sent_payload["status"] == "sent"
-    assert sent_payload["operator"]["created"] is True
-    assert operator_name.startswith("web-operator-")
+    assert sent_payload["operator"] == {
+        "operator_id": f"session-owner:{session_id}",
+        "agent_name": "chief",
+        "created": False,
+        "identity_source": "session_owner",
+    }
     assert "member_token" not in json.dumps(sent_payload)
 
     delivered = TestClient(app).post(
@@ -79,13 +78,39 @@ def test_web_operator_sends_as_server_side_pseudo_member_without_token_leak(monk
     )
     assert delivered.status_code == 200, delivered.text
     message = delivered.json()["message"]
-    assert message["from"] == operator_name
+    assert message["from"] == "chief"
     assert message["to"] == "worker-1"
     assert message["action"] == "TASK"
     assert message["payload"] == "Review the room wall slice."
 
+    detail = owner.get(f"/managed/workspaces/team-one/sessions/{session_id}")
+    assert detail.status_code == 200, detail.text
+    members = detail.json()["acp_session"]["members"]
+    assert all(not item["agent_name"].startswith("web-operator-") for item in members)
 
-def test_web_operator_reuses_existing_pseudo_member_for_same_admin(monkeypatch, tmp_path) -> None:
+    audit_events = app.state.managed_principal_store.list_audit_events(
+        action="managed.room_operator_message_sent",
+    )
+    assert len(audit_events) == 1
+    audit = audit_events[0]
+    assert audit.actor_email == "admin@example.com"
+    assert audit.target_type == "workspace_session"
+    assert audit.target_id == session_id
+    metadata = json.loads(audit.metadata_json or "{}")
+    assert metadata == {
+        "action": "TASK",
+        "identity_source": "session_owner",
+        "message_id": sent_payload["message"]["id"],
+        "operator_agent_name": "chief",
+        "to": "worker-1",
+        "workspace_id": sent_payload["workspace"]["workspace_id"],
+        "workspace_slug": "team-one",
+    }
+    assert "Review the room wall slice." not in (audit.metadata_json or "")
+    assert "token" not in (audit.metadata_json or "").lower()
+
+
+def test_web_operator_reuses_room_chief_without_creating_members(monkeypatch, tmp_path) -> None:
     app, owner, session_id = _owner_with_session(monkeypatch, tmp_path)
     _join_worker(app, owner, session_id=session_id)
 
@@ -103,13 +128,38 @@ def test_web_operator_reuses_existing_pseudo_member_for_same_admin(monkeypatch, 
 
     first_operator = first.json()["operator"]
     second_operator = second.json()["operator"]
-    assert first_operator["agent_name"] == second_operator["agent_name"]
-    assert first_operator["created"] is True
+    assert first_operator["agent_name"] == second_operator["agent_name"] == "chief"
+    assert first_operator["created"] is False
     assert second_operator["created"] is False
+    assert first_operator["identity_source"] == second_operator["identity_source"] == "session_owner"
     assert "member_token" not in json.dumps(second.json())
 
     detail = owner.get(f"/managed/workspaces/team-one/sessions/{session_id}")
     assert detail.status_code == 200, detail.text
     members = detail.json()["acp_session"]["members"]
-    operator_members = [item for item in members if item["agent_name"] == first_operator["agent_name"]]
-    assert len(operator_members) == 1
+    assert [item["agent_name"] for item in members].count("chief") == 1
+    assert all(not item["agent_name"].startswith("web-operator-") for item in members)
+
+
+def test_web_operator_falls_back_for_legacy_room_without_owner_token(monkeypatch, tmp_path) -> None:
+    app, owner, session_id = _owner_with_session(monkeypatch, tmp_path)
+    _join_worker(app, owner, session_id=session_id)
+    store = app.state.managed_principal_store
+    original_get_workspace_session = store.get_workspace_session
+
+    def legacy_workspace_session(*, session_id: str):
+        record = original_get_workspace_session(session_id=session_id)
+        return None if record is None else replace(record, owner_member_token=None)
+
+    monkeypatch.setattr(store, "get_workspace_session", legacy_workspace_session)
+
+    sent = owner.post(
+        f"/managed/workspaces/team-one/sessions/{session_id}/operator/send",
+        json={"to": "worker-1", "action": "INFO", "payload": "Legacy room note."},
+    )
+    assert sent.status_code == 200, sent.text
+    operator = sent.json()["operator"]
+    assert operator["agent_name"].startswith("web-operator-")
+    assert operator["created"] is True
+    assert operator["identity_source"] == "legacy_web_operator"
+    assert "member_token" not in json.dumps(sent.json())
