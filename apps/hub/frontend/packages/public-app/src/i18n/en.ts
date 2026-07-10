@@ -333,6 +333,10 @@ Move faster with less manual coordination`,
   sd_legend_issue_low_help: 'Queued delivery',
   sd_legend_issue_medium_help: 'Accumulated backlog or timeout',
   sd_legend_issue_high_help: 'Stale heartbeat or severe error',
+  sd_legend_connected: 'Live connection',
+  sd_legend_connected_help: 'Agent is connected and listening live',
+  sd_legend_stale: 'No heartbeat',
+  sd_legend_stale_help: 'No recent heartbeats from this agent',
 
   // Traffic
   sd_traffic_level_low: 'Low load',

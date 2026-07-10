@@ -333,6 +333,10 @@ Avanza mas rapido con menos coordinacion manual`,
   sd_legend_issue_low_help: 'Entrega encolada',
   sd_legend_issue_medium_help: 'Cola acumulada o timeout',
   sd_legend_issue_high_help: 'Latido perdido o error grave',
+  sd_legend_connected: 'Conexion activa',
+  sd_legend_connected_help: 'El agente esta conectado y escuchando en vivo',
+  sd_legend_stale: 'Sin latido',
+  sd_legend_stale_help: 'No llegan latidos recientes de este agente',
 
   // Traffic
   sd_traffic_level_low: 'Carga baja',

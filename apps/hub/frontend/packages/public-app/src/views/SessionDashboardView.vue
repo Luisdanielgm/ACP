@@ -86,6 +86,8 @@
               <span class="legend-chip" :title="t('sd_legend_issue_low_help')"><span class="legend-dot" style="background:#AFA9EC"></span>{{ t('sd_legend_issue_low') }}</span>
               <span class="legend-chip" :title="t('sd_legend_issue_medium_help')"><span class="legend-dot" style="background:#EF9F27"></span>{{ t('sd_legend_issue_medium') }}</span>
               <span class="legend-chip" :title="t('sd_legend_issue_high_help')"><span class="legend-dot" style="background:#F0997B"></span>{{ t('sd_legend_issue_high') }}</span>
+              <span class="legend-chip" :title="t('sd_legend_connected_help')"><span class="legend-halo"></span>{{ t('sd_legend_connected') }}</span>
+              <span class="legend-chip" :title="t('sd_legend_stale_help')"><span class="legend-stale"></span>{{ t('sd_legend_stale') }}</span>
             </div>
             <div v-if="pulseChips.length" class="pulse-strip">
               <span class="pulse-strip-label">{{ t('sd_session_cockpit_title') }}</span>
@@ -395,6 +397,8 @@ watchEffect(() => {
 .legend-chip { display:inline-flex; align-items:center; gap:6px; font-size:10px; font-weight:700; color:var(--muted); letter-spacing:0.05em; }
 .legend-line { width:18px; height:3px; border-radius:2px; }
 .legend-dot { width:8px; height:8px; border-radius:50%; }
+.legend-halo { width:8px; height:8px; border-radius:50%; background:#5DCAA5; box-shadow:0 0 0 3px rgba(93, 202, 165, 0.25); }
+.legend-stale { width:8px; height:8px; border-radius:50%; border:2px solid var(--muted); background:transparent; }
 .legend-work { display:inline-flex; align-items:flex-end; gap:3px; height:14px; }
 .legend-work span { display:inline-block; width:4px; border-radius:999px; background:#5DCAA5; box-shadow:0 0 12px rgba(93,202,165,0.26); animation:work-bars 1s steps(3, end) infinite; transform-origin:bottom; }
 .legend-work span:nth-child(1) { height:5px; animation-delay:0s; }

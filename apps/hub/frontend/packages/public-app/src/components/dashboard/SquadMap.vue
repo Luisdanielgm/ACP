@@ -129,10 +129,18 @@ const squadMapSvg = computed(() => {
     const x = cx + ringRadius * Math.cos(angle)
     const y = cy + ringRadius * Math.sin(angle)
     nodes.set(member.agent_name, { x, y, member })
-    markup += `<line class="signal-line" x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" />`
+    const isOperator = String(member.agent_name || '').startsWith('web-operator-')
+    const spokeClasses = [
+      'signal-line',
+      cs.has(member.agent_name) ? 'live' : '',
+      isOperator ? 'operator-spoke' : '',
+    ].filter(Boolean).join(' ')
+    markup += `<line class="${spokeClasses}" x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" />`
   })
 
-  // Animated routes
+  // Animated routes: pulse dashes along the wire, impact ripples on arrival,
+  // and a little envelope that rides the route and rests on the receiver.
+  let mailMarkup = ''
   animEvents.slice(-10).forEach((event, ri) => {
     const from = nodes.get(String(event.actor || ''))
     const to = nodes.get(String(event.target || ''))
@@ -149,13 +157,22 @@ const squadMapSvg = computed(() => {
         <rect class="node-float-pill" x="-4" y="-14" width="42" height="20" rx="10"></rect>
         <text class="node-float-text" x="17" y="0" text-anchor="middle">${escapeHtml(floatTagLabel(action, delivery))}</text>
       </g>`
+    mailMarkup += `
+      <g class="mail-glyph ${deliveryClass(delivery)}" style="--impact-accent:${tone}">
+        <rect x="-8" y="-5.5" width="16" height="11" rx="2.5"/>
+        <path d="M-8 -5.5 L0 1.5 L8 -5.5"/>
+        <animateMotion dur="1.35s" fill="freeze" path="${path}"/>
+      </g>`
   })
 
   // Nodes
   nodes.forEach(node => {
     const m = node.member
     const isChief = m.agent_name === chiefMember.agent_name
+    const isOperator = String(m.agent_name || '').startsWith('web-operator-')
+    const isConnected = cs.has(m.agent_name)
     const palette = memberPalette(m)
+    const accent = isOperator ? '#a1aab5' : palette.accent
     const hbState = heartbeatState(m, cs)
     const liveClass = hbState === 'stale' ? 'offline' : 'online'
     const activity = memberActivity(m, activityMap)
@@ -179,20 +196,41 @@ const squadMapSvg = computed(() => {
     const crown = isChief
       ? `<path class="node-crown" transform="translate(${node.x}, ${(node.y - shellR - 10).toFixed(1)})" d="M-9 4 L-6 -4 L-3 0 L0 -6 L3 0 L6 -4 L9 4 Z"/>`
       : ''
+    const dotX = (node.x + shellR - 8).toFixed(1)
+    const dotY = (node.y - shellR + 8).toFixed(1)
+    // Live websocket connection = pulsing halo around the status dot; a lost
+    // heartbeat hollows the dot out. Simple, glanceable connection states.
+    const statusDot = hbState === 'stale'
+      ? `<circle class="node-status stale" cx="${dotX}" cy="${dotY}" r="5.5"/>`
+      : `<circle class="node-status" cx="${dotX}" cy="${dotY}" r="5.5" fill="${statusTone(m.status)}"/>`
+    const liveHalo = isConnected && hbState !== 'stale'
+      ? `<circle class="node-live-halo" cx="${dotX}" cy="${dotY}" r="5.5" style="stroke:${statusTone(m.status)}"/>`
+      : ''
+    // The web operator is a person, not an agent runtime — draw it as one.
+    const glyph = isOperator
+      ? `<g class="node-person" transform="translate(${node.x}, ${node.y})">
+          <circle cy="-4.5" r="3.4"/>
+          <path d="M-6.5 8c0-4.2 2.9-6.6 6.5-6.6s6.5 2.4 6.5 6.6"/>
+        </g>`
+      : `<text class="node-glyph" x="${node.x}" y="${node.y + 4}" text-anchor="middle">${escapeHtml(nameInitials(m.agent_name))}</text>`
     markup += `
-      <g class="node-ring ${liveClass} ${activityClasses}" style="--member-accent:${palette.accent}">
+      <g class="node-ring ${liveClass} ${activityClasses}${isOperator ? ' operator' : ''}" style="--member-accent:${accent}">
         <title>${escapeHtml(m.agent_name || '-')} · ${escapeHtml(statusLabel)}${pending ? ` · +${pending}` : ''}</title>
         <circle class="node-aura" cx="${node.x}" cy="${node.y}" r="${auraR}"/>
         <circle class="node-shell" cx="${node.x}" cy="${node.y}" r="${shellR}"/>
-        <circle cx="${node.x}" cy="${node.y}" r="${coreR}" fill="${palette.accent}"/>
-        <circle class="node-status" cx="${(node.x + shellR - 8).toFixed(1)}" cy="${(node.y - shellR + 8).toFixed(1)}" r="5.5" fill="${statusTone(m.status)}"/>
+        <circle cx="${node.x}" cy="${node.y}" r="${coreR}" fill="${accent}"/>
+        ${statusDot}
+        ${liveHalo}
         ${pendingBadge}
         ${crown}
-        <text class="node-glyph" x="${node.x}" y="${node.y + 4}" text-anchor="middle">${escapeHtml(nameInitials(m.agent_name))}</text>
+        ${glyph}
         <text class="node-label" x="${label.nameX.toFixed(1)}" y="${label.nameY.toFixed(1)}" text-anchor="${label.anchor}">${escapeHtml(clipText(m.agent_name || '-', label.clip))}</text>
         <text class="node-subtext" x="${label.subX.toFixed(1)}" y="${label.subY.toFixed(1)}" text-anchor="${label.anchor}">${escapeHtml(clipText(m.current_task || statusLabel, label.clip))}</text>
       </g>`
   })
+
+  // Envelopes render last so a landed letter rests ON TOP of the receiver.
+  markup += mailMarkup
 
   return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(t('sd_squad_map_title'))}">${markup}</svg>`
 })
@@ -224,10 +262,27 @@ const squadMapSvg = computed(() => {
 .squad-canvas :deep(.node-subtext) { font-size:11px; fill:var(--muted); }
 .squad-canvas :deep(.radar-ring) { fill:none; stroke:var(--signal-line); stroke-width:1; stroke-dasharray:3 7; opacity:0.55; }
 .squad-canvas :deep(.node-status) { stroke:var(--node-core); stroke-width:2; }
+.squad-canvas :deep(.node-status.stale) { fill:none; stroke:var(--muted); stroke-width:2; }
+.squad-canvas :deep(.node-live-halo) {
+  fill:none;
+  stroke-width:1.6;
+  transform-box:fill-box;
+  transform-origin:center;
+  animation:node-live-halo 2.1s ease-out infinite;
+}
 .squad-canvas :deep(.node-pending circle) { fill:#EF9F27; stroke:var(--node-core); stroke-width:2; }
 .squad-canvas :deep(.node-pending text) { fill:#231a02; font-size:10px; font-weight:800; }
 .squad-canvas :deep(.node-crown) { fill:#EF9F27; stroke:var(--node-core); stroke-width:1; }
+.squad-canvas :deep(.node-person) { fill:none; stroke:var(--glyph-ink); stroke-width:1.8; stroke-linecap:round; }
+.squad-canvas :deep(.node-person circle) { fill:var(--glyph-ink); stroke:none; }
+.squad-canvas :deep(.node-ring.operator .node-shell) { stroke-dasharray:3 4; }
+.squad-canvas :deep(.mail-glyph rect) { fill:var(--impact-accent, var(--accent)); stroke:var(--node-core); stroke-width:1.4; }
+.squad-canvas :deep(.mail-glyph > path) { fill:none; stroke:var(--node-core); stroke-width:1.4; stroke-linejoin:round; }
+.squad-canvas :deep(.mail-glyph) { opacity:0.95; }
+.squad-canvas :deep(.mail-glyph.queued) { opacity:0.55; }
 .squad-canvas :deep(.signal-line) { stroke:var(--signal-line); stroke-width:2; }
+.squad-canvas :deep(line.signal-line.live) { stroke:rgba(93, 202, 165, 0.3); }
+.squad-canvas :deep(line.signal-line.operator-spoke) { stroke-dasharray:3 6; }
 .squad-canvas :deep(.signal-line.route-pulse) { stroke-width:3; stroke-dasharray:8 10; stroke-linecap:round; animation:route-pulse 1.45s cubic-bezier(0.22,1,0.36,1) infinite; }
 .squad-canvas :deep(.signal-line.route-pulse.queued) { opacity:0.42; animation-duration:1.95s; }
 .squad-canvas :deep(.signal-line.route-pulse.dequeued) { opacity:0.74; animation-duration:1.1s; }
@@ -260,6 +315,7 @@ const squadMapSvg = computed(() => {
 @keyframes dashboard-scan { 0% { transform:translate3d(0, -18%, 0); opacity:0.08; } 30% { opacity:0.24; } 100% { transform:translate3d(0, 210%, 0); opacity:0; } }
 @keyframes route-pulse { 0% { stroke-dashoffset:0; opacity:0.18; } 18% { opacity:0.95; } 100% { stroke-dashoffset:-36; opacity:0.24; } }
 @keyframes node-aura-breathe { 0%, 100% { transform:scale(0.96); opacity:0.12; } 50% { transform:scale(1.06); opacity:0.3; } }
+@keyframes node-live-halo { 0% { transform:scale(0.7); opacity:0.75; } 100% { transform:scale(2.1); opacity:0; } }
 @keyframes node-aura-pulse { 0% { transform:scale(0.92); opacity:0.14; } 55% { transform:scale(1.12); opacity:0.34; } 100% { transform:scale(1.22); opacity:0; } }
 @keyframes node-aura-ripple { 0% { transform:scale(0.88); opacity:0.2; } 50% { transform:scale(1.08); opacity:0.3; } 100% { transform:scale(1.26); opacity:0; } }
 @keyframes node-impact-task { 0% { r:18; opacity:0.45; } 100% { r:44; opacity:0; } }
@@ -272,6 +328,7 @@ html[data-motion="reduced"] .squad-canvas::after,
 html[data-motion="reduced"] .squad-canvas :deep(.route-pulse),
 html[data-motion="reduced"] .squad-canvas :deep(.node-aura),
 html[data-motion="reduced"] .squad-canvas :deep(.node-impact),
+html[data-motion="reduced"] .squad-canvas :deep(.node-live-halo),
 html[data-motion="reduced"] .squad-canvas :deep(.node-float-tag) {
   animation-duration: 1.8s !important;
 }
@@ -280,8 +337,19 @@ html[data-motion="off"] .squad-canvas::after,
 html[data-motion="off"] .squad-canvas :deep(.route-pulse),
 html[data-motion="off"] .squad-canvas :deep(.node-aura),
 html[data-motion="off"] .squad-canvas :deep(.node-impact),
+html[data-motion="off"] .squad-canvas :deep(.node-live-halo),
 html[data-motion="off"] .squad-canvas :deep(.node-float-tag) {
   animation: none !important;
+}
+
+/* The envelope rides an SMIL animateMotion, which CSS animation rules can't
+   slow down — hide it outright when motion is reduced or off. */
+html[data-motion="off"] .squad-canvas :deep(.mail-glyph),
+html[data-motion="reduced"] .squad-canvas :deep(.mail-glyph) {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .squad-canvas :deep(.mail-glyph) { display: none; }
 }
 
 /* Responsive */
