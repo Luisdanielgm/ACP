@@ -327,7 +327,7 @@ function labelFor(ux: number, uy: number, shellR: number, isChief: boolean, ring
     if (Math.abs(ux) > sideThreshold) {
       const side = ux > 0 ? 1 : -1
       const lx = side * (shellR + 16)
-      return { anchor: side > 0 ? 'start' : 'end', nameX: lx, nameY: -2, subX: lx, subY: 15, clip: 22 }
+      return { anchor: side > 0 ? 'start' : 'end', nameX: lx, nameY: -2, subX: lx, subY: 16, clip: 20 }
     }
     if (uy < 0) {
       return { anchor: 'middle', nameX: 0, nameY: -shellR - 26, subX: 0, subY: -shellR - 10, clip: 26 }
@@ -451,9 +451,13 @@ const graph = computed(() => {
     return tier
   }
 
-  const ringRadius = others.length ? Math.min(240, 170 + others.length * 8) : 0
-  const width = 1000
-  const height = others.length <= 2 ? 400 : ringRadius * 2 + 230
+  // Generous canvas: the map takes the vertical room it has instead of
+  // huddling in a thin horizontal band. Width and height derive from the
+  // outer orbit so full rings AND side labels always fit.
+  const ringRadius = others.length ? Math.max(280, Math.min(320, 170 + others.length * 14)) : 0
+  const outerR = ringRadius * 1.05
+  const width = others.length ? Math.round(outerR * 2 + 440) : 1040
+  const height = others.length ? Math.round(outerR * 2 + 190) : 530
   const cx = width / 2
   const cy = height / 2
 
@@ -465,7 +469,7 @@ const graph = computed(() => {
     ringRadius * (tight ? 0.9 : 0.82),
     ringRadius * 1.05,
   ]
-  const rings = others.length ? tierRadii : [70, 120, 170]
+  const rings = others.length ? tierRadii : [90, 150, 210]
 
   const positions = new Map<string, { x: number; y: number; tier: number; member: SessionMember }>()
   positions.set(chiefMember.agent_name, { x: cx, y: cy, tier: 0, member: chiefMember })
@@ -508,19 +512,26 @@ const graph = computed(() => {
     } else {
       const midX = (na.x + nb.x) / 2
       const midY = (na.y + nb.y) / 2
-      let vx = midX - cx
-      let vy = midY - cy
-      let vlen = Math.hypot(vx, vy)
-      if (vlen < 1) {
-        // Nodes are diametrically opposed: bulge perpendicular to the segment.
-        vx = -(nb.y - na.y)
-        vy = nb.x - na.x
-        vlen = Math.hypot(vx, vy) || 1
+      // Bulge PERPENDICULAR to the segment — the only direction guaranteed to
+      // lift the curve off the chord ("away from center" degenerates to along
+      // the chord when opposed nodes sit at different orbit radii). Sign
+      // points away from the center; on a dead tie, prefer UP (only the crown
+      // sits above the chief).
+      let px = -(nb.y - na.y)
+      let py = nb.x - na.x
+      const plen = Math.hypot(px, py) || 1
+      const dot = px * (midX - cx) + py * (midY - cy)
+      if (dot < 0 || (dot === 0 && py > 0)) {
+        px = -px
+        py = -py
       }
+      // A quadratic bezier only deviates HALF its control offset at the
+      // midpoint, so the offset is 2× the clearance still missing. 100px of
+      // clearance comfortably clears the chief's shell, crown, and label.
       const clearance = pointToSegmentDistance(cx, cy, na.x, na.y, nb.x, nb.y)
-      const bulge = Math.max(20, 78 - clearance * 0.4)
-      const ctrlX = midX + (vx / vlen) * bulge
-      const ctrlY = midY + (vy / vlen) * bulge
+      const bulge = 2 * Math.max(16, 100 - clearance)
+      const ctrlX = midX + (px / plen) * bulge
+      const ctrlY = midY + (py / plen) * bulge
       path = `M ${na.x.toFixed(1)} ${na.y.toFixed(1)} Q ${ctrlX.toFixed(1)} ${ctrlY.toFixed(1)} ${nb.x.toFixed(1)} ${nb.y.toFixed(1)}`
     }
     edges.push({ id: key, path, heat, held, title: `${pair.a} ⇄ ${pair.b} · ${pair.count}` })
@@ -608,8 +619,8 @@ const graph = computed(() => {
     const activity = memberActivity(m, activityMap)
     // Motion budget: only nodes that are part of something drift.
     const drifts = !isGhost && (pos.tier <= 1 || activity.isBusy)
-    const coreR = isChief ? 24 : 20
-    const shellR = isChief ? 34 : 29
+    const coreR = isChief ? 27 : 22
+    const shellR = isChief ? 38 : 32
     const pending = Number(m.pending_count || 0)
     const statusLabel = translateStatus(t, m.status) || m.status || '-'
     const dxRaw = pos.x - cx
@@ -641,7 +652,7 @@ const graph = computed(() => {
       initials: nameInitials(m.agent_name),
       coreR,
       shellR,
-      auraR: isChief ? 42 : 37,
+      auraR: isChief ? 47 : 41,
       label: labelFor(dxRaw / len, dyRaw / len, shellR, isChief, others.length),
       labelName: clipText(m.agent_name || '-', 26),
       labelSub: clipText(m.current_task || statusLabel, 26),
@@ -732,8 +743,8 @@ const graph = computed(() => {
 .squad-map { min-height:300px; }
 .squad-canvas { width:100%; min-height:300px; border:1px solid var(--canvas-border); border-radius:18px; background:radial-gradient(circle at top,var(--accent-soft),transparent 45%),linear-gradient(180deg,var(--canvas-top),var(--canvas-bottom)); overflow:hidden; position:relative; }
 .squad-canvas svg { width:100%; height:auto; display:block; }
-.node-label { font-size:13.5px; font-weight:700; fill:var(--ink); letter-spacing:-0.01em; }
-.node-subtext { font-size:11px; fill:var(--muted); }
+.node-label { font-size:15px; font-weight:700; fill:var(--ink); letter-spacing:-0.01em; }
+.node-subtext { font-size:12px; fill:var(--muted); }
 .radar-ring { fill:none; stroke:var(--signal-line); stroke-width:1; stroke-dasharray:3 7; opacity:0.55; }
 
 /* Node positioning: the outer group carries the orbit position and GLIDES
@@ -770,7 +781,7 @@ const graph = computed(() => {
 .node-person { fill:none; stroke:var(--glyph-ink); stroke-width:1.8; stroke-linecap:round; }
 .node-person circle { fill:var(--glyph-ink); stroke:none; }
 .node-ring.operator .node-shell { stroke-dasharray:3 4; }
-.node-glyph { font-size:11px; font-weight:800; fill:var(--glyph-ink); letter-spacing:0.06em; }
+.node-glyph { font-size:12.5px; font-weight:800; fill:var(--glyph-ink); letter-spacing:0.06em; }
 .node-workbars rect {
   fill:#5DCAA5;
   transform-box:fill-box; transform-origin:bottom;
