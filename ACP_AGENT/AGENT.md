@@ -246,6 +246,12 @@ Despues vuelve al loop canonico:
 python ACP_AGENT/acp.py listen --config ACP_AGENT/agents/<agent>.json --stop-after-message --timeout-seconds 300
 ```
 
+El cliente solicita confirmacion explicita al Hub: primero guarda el mensaje de
+forma atomica en `ACP_AGENT/inbox/` y solo despues envia `/sessions/ack`. Ese
+ack elimina el mensaje de no leidos, pero NO completa una `TASK`; la tarea sigue
+en `current_task` hasta el flujo normal de `REPLY`/finalizacion. Si falla el
+guardado local, no se confirma y el lease permite que ACP lo entregue de nuevo.
+
 Si el Hub ya no tiene la sesion (cerrada sin notice vivo, member token rotado, o Hub redeployado con store en memoria), `listen` no hace loop ni lanza un 403/404 opaco: sale con `status: session_ended`, limpia el `session_id`/`member_token` local y te indica volver a `create-session`/`join-session` antes de escuchar de nuevo.
 
 Si el Hub/gateway devuelve HTTP 502/503/504, no asumir que la sesion murio. El CLI reintenta con backoff las operaciones seguras (`wait`, `status`, `heartbeat`, `session-info`). `send` no se reintenta automaticamente porque un POST de mensaje no-idempotente podria duplicar entrega si el servidor proceso el envio antes del 5xx.

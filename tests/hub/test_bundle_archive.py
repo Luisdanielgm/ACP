@@ -11,6 +11,9 @@ from acp.hub.bundle_archive import (
 )
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
 def test_build_bundle_archive_writes_skill_tree(tmp_path: Path) -> None:
     source_dir = tmp_path / "ACP_AGENT"
     bundle_path = tmp_path / "downloads" / "ACP_AGENT.zip"
@@ -51,3 +54,11 @@ def test_discover_downloads_dir_falls_back_to_process_cwd(monkeypatch, tmp_path:
     monkeypatch.chdir(tmp_path)
 
     assert _discover_downloads_dir() == downloads_dir.resolve()
+
+
+def test_project_and_bundle_session_coordinator_skills_are_synchronized() -> None:
+    bundled = REPO_ROOT / "ACP_AGENT" / "skills" / "acp-session-coordinator" / "SKILL.md"
+    project = REPO_ROOT / ".codex" / "skills" / "acp-session-coordinator" / "SKILL.md"
+
+    assert project.is_file()
+    assert project.read_bytes() == bundled.read_bytes()

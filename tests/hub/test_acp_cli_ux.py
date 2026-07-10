@@ -2187,6 +2187,114 @@ def test_listen_clears_stale_binding_and_exits_when_session_is_gone(monkeypatch:
     assert saved["agent_name"] == "worker-1"
 
 
+def test_wait_persists_explicit_delivery_before_acknowledging(monkeypatch: Any, tmp_path: Path) -> None:
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir(parents=True)
+    inbox_dir = tmp_path / "inbox" / "worker-1"
+    config_path = agents_dir / "worker-1.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "agent_name": "worker-1",
+                "hub_http": "https://hub.example",
+                "session_id": "session-1",
+                "member_token": "member-token-123",
+                "inbox_dir": str(inbox_dir),
+            }
+        ),
+        encoding="utf-8",
+    )
+    message = {
+        "id": "message-1",
+        "ts": "2026-07-10T12:00:00Z",
+        "from": "chief",
+        "to": "worker-1",
+        "action": "TASK",
+        "payload": "Review auth.py",
+    }
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def fake_post_json(*, route: str, payload: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
+        calls.append((route, dict(payload)))
+        if route == "/sessions/wait":
+            assert payload["ack_mode"] == "explicit"
+            return {
+                "status": "message",
+                "message": message,
+                "delivery": {
+                    "ack_required": True,
+                    "message_id": "message-1",
+                    "receipt_handle": "receipt-1",
+                    "lease_expires_at": "2026-07-10T12:00:30Z",
+                },
+            }
+        assert route == "/sessions/ack"
+        inbox_files = list(inbox_dir.glob("*.json"))
+        assert len(inbox_files) == 1
+        assert json.loads(inbox_files[0].read_text(encoding="utf-8")) == message
+        assert payload["message_id"] == "message-1"
+        assert payload["receipt_handle"] == "receipt-1"
+        return {"status": "acknowledged", "message_id": "message-1", "pending_message_count": 0}
+
+    monkeypatch.setattr(acp_cli, "post_json", fake_post_json)
+
+    result = acp_cli.wait_for_session_message(
+        argparse.Namespace(command="wait", config=str(config_path), agent=None, timeout_seconds=30.0)
+    )
+
+    assert [route for route, _ in calls] == ["/sessions/wait", "/sessions/ack"]
+    assert result["local_inbox_path"] == str(next(inbox_dir.glob("*.json")))
+    assert result["acknowledgment"]["status"] == "acknowledged"
+
+
+def test_wait_does_not_ack_when_local_persistence_fails(monkeypatch: Any, tmp_path: Path) -> None:
+    agents_dir = tmp_path / "agents"
+    agents_dir.mkdir(parents=True)
+    config_path = agents_dir / "worker-1.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "agent_name": "worker-1",
+                "hub_http": "https://hub.example",
+                "session_id": "session-1",
+                "member_token": "member-token-123",
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls: list[str] = []
+
+    def fake_post_json(*, route: str, **kwargs: Any) -> dict[str, Any]:
+        calls.append(route)
+        return {
+            "status": "message",
+            "message": {"id": "message-1", "action": "INFO", "payload": "Keep me"},
+            "delivery": {
+                "ack_required": True,
+                "message_id": "message-1",
+                "receipt_handle": "receipt-1",
+            },
+        }
+
+    monkeypatch.setattr(acp_cli, "post_json", fake_post_json)
+    monkeypatch.setattr(
+        acp_cli,
+        "append_inbound_message",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("disk unavailable")),
+    )
+
+    try:
+        acp_cli.wait_for_session_message(
+            argparse.Namespace(command="wait", config=str(config_path), agent=None, timeout_seconds=30.0)
+        )
+    except OSError as exc:
+        assert "disk unavailable" in str(exc)
+    else:
+        raise AssertionError("expected local persistence failure")
+
+    assert calls == ["/sessions/wait"]
+
+
 def test_listen_still_raises_on_auth_failure(monkeypatch: Any, tmp_path: Path) -> None:
     # A 401 (bad ACP_TOKEN) is NOT a stale session binding; the loop must keep
     # surfacing it instead of silently clearing credentials.

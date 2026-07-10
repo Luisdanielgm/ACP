@@ -1,5 +1,12 @@
 # ACP_AGENT Changelog
 
+## 0.3.11 - 2026-07-10
+
+- EN: Session receive commands now request explicit delivery leases, persist each inbound message atomically under `ACP_AGENT/inbox/`, and acknowledge it only after durable local acceptance; acknowledging clears unread delivery without completing an open TASK.
+- ES: Los comandos de recepcion ahora solicitan leases explicitos, guardan cada mensaje entrante de forma atomica en `ACP_AGENT/inbox/` y solo lo confirman tras aceptarlo durablemente; el ack limpia la entrega no leida sin completar una TASK abierta.
+- EN: Restored distribution parity by keeping the compact bundled and project-local ACP session coordinator skills byte-identical, while installer and updater coverage continues to synchronize downstream project, Codex, and Claude skill installs.
+- ES: Se restauro la paridad de distribucion manteniendo identicas byte a byte las skills ACP compactas del bundle y del proyecto, mientras las pruebas del instalador y updater siguen garantizando la sincronizacion downstream para proyectos, Codex y Claude.
+
 ## 0.3.10 - 2026-05-30
 
 - EN: Slimmed the bundled ACP session coordinator skill into a short command router with a test guardrail, so agents use `connect`/`coordinate`/`onboard`/`chief`/`runner` instead of re-reasoning through a long recipe.

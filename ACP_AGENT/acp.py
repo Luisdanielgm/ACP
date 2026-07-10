@@ -42,6 +42,7 @@ from acp_distribution import AgentDistribution, load_distribution
 DEFAULT_BACKOFF = (0.5, 1.0, 2.0, 5.0)
 DEFAULT_POLL_MS = 800
 DEFAULT_LISTEN_TIMEOUT_SECONDS = 300.0
+DEFAULT_DELIVERY_LEASE_SECONDS = 60.0
 TRANSIENT_HTTP_STATUS_CODES = {502, 503, 504}
 TRANSIENT_RETRY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
 TRANSIENT_RETRY_SAFE_POST_ROUTES = {
@@ -1567,6 +1568,49 @@ def append_inbound_message(inbox_dir: Path, payload: dict[str, Any]) -> Path:
     return path
 
 
+def accept_and_ack_session_delivery(
+    *,
+    settings: HubAgentSettings,
+    response: dict[str, Any],
+    inbox_dir: Path | None = None,
+) -> dict[str, Any]:
+    if response.get("status") != "message" or not isinstance(response.get("message"), dict):
+        return response
+    enriched = dict(response)
+    message = dict(response["message"])
+    resolved_inbox_dir = inbox_dir or resolve_agent_queue_dir(
+        settings,
+        "inbox_dir",
+        "inbox",
+        fallback=f"inbox/{settings.agent_name}",
+    )
+    local_inbox_path = append_inbound_message(resolved_inbox_dir, message)
+    enriched["local_inbox_path"] = str(local_inbox_path)
+
+    delivery = response.get("delivery")
+    if not isinstance(delivery, dict) or delivery.get("ack_required") is not True:
+        return enriched
+    message_id = delivery.get("message_id")
+    receipt_handle = delivery.get("receipt_handle")
+    if not isinstance(message_id, str) or not message_id or not isinstance(receipt_handle, str) or not receipt_handle:
+        raise ValueError("explicit ACP delivery is missing message_id or receipt_handle")
+    if settings.session_id is None or settings.member_token is None:
+        raise ValueError("session_id and member_token are required to acknowledge an ACP delivery")
+    enriched["acknowledgment"] = post_json(
+        hub_http=settings.hub_http,
+        route="/sessions/ack",
+        payload={
+            "session_id": settings.session_id,
+            "agent_name": settings.agent_name,
+            "member_token": settings.member_token,
+            "message_id": message_id,
+            "receipt_handle": receipt_handle,
+        },
+        token=settings.token,
+    )
+    return enriched
+
+
 def enqueue_outbound_message(outbox_dir: Path, payload: dict[str, Any]) -> Path:
     ensure_queue_dirs(outbox_dir)
     msg_id = str(payload.get("id") or uuid4())
@@ -2742,10 +2786,13 @@ def wait_for_session_message(args: argparse.Namespace) -> dict[str, Any]:
             "agent_name": settings.agent_name,
             "member_token": settings.member_token,
             "timeout_seconds": float(args.timeout_seconds),
+            "ack_mode": "explicit",
+            "lease_seconds": DEFAULT_DELIVERY_LEASE_SECONDS,
         },
         token=settings.token,
     )
     if response.get("status") == "message":
+        response = accept_and_ack_session_delivery(settings=settings, response=response)
         apply_session_notice_if_needed(
             settings=settings,
             message=response.get("message") if isinstance(response.get("message"), dict) else None,
@@ -2806,19 +2853,23 @@ def wait_window_for_session_message(args: argparse.Namespace) -> dict[str, Any]:
                 "agent_name": settings.agent_name,
                 "member_token": settings.member_token,
                 "timeout_seconds": current_timeout,
+                "ack_mode": "explicit",
+                "lease_seconds": DEFAULT_DELIVERY_LEASE_SECONDS,
             },
             token=settings.token,
         )
         if response.get("status") == "timeout":
             continue
         if response.get("status") == "message":
-            enriched = dict(response)
+            enriched = accept_and_ack_session_delivery(
+                settings=settings,
+                response=response,
+                inbox_dir=inbox_dir,
+            )
             enriched["listener_mode"] = "window"
             enriched["window_minutes"] = window_minutes
             message = enriched.get("message")
             if isinstance(message, dict):
-                local_inbox_path = append_inbound_message(inbox_dir, message)
-                enriched["local_inbox_path"] = str(local_inbox_path)
                 notice = apply_session_notice_if_needed(
                     settings=settings,
                     message=message,
@@ -3410,6 +3461,8 @@ def listen_for_session_message(args: argparse.Namespace) -> dict[str, Any]:
                     "agent_name": settings.agent_name,
                     "member_token": settings.member_token,
                     "timeout_seconds": timeout_seconds,
+                    "ack_mode": "explicit",
+                    "lease_seconds": DEFAULT_DELIVERY_LEASE_SECONDS,
                 },
                 token=settings.token,
             )
@@ -3465,15 +3518,17 @@ def listen_for_session_message(args: argparse.Namespace) -> dict[str, Any]:
             last_timeout_at = utc_now_rfc3339()
             continue
         if response.get("status") == "message":
-            enriched = dict(response)
+            enriched = accept_and_ack_session_delivery(
+                settings=settings,
+                response=response,
+                inbox_dir=inbox_dir,
+            )
             if last_timeout_at is not None:
                 enriched["listener_resumed_after"] = last_timeout_at
             enriched["listener_mode"] = "persistent"
             message = enriched.get("message")
             notice: dict[str, Any] | None = None
             if isinstance(message, dict):
-                local_inbox_path = append_inbound_message(inbox_dir, message)
-                enriched["local_inbox_path"] = str(local_inbox_path)
                 notice = apply_session_notice_if_needed(
                     settings=settings,
                     message=message,
@@ -4161,7 +4216,7 @@ def publish_runner_waiting(*, settings: HubAgentSettings, profile: dict[str, Any
 def runner_wait_once(*, settings: HubAgentSettings, profile: dict[str, Any], timeout_seconds: float) -> dict[str, Any]:
     if settings.session_id is None or settings.member_token is None:
         raise ValueError("session_id and member_token are required in config. Create or join a session first.")
-    return post_json(
+    response = post_json(
         hub_http=settings.hub_http,
         route="/sessions/wait",
         payload={
@@ -4169,9 +4224,12 @@ def runner_wait_once(*, settings: HubAgentSettings, profile: dict[str, Any], tim
             "agent_name": settings.agent_name,
             "member_token": settings.member_token,
             "timeout_seconds": timeout_seconds,
+            "ack_mode": "explicit",
+            "lease_seconds": DEFAULT_DELIVERY_LEASE_SECONDS,
         },
         token=settings.token,
     )
+    return accept_and_ack_session_delivery(settings=settings, response=response)
 
 
 def _is_wait_already_active_error(message: str) -> bool:
