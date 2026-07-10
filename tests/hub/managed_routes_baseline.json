@@ -1,5 +1,5 @@
 {
-  "route_count": 102,
+  "route_count": 103,
   "routes": [
     {
       "path": "/",
@@ -533,6 +533,12 @@
     },
     {
       "path": "/sessions",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/sessions/ack",
       "methods": [
         "POST"
       ]

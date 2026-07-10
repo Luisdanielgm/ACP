@@ -112,6 +112,31 @@ _SESSION_WAIT_OPENAPI_EXTRA = {
                             "description": "Optional when X-ACP-Member-Token header is provided.",
                         },
                         "timeout_seconds": {"type": "number", "minimum": 0, "maximum": 300, "default": 30},
+                        "ack_mode": {"type": "string", "enum": ["auto", "explicit"], "default": "auto"},
+                        "lease_seconds": {"type": "number", "minimum": 0.1, "maximum": 300, "default": 30},
+                    },
+                }
+            }
+        },
+    }
+}
+_SESSION_ACK_OPENAPI_EXTRA = {
+    "requestBody": {
+        "required": True,
+        "content": {
+            "application/json": {
+                "schema": {
+                    "type": "object",
+                    "required": ["session_id", "agent_name", "message_id", "receipt_handle"],
+                    "properties": {
+                        "session_id": {"type": "string"},
+                        "agent_name": {"type": "string"},
+                        "member_token": {
+                            "type": "string",
+                            "description": "Optional when X-ACP-Member-Token header is provided.",
+                        },
+                        "message_id": {"type": "string"},
+                        "receipt_handle": {"type": "string"},
                     },
                 }
             }
@@ -1203,8 +1228,14 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
             timeout_seconds = float(timeout_seconds_raw)
             if timeout_seconds <= 0 or timeout_seconds > 300:
                 raise ValueError("timeout_seconds must be between 0 and 300.")
+            ack_mode = str(parsed.get("ack_mode", "auto")).strip().lower()
+            if ack_mode not in {"auto", "explicit"}:
+                raise ValueError("ack_mode must be auto or explicit.")
+            lease_seconds = float(parsed.get("lease_seconds", 30.0))
+            if lease_seconds < 0.1 or lease_seconds > 300:
+                raise ValueError("lease_seconds must be between 0.1 and 300.")
         except ValueError as exc:
-            reason = build_error(INVALID_FIELD, field="timeout_seconds", message=str(exc))
+            reason = build_error(INVALID_FIELD, field="body", message=str(exc))
             return JSONResponse(status_code=400, content=_safe_error_payload(reason))
 
         try:
@@ -1213,6 +1244,8 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
                 agent_name=agent_name,
                 member_token=member_token,
                 timeout_seconds=timeout_seconds,
+                ack_mode=ack_mode,
+                lease_seconds=lease_seconds,
             )
         except SessionConflictError as exc:
             details = {
@@ -1243,7 +1276,65 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
 
         if message is None:
             return JSONResponse(status_code=200, content={"status": "timeout"})
-        return JSONResponse(status_code=200, content={"status": "message", "message": message})
+        response_payload = {"status": "message", "message": message["message"]}
+        if message["delivery"] is not None:
+            response_payload["delivery"] = message["delivery"]
+        return JSONResponse(status_code=200, content=response_payload)
+
+    @router.post("/sessions/ack", openapi_extra=_SESSION_ACK_OPENAPI_EXTRA)
+    async def post_session_ack(
+        request: Request,
+        x_acp_member_token: str | None = Header(default=None, alias="X-ACP-Member-Token"),
+    ) -> JSONResponse:
+        parsed = await _load_json_object(request)
+        if parsed is None:
+            reason = build_error(INVALID_FIELD, field="body", message="body must be a JSON object.")
+            return JSONResponse(status_code=400, content=_safe_error_payload(reason))
+        required = ["session_id", "agent_name", "message_id", "receipt_handle"]
+        if _is_missing_required_value(_member_token_candidate(parsed, x_acp_member_token)):
+            required.append("member_token")
+        missing = _missing_required_fields(parsed, tuple(required))
+        if missing:
+            return _missing_required_fields_response(missing)
+
+        try:
+            session_id = _normalize_optional_string(parsed.get("session_id"), field="session_id", max_length=64)
+            message_id = _normalize_optional_string(parsed.get("message_id"), field="message_id", max_length=128)
+            receipt_handle = _normalize_optional_string(parsed.get("receipt_handle"), field="receipt_handle", max_length=256)
+            if session_id is None or message_id is None or receipt_handle is None:
+                raise ValueError("session_id, message_id, and receipt_handle are required.")
+            agent_name = _normalize_agent_name(parsed.get("agent_name"))
+            member_token = _normalize_member_token(_member_token_candidate(parsed, x_acp_member_token))
+        except ValueError as exc:
+            reason = build_error(INVALID_FIELD, field="body", message=str(exc))
+            return JSONResponse(status_code=400, content=_safe_error_payload(reason))
+
+        try:
+            pending_count = await runtime.coordination.acknowledge_message(
+                session_id=session_id,
+                agent_name=agent_name,
+                member_token=member_token,
+                message_id=message_id,
+                receipt_handle=receipt_handle,
+            )
+        except SessionConflictError as exc:
+            reason = build_error(INVALID_FIELD, field="receipt_handle", message=str(exc))
+            return JSONResponse(status_code=409, content=_safe_error_payload(reason))
+        except SessionNotFoundError as exc:
+            reason = build_error(SESSION_NOT_FOUND, field="session_id", message=str(exc))
+            return JSONResponse(status_code=404, content=_safe_error_payload(reason))
+        except SessionAccessError as exc:
+            reason = build_error(INVALID_FIELD, field="session_id", message=str(exc))
+            return JSONResponse(status_code=403, content=_safe_error_payload(reason))
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "acknowledged",
+                "message_id": message_id,
+                "pending_message_count": pending_count,
+            },
+        )
 
     @router.post("/sessions/cancel-wait", openapi_extra=_SESSION_WAIT_OPENAPI_EXTRA)
     async def post_session_cancel_wait(

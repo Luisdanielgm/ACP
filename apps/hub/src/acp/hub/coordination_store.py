@@ -8,6 +8,7 @@ import threading
 from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Protocol
 from uuid import uuid4
@@ -116,6 +117,26 @@ class CoordinationStore(Protocol):
     ) -> None: ...
 
     def dequeue_next_message(self, *, session_id: str, recipient_agent_name: str) -> dict[str, Any] | None: ...
+
+    def claim_next_message(
+        self,
+        *,
+        session_id: str,
+        recipient_agent_name: str,
+        receipt_handle: str,
+        leased_until: str,
+        now: str,
+    ) -> dict[str, Any] | None: ...
+
+    def acknowledge_message(
+        self,
+        *,
+        session_id: str,
+        recipient_agent_name: str,
+        message_id: str,
+        receipt_handle: str,
+        now: str,
+    ) -> bool: ...
 
     def pending_count(self, *, session_id: str, agent_name: str) -> int: ...
 
@@ -236,9 +257,17 @@ class InMemoryCoordinationStore:
         queue = self._pending_messages.get((session_id, recipient_agent_name))
         if not queue:
             return None
-        best_index = 0
-        best_key = (int(queue[0].get("_priority_rank", 0)), str(queue[0].get("_sort_ts", "")))
-        for index, message in enumerate(queue):
+        now = datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+        available = [
+            (index, message)
+            for index, message in enumerate(queue)
+            if not message.get("_leased_until") or str(message["_leased_until"]) <= now
+        ]
+        if not available:
+            return None
+        best_index, best_message = available[0]
+        best_key = (int(best_message.get("_priority_rank", 0)), str(best_message.get("_sort_ts", "")))
+        for index, message in available[1:]:
             key = (int(message.get("_priority_rank", 0)), str(message.get("_sort_ts", "")))
             if key < best_key:
                 best_index = index
@@ -250,6 +279,65 @@ class InMemoryCoordinationStore:
         selected.pop("_priority_rank", None)
         selected.pop("_sort_ts", None)
         return selected
+
+    def claim_next_message(
+        self,
+        *,
+        session_id: str,
+        recipient_agent_name: str,
+        receipt_handle: str,
+        leased_until: str,
+        now: str,
+    ) -> dict[str, Any] | None:
+        queue = self._pending_messages.get((session_id, recipient_agent_name))
+        if not queue:
+            return None
+        available = [
+            (index, message)
+            for index, message in enumerate(queue)
+            if not message.get("_leased_until") or str(message["_leased_until"]) <= now
+        ]
+        if not available:
+            return None
+        best_index, _ = min(
+            available,
+            key=lambda item: (
+                int(item[1].get("_priority_rank", 0)),
+                str(item[1].get("_sort_ts", "")),
+                item[0],
+            ),
+        )
+        queue[best_index]["_receipt_handle"] = receipt_handle
+        queue[best_index]["_leased_until"] = leased_until
+        selected = dict(queue[best_index])
+        for key in ("_priority_rank", "_sort_ts", "_receipt_handle", "_leased_until"):
+            selected.pop(key, None)
+        return selected
+
+    def acknowledge_message(
+        self,
+        *,
+        session_id: str,
+        recipient_agent_name: str,
+        message_id: str,
+        receipt_handle: str,
+        now: str,
+    ) -> bool:
+        queue_key = (session_id, recipient_agent_name)
+        queue = self._pending_messages.get(queue_key)
+        if not queue:
+            return False
+        for index, message in enumerate(queue):
+            if (
+                str(message.get("id")) == message_id
+                and message.get("_receipt_handle") == receipt_handle
+                and str(message.get("_leased_until") or "") > now
+            ):
+                del queue[index]
+                if not queue:
+                    self._pending_messages.pop(queue_key, None)
+                return True
+        return False
 
     def pending_count(self, *, session_id: str, agent_name: str) -> int:
         return len(self._pending_messages.get((session_id, agent_name), ()))
@@ -592,15 +680,18 @@ class SqliteCoordinationStore:
 
     def dequeue_next_message(self, *, session_id: str, recipient_agent_name: str) -> dict[str, Any] | None:
         with self._connection() as conn:
+            now = datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
             row = conn.execute(
                 """
                 SELECT queue_id, payload_json
                 FROM coordination_pending_messages
-                WHERE session_id = ? AND recipient_agent_name = ?
+                WHERE session_id = ?
+                  AND recipient_agent_name = ?
+                  AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
                 ORDER BY priority_rank ASC, sort_ts ASC, queue_seq ASC
                 LIMIT 1
                 """,
-                (session_id, recipient_agent_name),
+                (session_id, recipient_agent_name, now),
             ).fetchone()
             if row is None:
                 return None
@@ -611,6 +702,72 @@ class SqliteCoordinationStore:
             conn.commit()
             payload = json.loads(str(row["payload_json"]))
             return payload if isinstance(payload, dict) else None
+
+    def claim_next_message(
+        self,
+        *,
+        session_id: str,
+        recipient_agent_name: str,
+        receipt_handle: str,
+        leased_until: str,
+        now: str,
+    ) -> dict[str, Any] | None:
+        with self._connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    """
+                    SELECT queue_id, payload_json
+                    FROM coordination_pending_messages
+                    WHERE session_id = ?
+                      AND recipient_agent_name = ?
+                      AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+                    ORDER BY priority_rank ASC, sort_ts ASC, queue_seq ASC
+                    LIMIT 1
+                    """,
+                    (session_id, recipient_agent_name, now),
+                ).fetchone()
+                if row is None:
+                    conn.commit()
+                    return None
+                conn.execute(
+                    """
+                    UPDATE coordination_pending_messages
+                    SET receipt_handle = ?, lease_expires_at = ?
+                    WHERE queue_id = ?
+                    """,
+                    (receipt_handle, leased_until, str(row["queue_id"])),
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            payload = json.loads(str(row["payload_json"]))
+            return payload if isinstance(payload, dict) else None
+
+    def acknowledge_message(
+        self,
+        *,
+        session_id: str,
+        recipient_agent_name: str,
+        message_id: str,
+        receipt_handle: str,
+        now: str,
+    ) -> bool:
+        with self._connection() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM coordination_pending_messages
+                WHERE session_id = ?
+                  AND recipient_agent_name = ?
+                  AND message_id = ?
+                  AND receipt_handle = ?
+                  AND lease_expires_at > ?
+                """,
+                (session_id, recipient_agent_name, message_id, receipt_handle, now),
+            )
+            conn.commit()
+            return int(cursor.rowcount or 0) == 1
 
     def pending_count(self, *, session_id: str, agent_name: str) -> int:
         with self._connection() as conn:

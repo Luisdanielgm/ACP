@@ -237,6 +237,276 @@ def test_session_wait_returns_queued_message(api_client: Any) -> None:
     assert wait_response["body"]["message"]["payload"] == "Take auth ownership"
 
 
+def test_explicit_ack_clears_unread_message_but_keeps_task_open(api_client: Any) -> None:
+    chief = _create_session(api_client, "chief")
+    worker = _join_session(api_client, "worker", chief["join_code"])
+
+    sent = api_client.post(
+        "/sessions/send",
+        json={
+            "session_id": chief["session_id"],
+            "agent_name": "chief",
+            "member_token": chief["member_token"],
+            "to": "worker",
+            "action": "TASK",
+            "payload": "Take ownership of auth.py",
+        },
+    )
+    assert sent.status_code == 200
+
+    received = api_client.post(
+        "/sessions/wait",
+        json={
+            "session_id": worker["session_id"],
+            "agent_name": "worker",
+            "member_token": worker["member_token"],
+            "timeout_seconds": 1,
+            "ack_mode": "explicit",
+            "lease_seconds": 30,
+        },
+    )
+    assert received.status_code == 200, received.text
+    body = received.json()
+    assert body["status"] == "message"
+    assert body["message"]["action"] == "TASK"
+    assert body["delivery"]["ack_required"] is True
+    assert body["delivery"]["message_id"] == body["message"]["id"]
+    assert body["delivery"]["receipt_handle"]
+    assert body["delivery"]["lease_expires_at"]
+
+    before_ack = api_client.get(
+        f"/sessions/{chief['session_id']}/detail",
+        params={"agent_name": "worker", "member_token": worker["member_token"]},
+    ).json()["session"]
+    worker_before_ack = next(item for item in before_ack["members"] if item["agent_name"] == "worker")
+    assert worker_before_ack["pending_count"] == 1
+    assert worker_before_ack["current_task"] == "Take ownership of auth.py"
+
+    acknowledged = api_client.post(
+        "/sessions/ack",
+        json={
+            "session_id": worker["session_id"],
+            "agent_name": "worker",
+            "member_token": worker["member_token"],
+            "message_id": body["message"]["id"],
+            "receipt_handle": body["delivery"]["receipt_handle"],
+        },
+    )
+    assert acknowledged.status_code == 200, acknowledged.text
+    assert acknowledged.json() == {
+        "status": "acknowledged",
+        "message_id": body["message"]["id"],
+        "pending_message_count": 0,
+    }
+
+    after_ack = api_client.get(
+        f"/sessions/{chief['session_id']}/detail",
+        params={"agent_name": "worker", "member_token": worker["member_token"]},
+    ).json()["session"]
+    worker_after_ack = next(item for item in after_ack["members"] if item["agent_name"] == "worker")
+    assert worker_after_ack["pending_count"] == 0
+    assert worker_after_ack["current_task"] == "Take ownership of auth.py"
+
+
+def test_active_explicit_wait_leases_message_until_ack(api_client: Any) -> None:
+    chief = _create_session(api_client, "chief")
+    worker = _join_session(api_client, "worker", chief["join_code"])
+    wait_response: dict[str, Any] = {}
+
+    def _waiter() -> None:
+        response = api_client.post(
+            "/sessions/wait",
+            json={
+                "session_id": worker["session_id"],
+                "agent_name": "worker",
+                "member_token": worker["member_token"],
+                "timeout_seconds": 5,
+                "ack_mode": "explicit",
+                "lease_seconds": 30,
+            },
+        )
+        wait_response["status_code"] = response.status_code
+        wait_response["body"] = response.json()
+
+    thread = threading.Thread(target=_waiter)
+    thread.start()
+    time.sleep(0.2)
+    sent = api_client.post(
+        "/sessions/send",
+        json={
+            "session_id": chief["session_id"],
+            "agent_name": "chief",
+            "member_token": chief["member_token"],
+            "to": "worker",
+            "action": "INFO",
+            "payload": "Wake the listener",
+        },
+    )
+    assert sent.status_code == 200
+    thread.join(timeout=5)
+
+    assert wait_response["status_code"] == 200
+    body = wait_response["body"]
+    assert body["message"]["payload"] == "Wake the listener"
+    assert body["delivery"]["ack_required"] is True
+    detail = api_client.get(
+        f"/sessions/{chief['session_id']}/detail",
+        params={"agent_name": "worker", "member_token": worker["member_token"]},
+    ).json()["session"]
+    member = next(item for item in detail["members"] if item["agent_name"] == "worker")
+    assert member["pending_count"] == 1
+
+
+def test_invalid_explicit_ack_does_not_consume_message(api_client: Any) -> None:
+    chief = _create_session(api_client, "chief")
+    worker = _join_session(api_client, "worker", chief["join_code"])
+    api_client.post(
+        "/sessions/send",
+        json={
+            "session_id": chief["session_id"],
+            "agent_name": "chief",
+            "member_token": chief["member_token"],
+            "to": "worker",
+            "action": "INFO",
+            "payload": "Keep until valid ack",
+        },
+    )
+    received = api_client.post(
+        "/sessions/wait",
+        json={
+            "session_id": worker["session_id"],
+            "agent_name": "worker",
+            "member_token": worker["member_token"],
+            "timeout_seconds": 1,
+            "ack_mode": "explicit",
+        },
+    ).json()
+
+    rejected = api_client.post(
+        "/sessions/ack",
+        json={
+            "session_id": worker["session_id"],
+            "agent_name": "worker",
+            "member_token": worker["member_token"],
+            "message_id": received["message"]["id"],
+            "receipt_handle": "wrong-receipt",
+        },
+    )
+    assert rejected.status_code == 409
+    competing_auto_wait = api_client.post(
+        "/sessions/wait",
+        json={
+            "session_id": worker["session_id"],
+            "agent_name": "worker",
+            "member_token": worker["member_token"],
+            "timeout_seconds": 0.1,
+        },
+    )
+    assert competing_auto_wait.status_code == 200
+    assert competing_auto_wait.json()["status"] == "timeout"
+    detail = api_client.get(
+        f"/sessions/{chief['session_id']}/detail",
+        params={"agent_name": "worker", "member_token": worker["member_token"]},
+    ).json()["session"]
+    member = next(item for item in detail["members"] if item["agent_name"] == "worker")
+    assert member["pending_count"] == 1
+
+
+def test_expired_explicit_ack_lease_redelivers_message(api_client: Any) -> None:
+    chief = _create_session(api_client, "chief")
+    worker = _join_session(api_client, "worker", chief["join_code"])
+    api_client.post(
+        "/sessions/send",
+        json={
+            "session_id": chief["session_id"],
+            "agent_name": "chief",
+            "member_token": chief["member_token"],
+            "to": "worker",
+            "action": "INFO",
+            "payload": "Durable notice",
+        },
+    )
+
+    first = api_client.post(
+        "/sessions/wait",
+        json={
+            "session_id": worker["session_id"],
+            "agent_name": "worker",
+            "member_token": worker["member_token"],
+            "timeout_seconds": 1,
+            "ack_mode": "explicit",
+            "lease_seconds": 0.1,
+        },
+    ).json()
+    time.sleep(0.15)
+    second = api_client.post(
+        "/sessions/wait",
+        json={
+            "session_id": worker["session_id"],
+            "agent_name": "worker",
+            "member_token": worker["member_token"],
+            "timeout_seconds": 1,
+            "ack_mode": "explicit",
+            "lease_seconds": 30,
+        },
+    ).json()
+
+    assert second["status"] == "message"
+    assert second["message"]["id"] == first["message"]["id"]
+    assert second["delivery"]["receipt_handle"] != first["delivery"]["receipt_handle"]
+
+
+def test_sqlite_explicit_ack_survives_hub_restart(sqlite_runtime_pair) -> None:
+    runtime1, runtime2 = sqlite_runtime_pair()
+    with TestClient(create_app(runtime=runtime1)) as client1:
+        chief = _create_session(client1, "chief")
+        worker = _join_session(client1, "worker", chief["join_code"])
+        client1.post(
+            "/sessions/send",
+            json={
+                "session_id": chief["session_id"],
+                "agent_name": "chief",
+                "member_token": chief["member_token"],
+                "to": "worker",
+                "action": "TASK",
+                "payload": "Persist this task",
+            },
+        )
+        received = client1.post(
+            "/sessions/wait",
+            json={
+                "session_id": worker["session_id"],
+                "agent_name": "worker",
+                "member_token": worker["member_token"],
+                "timeout_seconds": 1,
+                "ack_mode": "explicit",
+                "lease_seconds": 30,
+            },
+        ).json()
+
+    with TestClient(create_app(runtime=runtime2)) as client2:
+        acknowledged = client2.post(
+            "/sessions/ack",
+            json={
+                "session_id": worker["session_id"],
+                "agent_name": "worker",
+                "member_token": worker["member_token"],
+                "message_id": received["message"]["id"],
+                "receipt_handle": received["delivery"]["receipt_handle"],
+            },
+        )
+        assert acknowledged.status_code == 200, acknowledged.text
+        assert acknowledged.json()["pending_message_count"] == 0
+
+        detail = client2.get(
+            f"/sessions/{chief['session_id']}/detail",
+            params={"agent_name": "worker", "member_token": worker["member_token"]},
+        ).json()["session"]
+        member = next(item for item in detail["members"] if item["agent_name"] == "worker")
+        assert member["pending_count"] == 0
+        assert member["current_task"] == "Persist this task"
+
+
 def test_session_wait_conflict_is_actionable(api_client: Any) -> None:
     chief = _create_session(api_client, "chief")
     worker = _join_session(api_client, "worker", chief["join_code"])
@@ -487,6 +757,7 @@ def test_session_rest_openapi_documents_request_bodies(api_client: Any) -> None:
 
     send_body = schema["paths"]["/sessions/send"]["post"]["requestBody"]
     wait_body = schema["paths"]["/sessions/wait"]["post"]["requestBody"]
+    ack_body = schema["paths"]["/sessions/ack"]["post"]["requestBody"]
     join_body = schema["paths"]["/sessions/join"]["post"]["requestBody"]
 
     assert send_body["content"]["application/json"]["schema"]["required"] == [
@@ -497,6 +768,13 @@ def test_session_rest_openapi_documents_request_bodies(api_client: Any) -> None:
         "payload",
     ]
     assert wait_body["content"]["application/json"]["schema"]["properties"]["member_token"]["description"]
+    assert wait_body["content"]["application/json"]["schema"]["properties"]["ack_mode"]["enum"] == ["auto", "explicit"]
+    assert ack_body["content"]["application/json"]["schema"]["required"] == [
+        "session_id",
+        "agent_name",
+        "message_id",
+        "receipt_handle",
+    ]
     assert join_body["content"]["application/json"]["schema"]["required"] == ["agent_name", "join_code"]
     assert "capabilities" in join_body["content"]["application/json"]["schema"]["properties"]
 

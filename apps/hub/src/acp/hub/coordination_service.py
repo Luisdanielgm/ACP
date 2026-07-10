@@ -10,7 +10,7 @@ import sqlite3
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -128,6 +128,8 @@ class WaitRegistration:
     future: asyncio.Future[dict[str, Any]]
     started_at: datetime
     expires_at: datetime
+    ack_mode: str = "auto"
+    lease_seconds: float = 30.0
 
     def ttl_seconds(self, *, now: datetime | None = None) -> int:
         current = now or datetime.now(timezone.utc)
@@ -277,13 +279,16 @@ class SessionCoordinationService:
             waiter = self._waiters.pop((session_id, agent_name), None)
             if waiter is not None and not waiter.future.done():
                 waiter.future.set_result(
-                    self._system_message(
-                        session_id=session_id,
-                        to=agent_name,
-                        payload_text="wait cancelled by member request",
-                        system_event="WAIT_CANCELLED",
-                        session_closed=False,
-                    )
+                    {
+                        "message": self._system_message(
+                            session_id=session_id,
+                            to=agent_name,
+                            payload_text="wait cancelled by member request",
+                            system_event="WAIT_CANCELLED",
+                            session_closed=False,
+                        ),
+                        "delivery": None,
+                    }
                 )
             self._record_event(session_id, event="WAIT_CANCELLED", actor=agent_name, detail="wait cancelled by member request")
             return {
@@ -576,7 +581,25 @@ class SessionCoordinationService:
                     destination_member.last_seen_at = now
                     destination_member.last_message_at = now
                     destination_member.last_action = action
-                    waiting.future.set_result(message_payload)
+                    if waiting.ack_mode == "explicit":
+                        priority_rank, sort_ts = _message_priority(message_payload)
+                        self._store.enqueue_message(
+                            session_id=session_id,
+                            recipient_agent_name=recipient,
+                            priority_rank=priority_rank,
+                            sort_ts=sort_ts,
+                            message=message_payload,
+                        )
+                        delivery_result = self._claim_explicit_delivery(
+                            session_id=session_id,
+                            agent_name=recipient,
+                            lease_seconds=waiting.lease_seconds,
+                        )
+                        if delivery_result is None:
+                            raise RuntimeError("queued message could not be leased")
+                    else:
+                        delivery_result = {"message": message_payload, "delivery": None}
+                    waiting.future.set_result(delivery_result)
                     self._store.update_member(session_id, destination_member)
                     delivery = "immediate"
                 else:
@@ -763,15 +786,33 @@ class SessionCoordinationService:
             )
             return member.as_payload(pending_count=self._pending_count_for(session_id, agent_name))
 
-    async def wait_for_message(self, *, session_id: str, agent_name: str, member_token: str, timeout_seconds: float) -> dict[str, Any] | None:
+    async def wait_for_message(
+        self,
+        *,
+        session_id: str,
+        agent_name: str,
+        member_token: str,
+        timeout_seconds: float,
+        ack_mode: str = "auto",
+        lease_seconds: float = 30.0,
+    ) -> dict[str, Any] | None:
         async with self._lock:
             notice = self._member_notice(session_id=session_id, agent_name=agent_name, member_token=member_token)
             if notice is not None:
-                return dict(notice)
+                return {"message": dict(notice), "delivery": None}
             _, member = self._authorize(session_id=session_id, agent_name=agent_name, member_token=member_token)
             self._mark_member_waiting_if_available(session_id=session_id, agent_name=agent_name, member=member)
-            message = self._store.dequeue_next_message(session_id=session_id, recipient_agent_name=agent_name)
-            if message is not None:
+            if ack_mode == "explicit":
+                delivery_result = self._claim_explicit_delivery(
+                    session_id=session_id,
+                    agent_name=agent_name,
+                    lease_seconds=lease_seconds,
+                )
+            else:
+                message = self._store.dequeue_next_message(session_id=session_id, recipient_agent_name=agent_name)
+                delivery_result = None if message is None else {"message": message, "delivery": None}
+            if delivery_result is not None:
+                message = delivery_result["message"]
                 member.status = "busy"
                 member.status_text = f"processing {message.get('action', 'INFO')}"
                 member.last_seen_at = _utc_now_iso()
@@ -786,10 +827,10 @@ class SessionCoordinationService:
                     thread_id=message.get("thread_id"),
                     in_reply_to=message.get("in_reply_to"),
                     payload_preview=_payload_preview(message.get("payload")),
-                    delivery="dequeued",
+                    delivery="leased" if delivery_result["delivery"] is not None else "dequeued",
                     detail=f"{message.get('action', 'INFO')} delivered to waiting agent",
                 )
-                return dict(message)
+                return delivery_result
             queue_key = (session_id, agent_name)
             existing_waiter = self._waiters.get(queue_key)
             if existing_waiter is not None and not existing_waiter.future.done():
@@ -819,9 +860,11 @@ class SessionCoordinationService:
                 future=waiter,
                 started_at=now_dt,
                 expires_at=datetime.fromtimestamp(now_dt.timestamp() + max(timeout_seconds, 0.1), tz=timezone.utc),
+                ack_mode=ack_mode,
+                lease_seconds=lease_seconds,
             )
         try:
-            message = await asyncio.wait_for(waiter, timeout=max(timeout_seconds, 0.1))
+            delivery_result = await asyncio.wait_for(waiter, timeout=max(timeout_seconds, 0.1))
         except TimeoutError:
             async with self._lock:
                 current = self._waiters.get((session_id, agent_name))
@@ -845,6 +888,7 @@ class SessionCoordinationService:
                     self._record_event(session_id, event="WAIT_CANCELLED", actor=agent_name, detail="wait request cancelled by client disconnect")
             raise
         async with self._lock:
+            message = delivery_result["message"]
             session = self._store.get_session(session_id)
             member = session.members.get(agent_name) if session is not None else None
             if member is not None:
@@ -862,10 +906,71 @@ class SessionCoordinationService:
                 thread_id=message.get("thread_id"),
                 in_reply_to=message.get("in_reply_to"),
                 payload_preview=_payload_preview(message.get("payload")),
-                delivery="immediate",
+                delivery="leased" if delivery_result["delivery"] is not None else "immediate",
                 detail=f"{message.get('action', 'INFO')} delivered through active wait",
             )
-        return dict(message)
+        return delivery_result
+
+    async def acknowledge_message(
+        self,
+        *,
+        session_id: str,
+        agent_name: str,
+        member_token: str,
+        message_id: str,
+        receipt_handle: str,
+    ) -> int:
+        async with self._lock:
+            self._authorize(session_id=session_id, agent_name=agent_name, member_token=member_token)
+            acknowledged = self._store.acknowledge_message(
+                session_id=session_id,
+                recipient_agent_name=agent_name,
+                message_id=message_id,
+                receipt_handle=receipt_handle,
+                now=_utc_now_iso(),
+            )
+            if not acknowledged:
+                raise SessionConflictError("delivery receipt is invalid, expired, or already acknowledged")
+            pending_count = self._pending_count_for(session_id, agent_name)
+            self._record_event(
+                session_id,
+                event="MESSAGE_ACKNOWLEDGED",
+                actor=agent_name,
+                target=agent_name,
+                message_id=message_id,
+                delivery="acknowledged",
+                detail="message delivery acknowledged by recipient",
+            )
+            return pending_count
+
+    def _claim_explicit_delivery(
+        self,
+        *,
+        session_id: str,
+        agent_name: str,
+        lease_seconds: float,
+    ) -> dict[str, Any] | None:
+        now = datetime.now(timezone.utc)
+        receipt_handle = secrets.token_urlsafe(24)
+        lease_expires_at = now + timedelta(seconds=lease_seconds)
+        message = self._store.claim_next_message(
+            session_id=session_id,
+            recipient_agent_name=agent_name,
+            receipt_handle=receipt_handle,
+            leased_until=lease_expires_at.isoformat(timespec="microseconds").replace("+00:00", "Z"),
+            now=now.isoformat(timespec="microseconds").replace("+00:00", "Z"),
+        )
+        if message is None:
+            return None
+        return {
+            "message": dict(message),
+            "delivery": {
+                "ack_required": True,
+                "message_id": str(message.get("id")),
+                "receipt_handle": receipt_handle,
+                "lease_expires_at": lease_expires_at.isoformat(timespec="microseconds").replace("+00:00", "Z"),
+            },
+        }
 
     def _build_session_payload(
         self,
@@ -980,7 +1085,7 @@ class SessionCoordinationService:
         self._store.remove_member(session_id, agent_name)
         waiter = self._waiters.pop((session_id, agent_name), None)
         if waiter is not None and not waiter.future.done():
-            waiter.future.set_result(dict(notice))
+            waiter.future.set_result({"message": dict(notice), "delivery": None})
 
     def _close_session_locked(self, session: CoordinationSession, *, notice_builder: Any) -> None:
         for affected_member in list(session.members.values()):
