@@ -62,6 +62,8 @@ const props = defineProps<{
   slug: string
   sessionId: string
   members: string[]
+  /** Preselect a recipient (set when the user clicks "message" on a map node). */
+  target?: string
 }>()
 
 const { t } = useManagedI18n()
@@ -80,6 +82,16 @@ watch(
       operatorTo.value = 'all'
     }
   },
+)
+
+watch(
+  () => props.target,
+  value => {
+    if (value && props.members.includes(value)) {
+      operatorTo.value = value
+    }
+  },
+  { immediate: true },
 )
 
 async function handleSendOperatorMessage() {

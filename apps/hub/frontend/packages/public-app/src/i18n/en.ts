@@ -337,6 +337,12 @@ Move faster with less manual coordination`,
   sd_legend_connected_help: 'Agent is connected and listening live',
   sd_legend_stale: 'No heartbeat',
   sd_legend_stale_help: 'No recent heartbeats from this agent',
+  sd_map_empty: 'No agents in this room yet.',
+  sd_map_message_btn: 'Send message',
+  sd_map_pending: 'Pending',
+  sd_map_expand: 'Expand map',
+  sd_map_collapse: 'Exit fullscreen',
+  sd_map_close_popover: 'Close card',
 
   // Traffic
   sd_traffic_level_low: 'Low load',

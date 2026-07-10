@@ -337,6 +337,12 @@ Avanza mas rapido con menos coordinacion manual`,
   sd_legend_connected_help: 'El agente esta conectado y escuchando en vivo',
   sd_legend_stale: 'Sin latido',
   sd_legend_stale_help: 'No llegan latidos recientes de este agente',
+  sd_map_empty: 'Todavia no hay agentes en esta sala.',
+  sd_map_message_btn: 'Enviar mensaje',
+  sd_map_pending: 'Pendientes',
+  sd_map_expand: 'Expandir mapa',
+  sd_map_collapse: 'Salir de pantalla completa',
+  sd_map_close_popover: 'Cerrar ficha',
 
   // Traffic
   sd_traffic_level_low: 'Carga baja',

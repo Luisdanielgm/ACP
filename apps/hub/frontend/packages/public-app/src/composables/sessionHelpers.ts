@@ -30,6 +30,22 @@ export function roleTone(role: string | undefined): string {
   return '#85B7EB'
 }
 
+// Identity initials from the agent name (first + last meaningful segment),
+// skipping hex hash suffixes — so two collaborators don't both read "CO".
+export function nameInitials(name: string): string {
+  const parts = String(name || '')
+    .split(/[-_.\s]+/)
+    .filter(Boolean)
+    .filter(part => !/^[0-9a-f]{6,}$/i.test(part))
+  if (!parts.length) return '?'
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+}
+
+export function isWebOperator(name: string | undefined): boolean {
+  return String(name || '').startsWith('web-operator-')
+}
+
 export function statusTone(status: string | undefined): string {
   const s = String(status || '').toLowerCase()
   if (s === 'busy') return '#F0997B'

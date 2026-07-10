@@ -1,26 +1,88 @@
 <template>
-  <div class="cockpit-card" :data-load="trafficLevel">
+  <div ref="cardRef" class="cockpit-card" :class="{ expanded }" :data-load="trafficLevel">
     <div class="cockpit-head">
       <div>
         <div class="cockpit-title">{{ t('sd_squad_map_title') }}</div>
         <div class="cockpit-sub">{{ t('sd_squad_map_sub') }}</div>
       </div>
+      <button
+        class="map-tool"
+        type="button"
+        :aria-label="t(expanded ? 'sd_map_collapse' : 'sd_map_expand')"
+        :title="t(expanded ? 'sd_map_collapse' : 'sd_map_expand')"
+        @click="expanded = !expanded"
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <template v-if="expanded">
+            <path d="M18 6L6 18" /><path d="M6 6l12 12" />
+          </template>
+          <template v-else>
+            <path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M16 3h3a2 2 0 0 1 2 2v3" />
+            <path d="M16 21h3a2 2 0 0 0 2-2v-3" /><path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+          </template>
+        </svg>
+      </button>
     </div>
     <div class="squad-map">
       <div v-if="!payload?.members?.length" class="empty-state">
-        <span>{{ t('sd_no_problem_members') }}</span>
+        <span>{{ t('sd_map_empty') }}</span>
+        <button v-if="payload" class="map-invite-cta" type="button" @click="$emit('invite')">
+          {{ t('sd_invite_prompt_btn') }}
+        </button>
       </div>
-      <div v-else class="squad-canvas" v-html="squadMapSvg"></div>
+      <div v-else class="squad-canvas" v-html="squadMapSvg" @click="onCanvasClick"></div>
     </div>
+
+    <!-- Member quick card: teleported to <body> with fixed positioning so the
+         card's overflow:hidden can never clip it, and the 2s poll re-render
+         never blinks it away; its data recomputes live from the payload. -->
+    <Teleport to="body">
+    <div
+      v-if="selectedMember"
+      class="map-popover"
+      :style="{ left: popoverX + 'px', top: popoverY + 'px' }"
+      role="dialog"
+      :aria-label="selectedMember.agent_name"
+    >
+      <div class="map-popover-head">
+        <span class="map-popover-avatar" :style="{ background: selectedAccent }">{{ selectedInitials }}</span>
+        <div class="map-popover-id">
+          <strong>{{ selectedMember.agent_name }}</strong>
+          <span class="map-popover-status">{{ translateStatus(t, selectedMember.status) || selectedMember.status }}</span>
+        </div>
+        <button class="map-tool" type="button" :aria-label="t('sd_map_close_popover')" @click="closePopover">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <path d="M18 6L6 18" /><path d="M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <p v-if="selectedMember.current_task" class="map-popover-task">{{ selectedMember.current_task }}</p>
+      <div class="map-popover-meta">
+        <span class="map-popover-chip" :class="{ warn: Number(selectedMember.pending_count || 0) > 0 }">
+          {{ t('sd_map_pending') }}: {{ selectedMember.pending_count || 0 }}
+        </span>
+        <span v-if="connectedSet.has(selectedMember.agent_name)" class="map-popover-chip live">{{ t('sd_legend_connected') }}</span>
+        <span v-else-if="heartbeatState(selectedMember, connectedSet) === 'stale'" class="map-popover-chip stale">{{ t('sd_legend_stale') }}</span>
+      </div>
+      <div v-if="canMessage || adminActionsAvailable" class="map-popover-actions">
+        <button v-if="canMessage" class="map-popover-btn" type="button" @click="onMessageMember">
+          {{ t('sd_map_message_btn') }}
+        </button>
+        <button v-if="adminActionsAvailable" class="map-popover-btn danger" type="button" @click="onDisconnectMember">
+          {{ t('sd_disconnect_member_btn') }}
+        </button>
+      </div>
+    </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from '@acp/shared'
 import { messages } from '../../i18n'
 import {
-  normalizedRole, memberPalette, heartbeatState, statusTone,
+  normalizedRole, memberPalette, heartbeatState, statusTone, nameInitials, isWebOperator,
   messageActionType, actionChipClass, deliveryMode, deliveryClass, actionTone, floatTagLabel,
   recentMemberActivity, memberActivity, mapRoutePath, mapAnimationEvents, sortedMembers,
   escapeHtml, type TrafficLevel,
@@ -32,6 +94,14 @@ const props = defineProps<{
   payload: SessionDetailPayload | null
   connectedSet: Set<string>
   trafficLevel: TrafficLevel
+  adminActionsAvailable?: boolean
+  canMessage?: boolean
+}>()
+
+const emit = defineEmits<{
+  invite: []
+  'message-member': [agentName: string]
+  'disconnect-member': [agentName: string]
 }>()
 
 const { t } = useI18n(messages)
@@ -40,17 +110,86 @@ function clipText(value: string, max = 26): string {
   return value.length > max ? value.slice(0, max - 1) + '…' : value
 }
 
-// Identity initials from the agent name (first + last meaningful segment),
-// skipping hex hash suffixes — so two collaborators don't both read "CO".
-function nameInitials(name: string): string {
-  const parts = String(name || '')
-    .split(/[-_.\s]+/)
-    .filter(Boolean)
-    .filter(part => !/^[0-9a-f]{6,}$/i.test(part))
-  if (!parts.length) return '?'
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+// ── War-room mode + member quick card ──
+
+const cardRef = ref<HTMLElement | null>(null)
+const expanded = ref(false)
+const selectedName = ref('')
+const popoverX = ref(0)
+const popoverY = ref(0)
+
+const selectedMember = computed<SessionMember | null>(() => {
+  if (!selectedName.value) return null
+  return props.payload?.members?.find(m => m.agent_name === selectedName.value) || null
+})
+
+const selectedAccent = computed(() => {
+  const m = selectedMember.value
+  if (!m) return 'transparent'
+  return isWebOperator(m.agent_name) ? '#a1aab5' : memberPalette(m).accent
+})
+
+const selectedInitials = computed(() => nameInitials(selectedMember.value?.agent_name || ''))
+
+function onCanvasClick(event: MouseEvent) {
+  const target = (event.target as HTMLElement).closest('[data-agent]')
+  if (!target) return
+  const agentName = target.getAttribute('data-agent') || ''
+  if (!agentName) return
+  // Fixed positioning against the viewport: immune to card overflow clipping
+  // and correct in both the inline card and war-room mode.
+  const POPOVER_W = 280
+  const POPOVER_H = 230
+  popoverX.value = Math.max(8, Math.min(event.clientX + 8, window.innerWidth - POPOVER_W - 8))
+  popoverY.value = Math.max(8, Math.min(event.clientY + 8, window.innerHeight - POPOVER_H - 8))
+  selectedName.value = agentName
 }
+
+function closePopover() {
+  selectedName.value = ''
+}
+
+function onMessageMember() {
+  const name = selectedName.value
+  closePopover()
+  if (name) emit('message-member', name)
+}
+
+function onDisconnectMember() {
+  const name = selectedName.value
+  closePopover()
+  if (name) emit('disconnect-member', name)
+}
+
+function onDocumentClick(event: MouseEvent) {
+  const target = event.target as HTMLElement
+  if (target.closest('.map-popover') || target.closest('[data-agent]')) return
+  closePopover()
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return
+  if (selectedName.value) {
+    closePopover()
+  } else if (expanded.value) {
+    expanded.value = false
+  }
+}
+
+watch([selectedName, expanded], ([name, isExpanded]) => {
+  const active = Boolean(name) || isExpanded
+  document.removeEventListener('click', onDocumentClick, true)
+  document.removeEventListener('keydown', onKeydown)
+  if (active) {
+    document.addEventListener('click', onDocumentClick, true)
+    document.addEventListener('keydown', onKeydown)
+  }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', onDocumentClick, true)
+  document.removeEventListener('keydown', onKeydown)
+})
 
 interface NodeLabel {
   anchor: 'start' | 'middle' | 'end'
@@ -129,13 +268,22 @@ const squadMapSvg = computed(() => {
     const x = cx + ringRadius * Math.cos(angle)
     const y = cy + ringRadius * Math.sin(angle)
     nodes.set(member.agent_name, { x, y, member })
-    const isOperator = String(member.agent_name || '').startsWith('web-operator-')
+    const isOperator = isWebOperator(member.agent_name)
     const spokeClasses = [
       'signal-line',
       cs.has(member.agent_name) ? 'live' : '',
       isOperator ? 'operator-spoke' : '',
     ].filter(Boolean).join(' ')
     markup += `<line class="${spokeClasses}" x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" />`
+    // Pending messages queue up as amber dots ON the wire, right before the
+    // agent — you can see WHERE work is piling up at a glance.
+    const queued = Math.min(5, Number(member.pending_count || 0))
+    for (let d = 0; d < queued; d++) {
+      const tPos = 0.82 - d * 0.06
+      const qx = cx + (x - cx) * tPos
+      const qy = cy + (y - cy) * tPos
+      markup += `<circle class="queue-dot" style="animation-delay:${(d * 0.18).toFixed(2)}s" cx="${qx.toFixed(1)}" cy="${qy.toFixed(1)}" r="3"/>`
+    }
   })
 
   // Animated routes: pulse dashes along the wire, impact ripples on arrival,
@@ -149,16 +297,22 @@ const squadMapSvg = computed(() => {
     const delivery = deliveryMode(event)
     const path = mapRoutePath(from, to, ri)
     const tone = actionTone(action)
+    // A short slice of the message itself makes the float tag informative:
+    // "TASK · revisar costos…" instead of a bare action glyph.
+    const preview = clipText(String(event.payload_preview || '').trim(), 16)
+    const tagText = preview ? `${floatTagLabel(action, delivery)} ${preview}` : floatTagLabel(action, delivery)
+    const pillWidth = Math.max(42, 14 + tagText.length * 5.6)
     markup += `<path class="signal-line route-pulse ${actionChipClass(action)} ${deliveryClass(delivery)}" style="animation-delay:${ri * 120}ms;stroke:${tone}" d="${path}" />`
     markup += `
       <circle class="node-impact ${actionChipClass(action)} ${deliveryClass(delivery)}" style="animation-delay:${ri * 120}ms;--impact-accent:${tone}" cx="${to.x}" cy="${to.y}" r="32"></circle>
       <circle class="node-impact spark ${actionChipClass(action)} ${deliveryClass(delivery)}" style="animation-delay:${ri * 120 + 120}ms;--impact-accent:${tone}" cx="${to.x}" cy="${to.y}" r="24"></circle>
       <g class="node-float-tag ${actionChipClass(action)} ${deliveryClass(delivery)}" style="animation-delay:${ri * 120 + 40}ms;--impact-accent:${tone}" transform="translate(${to.x + 30}, ${to.y - 34})">
-        <rect class="node-float-pill" x="-4" y="-14" width="42" height="20" rx="10"></rect>
-        <text class="node-float-text" x="17" y="0" text-anchor="middle">${escapeHtml(floatTagLabel(action, delivery))}</text>
+        <rect class="node-float-pill" x="-4" y="-14" width="${pillWidth.toFixed(1)}" height="20" rx="10"></rect>
+        <text class="node-float-text" x="${(pillWidth / 2 - 4).toFixed(1)}" y="0" text-anchor="middle">${escapeHtml(tagText)}</text>
       </g>`
     mailMarkup += `
       <g class="mail-glyph ${deliveryClass(delivery)}" style="--impact-accent:${tone}">
+        <title>${escapeHtml(preview ? `${action || 'MSG'} · ${preview}` : action || 'MSG')}</title>
         <rect x="-8" y="-5.5" width="16" height="11" rx="2.5"/>
         <path d="M-8 -5.5 L0 1.5 L8 -5.5"/>
         <animateMotion dur="1.35s" fill="freeze" path="${path}"/>
@@ -166,11 +320,18 @@ const squadMapSvg = computed(() => {
   })
 
   // Nodes
+  let nodeIndex = 0
   nodes.forEach(node => {
     const m = node.member
     const isChief = m.agent_name === chiefMember.agent_name
-    const isOperator = String(m.agent_name || '').startsWith('web-operator-')
+    const isOperator = isWebOperator(m.agent_name)
     const isConnected = cs.has(m.agent_name)
+    // Organic drift: each node sways on its own tiny vector so the room feels
+    // alive. Keyframes start and end at rest, so the 2s poll re-render never
+    // produces a visible jump.
+    const driftX = [0, 1.6, -1.6][nodeIndex % 3]
+    const driftY = nodeIndex % 2 === 0 ? -2.4 : 2.4
+    nodeIndex += 1
     const palette = memberPalette(m)
     const accent = isOperator ? '#a1aab5' : palette.accent
     const hbState = heartbeatState(m, cs)
@@ -213,8 +374,17 @@ const squadMapSvg = computed(() => {
           <path d="M-6.5 8c0-4.2 2.9-6.6 6.5-6.6s6.5 2.4 6.5 6.6"/>
         </g>`
       : `<text class="node-glyph" x="${node.x}" y="${node.y + 4}" text-anchor="middle">${escapeHtml(nameInitials(m.agent_name))}</text>`
+    // Busy agents show explicit working bars at the shell's edge — the aura
+    // pulse alone was too subtle to read as "processing right now".
+    const workBadge = activity.isBusy
+      ? `<g class="node-workbars" transform="translate(${(node.x + shellR - 7).toFixed(1)}, ${(node.y + shellR - 5).toFixed(1)})">
+          <rect x="-6" y="-5" width="2.4" height="5" rx="1.2"/>
+          <rect x="-2.2" y="-9" width="2.4" height="9" rx="1.2"/>
+          <rect x="1.6" y="-7" width="2.4" height="7" rx="1.2"/>
+        </g>`
+      : ''
     markup += `
-      <g class="node-ring ${liveClass} ${activityClasses}${isOperator ? ' operator' : ''}" style="--member-accent:${accent}">
+      <g class="node-ring ${liveClass} ${activityClasses}${isOperator ? ' operator' : ''}" data-agent="${escapeHtml(m.agent_name || '')}" style="--member-accent:${accent};--dx:${driftX}px;--dy:${driftY}px">
         <title>${escapeHtml(m.agent_name || '-')} · ${escapeHtml(statusLabel)}${pending ? ` · +${pending}` : ''}</title>
         <circle class="node-aura" cx="${node.x}" cy="${node.y}" r="${auraR}"/>
         <circle class="node-shell" cx="${node.x}" cy="${node.y}" r="${shellR}"/>
@@ -223,6 +393,7 @@ const squadMapSvg = computed(() => {
         ${liveHalo}
         ${pendingBadge}
         ${crown}
+        ${workBadge}
         ${glyph}
         <text class="node-label" x="${label.nameX.toFixed(1)}" y="${label.nameY.toFixed(1)}" text-anchor="${label.anchor}">${escapeHtml(clipText(m.agent_name || '-', label.clip))}</text>
         <text class="node-subtext" x="${label.subX.toFixed(1)}" y="${label.subY.toFixed(1)}" text-anchor="${label.anchor}">${escapeHtml(clipText(m.current_task || statusLabel, label.clip))}</text>
@@ -250,6 +421,67 @@ const squadMapSvg = computed(() => {
 .cockpit-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:16px; }
 .cockpit-title { font-size:15px; font-weight:700; letter-spacing:-0.02em; }
 .cockpit-sub { font-size:12px; color:var(--muted); line-height:1.5; margin-top:4px; }
+
+/* War-room mode */
+.cockpit-card.expanded {
+  position:fixed; inset:16px; z-index:180;
+  overflow:auto;
+  background:var(--bg);
+}
+.map-tool {
+  display:inline-flex; align-items:center; justify-content:center;
+  width:30px; height:30px; padding:0; flex-shrink:0;
+  border:1px solid var(--line); border-radius:9px;
+  background:transparent; color:var(--muted);
+  cursor:pointer; transition:all 0.15s ease;
+}
+.map-tool:hover { color:var(--ink); border-color:var(--hover-line); }
+.map-invite-cta {
+  padding:9px 18px; border-radius:999px;
+  border:1px solid var(--accent-glow); background:var(--accent-soft);
+  color:var(--accent); font-size:0.82rem; font-weight:700;
+  cursor:pointer; transition:all 0.15s ease;
+}
+.map-invite-cta:hover { border-color:var(--accent); }
+
+/* Member quick card (teleported to <body>, fixed to the viewport) */
+.map-popover {
+  position:fixed; z-index:260;
+  width:280px; padding:14px;
+  display:flex; flex-direction:column; gap:10px;
+  border:1px solid var(--line); border-radius:14px;
+  background:var(--bg); box-shadow:var(--shadow-elev);
+}
+.map-popover-head { display:flex; align-items:center; gap:10px; }
+.map-popover-avatar {
+  width:32px; height:32px; border-radius:50%; flex-shrink:0;
+  display:inline-flex; align-items:center; justify-content:center;
+  color:var(--glyph-ink); font-size:11px; font-weight:800;
+}
+.map-popover-id { min-width:0; display:flex; flex-direction:column; gap:2px; flex:1; }
+.map-popover-id strong { font-size:0.86rem; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.map-popover-status { font-size:0.72rem; color:var(--muted); }
+.map-popover-task { margin:0; font-size:0.8rem; color:var(--muted); line-height:1.45; word-break:break-word; }
+.map-popover-meta { display:flex; gap:6px; flex-wrap:wrap; }
+.map-popover-chip {
+  display:inline-flex; align-items:center; padding:3px 9px;
+  border-radius:999px; border:1px solid var(--line); background:var(--soft);
+  color:var(--muted); font-size:0.68rem; font-weight:700;
+}
+.map-popover-chip.warn { color:#EF9F27; border-color:rgba(239, 159, 39, 0.3); background:rgba(239, 159, 39, 0.08); }
+.map-popover-chip.live { color:#5DCAA5; border-color:rgba(93, 202, 165, 0.3); background:rgba(93, 202, 165, 0.08); }
+.map-popover-chip.stale { color:var(--muted); border-style:dashed; }
+.map-popover-actions { display:flex; gap:8px; }
+.map-popover-btn {
+  flex:1; padding:8px 12px;
+  border-radius:10px; border:1px solid var(--accent-glow);
+  background:var(--accent-soft); color:var(--accent);
+  font-size:0.78rem; font-weight:700; cursor:pointer;
+  transition:all 0.15s ease;
+}
+.map-popover-btn:hover { border-color:var(--accent); }
+.map-popover-btn.danger { border-color:rgba(240, 153, 123, 0.35); background:rgba(240, 153, 123, 0.08); color:#F0997B; }
+.map-popover-btn.danger:hover { border-color:#F0997B; }
 
 /* Squad map */
 .squad-map { min-height:300px; }
@@ -283,6 +515,22 @@ const squadMapSvg = computed(() => {
 .squad-canvas :deep(.signal-line) { stroke:var(--signal-line); stroke-width:2; }
 .squad-canvas :deep(line.signal-line.live) { stroke:rgba(93, 202, 165, 0.3); }
 .squad-canvas :deep(line.signal-line.operator-spoke) { stroke-dasharray:3 6; }
+.squad-canvas :deep(.queue-dot) {
+  fill:#EF9F27; stroke:var(--node-core); stroke-width:1;
+  transform-box:fill-box; transform-origin:center;
+  animation:queue-dot 1.6s ease-in-out infinite;
+}
+.squad-canvas :deep(.node-workbars rect) {
+  fill:#5DCAA5;
+  transform-box:fill-box; transform-origin:bottom;
+  animation:map-work-bars 1s steps(3, end) infinite;
+}
+.squad-canvas :deep(.node-workbars rect:nth-child(2)) { animation-delay:0.16s; }
+.squad-canvas :deep(.node-workbars rect:nth-child(3)) { animation-delay:0.32s; }
+.squad-canvas :deep(.node-ring) {
+  cursor:pointer;
+  animation:node-drift 2.6s ease-in-out infinite;
+}
 .squad-canvas :deep(.signal-line.route-pulse) { stroke-width:3; stroke-dasharray:8 10; stroke-linecap:round; animation:route-pulse 1.45s cubic-bezier(0.22,1,0.36,1) infinite; }
 .squad-canvas :deep(.signal-line.route-pulse.queued) { opacity:0.42; animation-duration:1.95s; }
 .squad-canvas :deep(.signal-line.route-pulse.dequeued) { opacity:0.74; animation-duration:1.1s; }
@@ -316,6 +564,9 @@ const squadMapSvg = computed(() => {
 @keyframes route-pulse { 0% { stroke-dashoffset:0; opacity:0.18; } 18% { opacity:0.95; } 100% { stroke-dashoffset:-36; opacity:0.24; } }
 @keyframes node-aura-breathe { 0%, 100% { transform:scale(0.96); opacity:0.12; } 50% { transform:scale(1.06); opacity:0.3; } }
 @keyframes node-live-halo { 0% { transform:scale(0.7); opacity:0.75; } 100% { transform:scale(2.1); opacity:0; } }
+@keyframes node-drift { 0%, 100% { transform:translate(0, 0); } 50% { transform:translate(var(--dx, 0px), var(--dy, -2.4px)); } }
+@keyframes queue-dot { 0%, 100% { transform:scale(0.85); opacity:0.55; } 50% { transform:scale(1.1); opacity:1; } }
+@keyframes map-work-bars { 0%, 100% { transform:scaleY(0.7); opacity:0.55; } 45% { transform:scaleY(1.05); opacity:1; } }
 @keyframes node-aura-pulse { 0% { transform:scale(0.92); opacity:0.14; } 55% { transform:scale(1.12); opacity:0.34; } 100% { transform:scale(1.22); opacity:0; } }
 @keyframes node-aura-ripple { 0% { transform:scale(0.88); opacity:0.2; } 50% { transform:scale(1.08); opacity:0.3; } 100% { transform:scale(1.26); opacity:0; } }
 @keyframes node-impact-task { 0% { r:18; opacity:0.45; } 100% { r:44; opacity:0; } }
@@ -329,8 +580,13 @@ html[data-motion="reduced"] .squad-canvas :deep(.route-pulse),
 html[data-motion="reduced"] .squad-canvas :deep(.node-aura),
 html[data-motion="reduced"] .squad-canvas :deep(.node-impact),
 html[data-motion="reduced"] .squad-canvas :deep(.node-live-halo),
+html[data-motion="reduced"] .squad-canvas :deep(.queue-dot),
+html[data-motion="reduced"] .squad-canvas :deep(.node-workbars rect),
 html[data-motion="reduced"] .squad-canvas :deep(.node-float-tag) {
   animation-duration: 1.8s !important;
+}
+html[data-motion="reduced"] .squad-canvas :deep(.node-ring) {
+  animation: none !important;
 }
 
 html[data-motion="off"] .squad-canvas::after,
@@ -338,6 +594,9 @@ html[data-motion="off"] .squad-canvas :deep(.route-pulse),
 html[data-motion="off"] .squad-canvas :deep(.node-aura),
 html[data-motion="off"] .squad-canvas :deep(.node-impact),
 html[data-motion="off"] .squad-canvas :deep(.node-live-halo),
+html[data-motion="off"] .squad-canvas :deep(.queue-dot),
+html[data-motion="off"] .squad-canvas :deep(.node-workbars rect),
+html[data-motion="off"] .squad-canvas :deep(.node-ring),
 html[data-motion="off"] .squad-canvas :deep(.node-float-tag) {
   animation: none !important;
 }

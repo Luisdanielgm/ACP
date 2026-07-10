@@ -22,7 +22,10 @@
             </div>
             <div class="lane-session">{{ member.provider || '-' }} · {{ compactPath(member.workspace_path) }}</div>
           </div>
-          <span class="lane-role" :style="{ background: memberPalette(member).accent }">{{ roleGlyph(member.role) }}</span>
+          <span
+            class="lane-role"
+            :style="{ background: isWebOperator(member.agent_name) ? '#a1aab5' : memberPalette(member).accent }"
+          >{{ nameInitials(member.agent_name) }}</span>
         </div>
         <div class="lane-meter-grid">
           <div v-for="metric in laneMetrics(member)" :key="metric.key" class="lane-meter-card">
@@ -76,7 +79,7 @@
 import { useI18n, UiButton } from '@acp/shared'
 import { messages } from '../../i18n'
 import {
-  normalizedRole, roleGlyph, roleIcon, memberPalette, memberStyleVars,
+  normalizedRole, roleIcon, memberPalette, memberStyleVars, nameInitials, isWebOperator,
   memberIssues, memberActivity, memberOperationalState, heartbeatState, heartbeatAgeSeconds,
   actionChipClass, compactPath, timeAgo, runSummary,
   type Issue, type MemberActivityData, type TrafficLevel,

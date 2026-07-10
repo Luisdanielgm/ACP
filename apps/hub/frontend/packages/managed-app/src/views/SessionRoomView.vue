@@ -18,12 +18,33 @@
           </RouterLink>
         </div>
 
+        <!-- Closed room: no live polling, but the durable archive (wall + files)
+             stays readable instead of an error/retry loop. -->
+        <template v-else-if="isClosed">
+          <div class="closed-notice">
+            <p class="empty-title">{{ t('session_room_closed_title') }}</p>
+            <p class="closed-body">{{ t('session_room_closed_body') }}</p>
+            <RouterLink :to="`/managed/ui/workspaces/${encodeURIComponent(slug)}`" class="primary-button">
+              {{ t('session_back_to_sessions') }}
+            </RouterLink>
+          </div>
+          <section class="archive-panel">
+            <h2 class="archive-title">{{ t('room_tab_wall') }}</h2>
+            <RoomWallPanel :slug="slug" :session-id="sessionId" />
+          </section>
+          <section class="archive-panel">
+            <h2 class="archive-title">{{ t('room_tab_files') }}</h2>
+            <RoomFilesPanel :slug="slug" :session-id="sessionId" />
+          </section>
+        </template>
+
         <RoomLive
           v-else
           :key="`${slug}:${sessionId}`"
           :slug="slug"
           :session-id="sessionId"
           :ws-session="session"
+          @closed="markClosed"
         />
       </section>
     </main>
@@ -36,6 +57,8 @@ import { useRoute } from 'vue-router'
 import ManagedNav from '../components/ManagedNav.vue'
 import SkeletonBlock from '../components/SkeletonBlock.vue'
 import RoomLive from '../components/room/RoomLive.vue'
+import RoomWallPanel from '../components/room/RoomWallPanel.vue'
+import RoomFilesPanel from '../components/room/RoomFilesPanel.vue'
 import { fetchSessionDetail, type WorkspaceSession } from '../api/managed'
 import { getApiErrorMessage } from '../api/client'
 import { useManagedAuth } from '../composables/useManagedAuth'
@@ -52,6 +75,17 @@ const sessionId = computed(() => String(route.params.sessionId || ''))
 
 const loading = ref(true)
 const session = ref<WorkspaceSession | null>(null)
+const closedLocally = ref(false)
+
+// Only an explicit 'closed' counts — older backends omit live_status and the
+// room must still go live for them.
+const isClosed = computed(() =>
+  closedLocally.value || session.value?.live_status === 'closed'
+)
+
+function markClosed() {
+  closedLocally.value = true
+}
 
 async function loadDetail() {
   const detail = await fetchSessionDetail(slug.value, sessionId.value)
@@ -73,6 +107,7 @@ onMounted(async () => {
 watch([slug, sessionId], async () => {
   loading.value = true
   session.value = null
+  closedLocally.value = false
   try {
     await loadDetail()
   } catch (err) {
@@ -97,6 +132,32 @@ watchEffect(() => {
   gap: 14px;
 }
 .room-skeleton { display: flex; flex-direction: column; gap: 14px; }
+.closed-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 32px 24px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+}
+.closed-body { margin: 0; color: var(--muted); font-size: 0.9rem; }
+.archive-panel {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel);
+  padding: 18px;
+}
+.archive-title {
+  margin: 0 0 12px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 .empty-state {
   display: flex;
   flex-direction: column;

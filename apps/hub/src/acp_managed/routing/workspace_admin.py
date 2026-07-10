@@ -437,10 +437,15 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
             )
         except Exception:
             session_detail = None
+        workspace_session = _sanitize_workspace_session(record, include_owner_member_token=True)
+        # Mirror the list route's enrichment: no live coordination state means
+        # the session is closed, so the SPA can render the archive view on a
+        # direct navigation or refresh instead of polling a deleted session.
+        workspace_session["live_status"] = "active" if isinstance(session_detail, dict) else "closed"
         return JSONResponse(
             {
                 "workspace": _sanitize_workspace(workspace),
-                "workspace_session": _sanitize_workspace_session(record, include_owner_member_token=True),
+                "workspace_session": workspace_session,
                 "acp_session": session_detail,
                 **_managed_session_aliases(
                     record=record,

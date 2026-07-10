@@ -99,6 +99,9 @@
                 :payload="session.payload.value"
                 :connected-set="session.connectedSet.value"
                 :traffic-level="session.trafficSnapshot.value.level"
+                :admin-actions-available="session.adminActionsAvailable.value"
+                @invite="copyInvite"
+                @disconnect-member="confirmDisconnect"
               />
               <MemberLanes
                 :members="session.visibleMembers.value"

@@ -66,9 +66,20 @@
     </div>
     </Teleport>
 
+    <!-- Styled confirm dialog for destructive actions (close / disconnect) -->
+    <ConfirmDialog
+      :open="!!pendingConfirm"
+      :title="pendingConfirm?.title || ''"
+      :message="pendingConfirm?.message || ''"
+      :confirm-label="pendingConfirm?.confirmLabel || ''"
+      :cancel-label="t('room_cancel')"
+      @confirm="runPendingConfirm"
+      @cancel="pendingConfirm = null"
+    />
+
     <!-- Invite prompt dialog: shows the full prompt (incl. session id) and copies it -->
     <div v-if="inviteOpen" class="invite-overlay" @click.self="inviteOpen = false">
-      <div class="invite-dialog" role="dialog" aria-modal="true" :aria-label="t('room_invite_title')">
+      <div ref="inviteDialogRef" class="invite-dialog" role="dialog" aria-modal="true" tabindex="-1" :aria-label="t('room_invite_title')">
         <div class="invite-head">
           <RoomIcon name="user-plus" :size="16" />
           <strong>{{ t('room_invite_title') }}</strong>
@@ -125,12 +136,30 @@
         <span v-for="chip in pulseChips" :key="chip.key" class="pulse-chip" :class="chip.className">{{ chip.label }}</span>
       </div>
 
+      <!-- Pinned wall note: durable context stays visible without opening the dock -->
+      <button
+        v-if="pinnedPost"
+        class="pinned-banner"
+        type="button"
+        :title="t('room_tab_wall')"
+        @click="activeTab = 'wall'"
+      >
+        <RoomIcon name="pin" :size="13" />
+        <span class="pinned-banner-body">{{ pinnedPost.body }}</span>
+        <span class="pinned-banner-meta">{{ pinnedPost.author_name }}</span>
+      </button>
+
       <!-- Cockpit: map + lanes -->
       <div class="cockpit-grid">
         <SquadMap
           :payload="session.payload.value"
           :connected-set="session.connectedSet.value"
           :traffic-level="trafficLevel"
+          :admin-actions-available="session.adminActionsAvailable.value"
+          :can-message="true"
+          @invite="copyInvite"
+          @message-member="messageMember"
+          @disconnect-member="confirmDisconnect"
         />
         <MemberLanes
           :members="session.visibleMembers.value"
@@ -163,13 +192,23 @@
 
       <section v-show="activeTab" class="dock-panel">
         <div v-show="activeTab === 'wall'" class="dock-panel-inner">
-          <RoomWallPanel :slug="slug" :session-id="sessionId" @count="wallCount = $event" />
+          <RoomWallPanel
+            :slug="slug"
+            :session-id="sessionId"
+            @count="wallCount = $event"
+            @pinned="pinnedPost = $event"
+          />
         </div>
         <div v-show="activeTab === 'files'" class="dock-panel-inner">
           <RoomFilesPanel :slug="slug" :session-id="sessionId" @count="filesCount = $event" />
         </div>
         <div v-show="activeTab === 'operator'" class="dock-panel-inner">
-          <RoomOperatorPanel :slug="slug" :session-id="sessionId" :members="operatorMembers" />
+          <RoomOperatorPanel
+            :slug="slug"
+            :session-id="sessionId"
+            :members="operatorMembers"
+            :target="operatorTarget"
+          />
         </div>
         <div v-show="activeTab === 'team'" class="dock-panel-inner bare">
           <MemberRoster
@@ -203,7 +242,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watchEffect } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { useI18n, useMotion } from '@acp/shared'
 import {
   SquadMap,
@@ -223,9 +262,10 @@ import {
   memberActivity,
 } from '@acp/public-app/composables/sessionHelpers'
 import { translateDelivery } from '@acp/public-app/composables/dashboardTranslations'
-import type { WorkspaceSession } from '../../api/managed'
+import type { RoomWallPost, WorkspaceSession } from '../../api/managed'
 import { useManagedI18n } from '../../i18n'
 import { useToast } from '../../composables/useToast'
+import ConfirmDialog from '../ConfirmDialog.vue'
 import RoomIcon, { type RoomIconName } from './RoomIcon.vue'
 import RoomWallPanel from './RoomWallPanel.vue'
 import RoomFilesPanel from './RoomFilesPanel.vue'
@@ -235,6 +275,10 @@ const props = defineProps<{
   slug: string
   sessionId: string
   wsSession: WorkspaceSession
+}>()
+
+const emit = defineEmits<{
+  closed: []
 }>()
 
 const { t } = useManagedI18n()
@@ -361,6 +405,13 @@ interface DockTab {
 const activeTab = ref<DockTabId | null>('wall')
 const wallCount = ref(0)
 const filesCount = ref(0)
+const pinnedPost = ref<RoomWallPost | null>(null)
+const operatorTarget = ref('')
+
+function messageMember(agentName: string) {
+  operatorTarget.value = agentName
+  activeTab.value = 'operator'
+}
 
 const dockTabs = computed<DockTab[]>(() => [
   { id: 'wall', icon: 'pin', label: t('room_tab_wall'), badge: wallCount.value },
@@ -389,6 +440,25 @@ async function copyValue(value: string, label: string) {
 
 const inviteOpen = ref(false)
 const inviteText = ref('')
+const inviteDialogRef = ref<HTMLElement | null>(null)
+
+function onInviteKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') inviteOpen.value = false
+}
+
+watch(inviteOpen, async open => {
+  if (open) {
+    document.addEventListener('keydown', onInviteKeydown)
+    await nextTick()
+    inviteDialogRef.value?.focus()
+  } else {
+    document.removeEventListener('keydown', onInviteKeydown)
+  }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', onInviteKeydown)
+})
 
 async function copyInvite() {
   if (!session.payload.value) return
@@ -401,16 +471,47 @@ function copyInviteText() {
   if (inviteText.value) copyValue(inviteText.value, st('sd_invite_prompt_label'))
 }
 
-async function confirmCloseSession() {
-  if (!confirm(st('sd_confirm_close_session'))) return
-  const ok = await session.doCloseSession()
-  if (ok) toast.show(st('sd_session_closed_admin'), 'success')
+// Styled confirmations instead of the browser's native confirm() popup.
+interface PendingConfirm {
+  title: string
+  message: string
+  confirmLabel: string
+  run: () => Promise<void>
 }
 
-async function confirmDisconnect(agentName: string) {
-  if (!confirm(st('sd_confirm_disconnect_member', { agent: agentName }))) return
-  const ok = await session.doDisconnectMember(agentName)
-  if (ok) toast.show(st('sd_member_disconnected_admin', { agent: agentName }), 'success')
+const pendingConfirm = ref<PendingConfirm | null>(null)
+
+function confirmCloseSession() {
+  pendingConfirm.value = {
+    title: st('sd_close_session_btn'),
+    message: st('sd_confirm_close_session'),
+    confirmLabel: st('sd_close_session_btn'),
+    run: async () => {
+      const ok = await session.doCloseSession()
+      if (ok) {
+        toast.show(st('sd_session_closed_admin'), 'success')
+        emit('closed')
+      }
+    },
+  }
+}
+
+function confirmDisconnect(agentName: string) {
+  pendingConfirm.value = {
+    title: st('sd_disconnect_member_btn'),
+    message: st('sd_confirm_disconnect_member', { agent: agentName }),
+    confirmLabel: st('sd_disconnect_member_btn'),
+    run: async () => {
+      const ok = await session.doDisconnectMember(agentName)
+      if (ok) toast.show(st('sd_member_disconnected_admin', { agent: agentName }), 'success')
+    },
+  }
+}
+
+async function runPendingConfirm() {
+  const action = pendingConfirm.value
+  pendingConfirm.value = null
+  if (action) await action.run()
 }
 
 function retry() {
@@ -588,6 +689,33 @@ watchEffect(() => {
 .legend-work span:nth-child(3) { height: 7px; animation-delay: 0.32s; }
 .legend-work span:nth-child(4) { height: 12px; animation-delay: 0.48s; }
 @keyframes work-bars { 0%, 100% { transform: scaleY(0.72); opacity: 0.52; } 45% { transform: scaleY(1.08); opacity: 1; } }
+
+/* Pinned wall banner */
+.pinned-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 14px;
+  border: 1px solid rgba(239, 159, 39, 0.28);
+  border-radius: 12px;
+  background: rgba(239, 159, 39, 0.07);
+  color: var(--ink);
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.pinned-banner:hover { border-color: rgba(239, 159, 39, 0.5); }
+.pinned-banner svg { color: #EF9F27; flex-shrink: 0; }
+.pinned-banner-body {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pinned-banner-meta { color: var(--muted); font-size: 0.74rem; flex-shrink: 0; }
 
 /* Pulse strip */
 .pulse-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

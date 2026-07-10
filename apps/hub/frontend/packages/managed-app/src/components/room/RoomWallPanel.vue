@@ -86,6 +86,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   count: [value: number]
+  pinned: [post: RoomWallPost | null]
 }>()
 
 const { t } = useManagedI18n()
@@ -98,7 +99,11 @@ const posts = ref<RoomWallPost[]>([])
 const newPostBody = ref('')
 const newPostPinned = ref(false)
 
-watch(posts, value => emit('count', value.length), { deep: false })
+watch(posts, value => {
+  emit('count', value.length)
+  const pinned = value.filter(post => post.pinned)
+  emit('pinned', pinned.length ? pinned[pinned.length - 1] : null)
+}, { deep: false })
 
 async function loadWall() {
   loading.value = true
