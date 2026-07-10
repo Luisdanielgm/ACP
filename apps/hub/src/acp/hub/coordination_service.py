@@ -597,11 +597,22 @@ class SessionCoordinationService:
                         )
                         if delivery_result is None:
                             raise RuntimeError("queued message could not be leased")
+                        # claim_next_message hands back the highest-priority
+                        # AVAILABLE message for the recipient, which may be an
+                        # older queued or expired-lease message rather than the
+                        # one we just enqueued. The delivery is still correct
+                        # (the waiter gets the right next message), but this
+                        # send only counts as "immediate" when the message we
+                        # sent is the one actually handed over; otherwise it
+                        # stays queued behind the claimed one.
+                        claimed_id = (delivery_result.get("message") or {}).get("id")
+                        delivered_sent_message = claimed_id == message_id
                     else:
                         delivery_result = {"message": message_payload, "delivery": None}
+                        delivered_sent_message = True
                     waiting.future.set_result(delivery_result)
                     self._store.update_member(session_id, destination_member)
-                    delivery = "immediate"
+                    delivery = "immediate" if delivered_sent_message else "queued"
                 else:
                     priority_rank, sort_ts = _message_priority(message_payload)
                     self._store.enqueue_message(session_id=session_id, recipient_agent_name=recipient, priority_rank=priority_rank, sort_ts=sort_ts, message=message_payload)
