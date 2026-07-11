@@ -546,6 +546,8 @@ class SessionCoordinationService:
                 member.current_task = None
                 member.current_task_from = None
                 member.current_task_at = None
+                member.status = "waiting"
+                member.status_text = "reply sent"
             self._store.update_member(session_id, member)
             deliveries: dict[str, str] = {}
             for recipient in recipients:

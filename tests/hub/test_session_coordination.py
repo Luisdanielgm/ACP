@@ -989,6 +989,8 @@ def test_reply_clears_worker_current_task(api_client: Any) -> None:
     assert worker_member["current_task"] is None
     assert worker_member["current_task_from"] is None
     assert worker_member["current_task_at"] is None
+    assert worker_member["status"] == "waiting"
+    assert worker_member["status_text"] == "reply sent"
 
 
 def test_pending_delivery_prioritizes_reply_over_task_and_info(api_client: Any) -> None:
