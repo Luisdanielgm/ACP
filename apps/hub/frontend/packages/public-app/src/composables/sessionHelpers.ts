@@ -1,4 +1,5 @@
 import type { SessionMember, SessionEvent, SessionDetailPayload } from '../api/sessions'
+import { AVATAR_LEADER, AVATAR_HUMAN, ROBOT_AVATAR_IDS } from '../assets/acp/acpAssets'
 
 // ── Roles ──
 
@@ -337,6 +338,93 @@ export function mapAnimationEvents(payload: SessionDetailPayload, windowMs = 600
     const ts = Date.parse(String(e.ts || ''))
     return !Number.isNaN(ts) && (now - ts) <= windowMs
   })
+}
+
+// ── Asset selectors (state → visual, driven by real data) ──
+
+// Stable avatar per member: chief gets the leader portrait, the human operator gets the
+// human portrait, and every other agent hashes its name onto a consistent robot face.
+export function avatarForMember(member: SessionMember): string {
+  if (normalizedRole(member.role) === 'chief') return AVATAR_LEADER
+  if (isWebOperator(member.agent_name)) return AVATAR_HUMAN
+  const pool = ROBOT_AVATAR_IDS
+  if (!pool.length) return AVATAR_LEADER
+  return pool[hashValue(member.agent_name || '') % pool.length]
+}
+
+export type LinkFreshness = 'current' | 'recent' | 'old' | 'expired'
+
+// Relationship recency thresholds mirror the reference legend:
+// current < 30s, recent 30s–2m, old 2m–5m, expired > 5m.
+export function linkFreshness(ageSeconds: number | null): LinkFreshness {
+  if (ageSeconds === null || ageSeconds > 300) return 'expired'
+  if (ageSeconds <= 30) return 'current'
+  if (ageSeconds <= 120) return 'recent'
+  return 'old'
+}
+
+export function linkIconName(freshness: LinkFreshness): string {
+  return `link-${freshness}`
+}
+
+export type HeartbeatTier = 'strong' | 'normal' | 'weak' | 'none'
+
+export function heartbeatTier(member: SessionMember, connectedSet: Set<string> = new Set()): HeartbeatTier {
+  const state = heartbeatState(member, connectedSet)
+  if (state === 'live') {
+    const age = heartbeatAgeSeconds(member)
+    return connectedSet.has(member.agent_name) && (age === null || age <= 30) ? 'strong' : 'normal'
+  }
+  if (state === 'quiet') return 'weak'
+  return 'none'
+}
+
+export function heartbeatIconName(tier: HeartbeatTier): string {
+  return `heartbeat-${tier}`
+}
+
+// Presence badge — we track online/silent/disconnected (the kit's "thinking" state is not
+// something the protocol reports, so it is intentionally never selected).
+export function presenceIconName(member: SessionMember, connectedSet: Set<string> = new Set()): string {
+  const state = heartbeatState(member, connectedSet)
+  if (state === 'live') return 'presence-online'
+  if (state === 'quiet') return 'presence-silent'
+  return 'presence-disconnected'
+}
+
+// Operational badge — maps our operational state (+ real pending backlog) to a kit icon.
+export function operationIconName(op: OperationalState, pending = 0): string {
+  if (op.tone === 'warning') return 'operation-incident'
+  if (pending >= 3) return 'operation-queue-high'
+  if (op.tone === 'working') return 'operation-working'
+  if (op.tone === 'alert') return 'operation-processing'
+  if (op.tone === 'listening') return 'operation-waiting'
+  return 'operation-idle'
+}
+
+// Message-type icon from an event.
+export function messageIconNameForEvent(event: SessionEvent): string {
+  const ev = String(event.event || '').toUpperCase()
+  if (ev === 'HEARTBEAT') return 'message-heartbeat'
+  if (String(event.target || '').toLowerCase() === 'all' || String(event.target || '') === '*') return 'message-broadcast'
+  const action = messageActionType(event)
+  if (action === 'TASK') return 'message-task'
+  if (action === 'INFO') return 'message-information'
+  if (action === 'REPLY') return 'message-response'
+  if (['SESSION_CREATED', 'SESSION_JOINED', 'SESSION_LEFT', 'SESSION_CLOSED', 'STATUS_UPDATED'].includes(ev)) return 'message-system'
+  return 'message-system'
+}
+
+// Result/outcome icon — delivery + event type, no read-receipt invention.
+export function resultIconNameForEvent(event: SessionEvent): string {
+  const ev = String(event.event || '').toUpperCase()
+  const detail = String(event.detail || '').toLowerCase()
+  if (ev === 'WAIT_TIMEOUT' || ['error', 'failed', 'rejected', 'timeout'].some(n => detail.includes(n))) return 'result-rejected'
+  if (['RUN_FINISHED', 'RUN_REPLY_SENT'].includes(ev)) return 'result-completed'
+  const delivery = deliveryMode(event)
+  if (delivery === 'queued') return 'result-pending'
+  if (delivery === 'immediate' || delivery === 'dequeued') return 'result-delivered'
+  return 'result-delivered'
 }
 
 // ── Sorting ──

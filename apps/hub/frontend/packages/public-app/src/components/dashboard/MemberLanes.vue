@@ -23,9 +23,12 @@
             <div class="lane-session">{{ member.provider || '-' }} · {{ compactPath(member.workspace_path) }}</div>
           </div>
           <span
-            class="lane-role"
-            :style="{ background: isWebOperator(member.agent_name) ? '#a1aab5' : memberPalette(member).accent }"
-          >{{ nameInitials(member.agent_name) }}</span>
+            class="lane-avatar"
+            :style="{ '--role-accent': isWebOperator(member.agent_name) ? '#a1aab5' : memberPalette(member).accent }"
+          >
+            <img class="lane-avatar-face" :class="{ ghost: heartbeatStateFor(member) === 'stale' }" :src="avatarSrc(member)" :alt="member.agent_name" />
+            <img class="lane-avatar-badge" :src="presenceSrc(member)" alt="" aria-hidden="true" />
+          </span>
         </div>
         <div class="lane-meter-grid">
           <div v-for="metric in laneMetrics(member)" :key="metric.key" class="lane-meter-card">
@@ -39,7 +42,9 @@
           </div>
         </div>
         <div class="lane-meta">
-          <span class="op-state-badge" :class="getOpState(member).tone">{{ t('sd_' + getOpState(member).key) }}</span>
+          <span class="op-state-badge" :class="getOpState(member).tone">
+            <img class="op-icon" :src="operationSrc(member)" alt="" aria-hidden="true" />{{ t('sd_' + getOpState(member).key) }}
+          </span>
           <span>{{ translateStatus(t, member.status) }}</span>
           <span>{{ t('sd_delivery_mode_label') }}: {{ translateDelivery(t, member.delivery_mode || 'attached') }}</span>
           <span>{{ t('sd_pending_label') }}: {{ member.pending_count || 0 }}</span>
@@ -79,11 +84,13 @@
 import { useI18n, UiButton } from '@acp/shared'
 import { messages } from '../../i18n'
 import {
-  normalizedRole, roleIcon, memberPalette, memberStyleVars, nameInitials, isWebOperator,
+  normalizedRole, roleIcon, memberPalette, memberStyleVars, isWebOperator,
   memberIssues, memberActivity, memberOperationalState, heartbeatState, heartbeatAgeSeconds,
   actionChipClass, compactPath, timeAgo, runSummary,
+  avatarForMember, presenceIconName, operationIconName,
   type Issue, type MemberActivityData, type TrafficLevel,
 } from '../../composables/sessionHelpers'
+import { avatarUrl, stateIconUrl } from '../../assets/acp/acpAssets'
 import { translateRole, translateStatus, translateDelivery } from '../../composables/dashboardTranslations'
 import type { SessionMember } from '../../api/sessions'
 
@@ -135,6 +142,18 @@ function getOpState(member: SessionMember) {
   const activity = memberActivity(member, props.activityMap)
   const issues = getMemberIssues(member)
   return memberOperationalState(member, activity, issues)
+}
+
+function avatarSrc(member: SessionMember): string {
+  return avatarUrl(avatarForMember(member), 256)
+}
+
+function presenceSrc(member: SessionMember): string {
+  return stateIconUrl(presenceIconName(member, props.connectedSet))
+}
+
+function operationSrc(member: SessionMember): string {
+  return stateIconUrl(operationIconName(getOpState(member), Number(member.pending_count || 0)))
 }
 
 function activityChips(member: SessionMember): ActivityChip[] {
@@ -246,7 +265,11 @@ function laneClasses(member: SessionMember): string[] {
 .lane-rank-pill.role-chief { color:#EF9F27; border-color:rgba(250,204,21,0.24); background:rgba(250,204,21,0.09); }
 .lane-rank-pill.role-collaborator { color:#1D9E75; border-color:rgba(129,140,248,0.24); background:rgba(129,140,248,0.09); }
 .lane-rank-pill.role-member { color:#85B7EB; border-color:rgba(133,183,235,0.24); background:rgba(133,183,235,0.09); }
-.lane-role { display:inline-flex; align-items:center; justify-content:center; min-width:34px; height:26px; padding:0 10px; border-radius:999px; font-size:10px; font-weight:800; letter-spacing:0.08em; color:var(--glyph-ink); }
+.lane-avatar { position:relative; width:42px; height:42px; flex-shrink:0; }
+.lane-avatar-face { width:42px; height:42px; border-radius:50%; object-fit:cover; border:2px solid var(--role-accent, var(--accent)); display:block; }
+.lane-avatar-face.ghost { filter:grayscale(1) brightness(0.7); opacity:0.6; }
+.lane-avatar-badge { position:absolute; right:-3px; bottom:-3px; width:17px; height:17px; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.4)); }
+.op-icon { width:14px; height:14px; display:inline-block; vertical-align:middle; }
 .lane-meter-grid { display:grid; gap:10px; grid-template-columns:repeat(3, minmax(0,1fr)); margin-top:14px; }
 .lane-meter-card { border:1px solid var(--line); border-radius:12px; padding:10px 12px; background:var(--card-bg-soft); }
 .lane-meter-top { display:flex; justify-content:space-between; gap:8px; align-items:baseline; }

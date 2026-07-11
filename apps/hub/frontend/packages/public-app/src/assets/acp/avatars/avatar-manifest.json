@@ -1,0 +1,33 @@
+{
+  "format": "png",
+  "size": "1024x1024",
+  "background": "transparent",
+  "family": "ACP futuristic agent portraits",
+  "variants": {
+    "master": { "directory": "png", "extension": "png", "size": 1024, "purpose": "edición y respaldo visual" },
+    "node": { "directory": "webp/256", "extension": "webp", "size": 256, "purpose": "mapa, carriles y listas" },
+    "detail": { "directory": "webp/512", "extension": "webp", "size": 512, "purpose": "detalle ampliado y pantallas de alta densidad" }
+  },
+  "avatars": [
+    { "id": "leader-coordinator", "file": "png/01-leader-coordinator.png", "role": "Líder / Coordinador", "accent": "#32D583", "type": "robot" },
+    { "id": "finance", "file": "png/02-finance.png", "role": "Finanzas", "accent": "#49A6FF", "type": "robot" },
+    { "id": "operations", "file": "png/03-operations.png", "role": "Operaciones", "accent": "#FF9F2F", "type": "robot" },
+    { "id": "human-resources", "file": "png/04-human-resources.png", "role": "Recursos Humanos", "accent": "#B584FF", "type": "robot" },
+    { "id": "support", "file": "png/05-support.png", "role": "Soporte", "accent": "#2ED7C4", "type": "robot" },
+    { "id": "human-observer", "file": "png/06-human-observer.png", "role": "Operador Humano", "accent": "#F5B942", "type": "human" },
+    { "id": "frontend-developer", "file": "png/07-frontend-developer.png", "role": "Desarrollador Front-end", "accent": "#3CCBFF", "type": "robot" },
+    { "id": "backend-developer", "file": "png/08-backend-developer.png", "role": "Desarrollador Back-end", "accent": "#6B75FF", "type": "robot" },
+    { "id": "devops-engineer", "file": "png/09-devops-engineer.png", "role": "Ingeniero DevOps", "accent": "#B7E642", "type": "robot" },
+    { "id": "quality-assurance", "file": "png/10-quality-assurance.png", "role": "Calidad / QA", "accent": "#F6C94A", "type": "robot" },
+    { "id": "cybersecurity", "file": "png/11-cybersecurity.png", "role": "Ciberseguridad", "accent": "#FF5D5D", "type": "robot" },
+    { "id": "product-manager", "file": "png/12-product-manager.png", "role": "Product Manager", "accent": "#419CFF", "type": "robot" },
+    { "id": "ux-ui-designer", "file": "png/13-ux-ui-designer.png", "role": "Diseño UX/UI", "accent": "#FF8076", "type": "robot" },
+    { "id": "data-analyst", "file": "png/14-data-analyst.png", "role": "Analista de Datos", "accent": "#2BD9DE", "type": "robot" },
+    { "id": "sales", "file": "png/15-sales.png", "role": "Ventas", "accent": "#A7E772", "type": "robot" },
+    { "id": "marketing", "file": "png/16-marketing.png", "role": "Marketing", "accent": "#B26BFF", "type": "robot" },
+    { "id": "legal-compliance", "file": "png/17-legal-compliance.png", "role": "Legal y Cumplimiento", "accent": "#638CFF", "type": "robot" },
+    { "id": "logistics", "file": "png/18-logistics.png", "role": "Logística", "accent": "#F5A923", "type": "robot" },
+    { "id": "customer-success", "file": "png/19-customer-success.png", "role": "Éxito del Cliente", "accent": "#6DE3C2", "type": "robot" },
+    { "id": "research-knowledge", "file": "png/20-research-knowledge.png", "role": "Investigación y Conocimiento", "accent": "#B7A2FF", "type": "robot" }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "format": "PNG master + WebP runtime",
+  "background": "transparent",
+  "variants": {
+    "master": { "directory": "png", "extension": "png", "size": 512, "purpose": "edición y respaldo" },
+    "micro": { "directory": "webp/128", "extension": "webp", "size": 128, "purpose": "orbes e insignias de 24 a 64 px" },
+    "map": { "directory": "webp/256", "extension": "webp", "size": 256, "purpose": "marcos orbitales y objetos en el mapa" }
+  },
+  "objects": [
+    { "id": "leader-frame", "file": "01-leader-frame", "kind": "orbital-frame", "accent": "#32D583", "use": "Overlay del líder; centro transparente" },
+    { "id": "finance-frame", "file": "02-finance-frame", "kind": "orbital-frame", "accent": "#378BFF", "use": "Overlay de finanzas; centro transparente" },
+    { "id": "operations-frame", "file": "03-operations-frame", "kind": "orbital-frame", "accent": "#FF9F2F", "use": "Overlay de operaciones; centro transparente" },
+    { "id": "human-resources-frame", "file": "04-human-resources-frame", "kind": "orbital-frame", "accent": "#A783E8", "use": "Overlay de RR. HH.; centro transparente" },
+    { "id": "support-frame", "file": "05-support-frame", "kind": "orbital-frame", "accent": "#2ED7C4", "use": "Overlay de soporte; centro transparente" },
+    { "id": "human-observer-frame", "file": "06-human-observer-frame", "kind": "orbital-frame", "accent": "#F5B942", "use": "Overlay del operador humano; centro transparente" },
+    { "id": "task-orb", "file": "07-task-orb", "kind": "message-orb", "accent": "#FF9F2F", "use": "Paquete 3D de tarea/orden" },
+    { "id": "information-orb", "file": "08-information-orb", "kind": "message-orb", "accent": "#378BFF", "use": "Paquete 3D de información" },
+    { "id": "response-orb", "file": "09-response-orb", "kind": "message-orb", "accent": "#7664E8", "use": "Paquete 3D de respuesta" },
+    { "id": "system-orb", "file": "10-system-orb", "kind": "message-orb", "accent": "#77808A", "use": "Paquete 3D de sistema" },
+    { "id": "heartbeat-orb", "file": "11-heartbeat-orb", "kind": "message-orb", "accent": "#2ED7C4", "use": "Paquete 3D de heartbeat" },
+    { "id": "leader-crown", "file": "12-leader-crown", "kind": "badge", "accent": "#F5B942", "use": "Insignia reutilizable de líder" }
+  ]
+}

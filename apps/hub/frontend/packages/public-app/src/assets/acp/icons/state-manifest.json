@@ -1,0 +1,21 @@
+{
+  "format": "SVG", "viewBox": "0 0 64 64", "source": "Estados y eventos visibles en los dashboards ACP de referencia",
+  "groups": {
+    "presence": ["presence-online", "presence-silent", "presence-thinking", "presence-disconnected"],
+    "operation": ["operation-working", "operation-processing", "operation-idle", "operation-waiting", "operation-queue-high", "operation-incident"],
+    "message": ["message-task", "message-information", "message-response", "message-system", "message-heartbeat", "message-broadcast", "message-error"],
+    "result": ["result-delivered", "result-read", "result-completed", "result-pending", "result-rejected"],
+    "link": ["link-current", "link-recent", "link-old", "link-expired"],
+    "heartbeat": ["heartbeat-strong", "heartbeat-normal", "heartbeat-weak", "heartbeat-none"],
+    "recovery": ["recovery-reconnecting"]
+  },
+  "files": {
+    "presence-online": "icons/presence-online.svg", "presence-silent": "icons/presence-silent.svg", "presence-thinking": "icons/presence-thinking.svg", "presence-disconnected": "icons/presence-disconnected.svg",
+    "operation-working": "icons/operation-working.svg", "operation-processing": "icons/operation-processing.svg", "operation-idle": "icons/operation-idle.svg", "operation-waiting": "icons/operation-waiting.svg", "operation-queue-high": "icons/operation-queue-high.svg", "operation-incident": "icons/operation-incident.svg",
+    "message-task": "icons/message-task.svg", "message-information": "icons/message-information.svg", "message-response": "icons/message-response.svg", "message-system": "icons/message-system.svg", "message-heartbeat": "icons/message-heartbeat.svg", "message-broadcast": "icons/message-broadcast.svg", "message-error": "icons/message-error.svg",
+    "result-delivered": "icons/result-delivered.svg", "result-read": "icons/result-read.svg", "result-completed": "icons/result-completed.svg", "result-pending": "icons/result-pending.svg", "result-rejected": "icons/result-rejected.svg",
+    "link-current": "icons/link-current.svg", "link-recent": "icons/link-recent.svg", "link-old": "icons/link-old.svg", "link-expired": "icons/link-expired.svg",
+    "heartbeat-strong": "icons/heartbeat-strong.svg", "heartbeat-normal": "icons/heartbeat-normal.svg", "heartbeat-weak": "icons/heartbeat-weak.svg", "heartbeat-none": "icons/heartbeat-none.svg",
+    "recovery-reconnecting": "icons/recovery-reconnecting.svg"
+  }
+}

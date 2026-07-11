@@ -50,6 +50,14 @@
           <g v-for="edge in graph.edges" :key="edge.id" class="relation" :class="[edge.heat, { held: edge.held }]">
             <title>{{ edge.title }}</title>
             <path :d="edge.path" />
+            <text
+              v-if="edge.showLabel"
+              class="relation-label"
+              :class="edge.freshness"
+              :x="edge.labelX"
+              :y="edge.labelY"
+              text-anchor="middle"
+            >{{ edge.label }}</text>
           </g>
 
           <circle
@@ -77,38 +85,50 @@
               <title>{{ node.title }}</title>
               <circle class="node-aura" :r="node.auraR" />
               <circle class="node-shell" :r="node.shellR" />
-              <circle class="node-core" :r="node.coreR" :fill="node.accent" :style="{ '--core-accent': node.accent }" />
-              <circle
-                class="node-status"
-                :class="{ stale: node.isGhost }"
-                :cx="node.shellR - 8"
-                :cy="-node.shellR + 8"
-                r="5.5"
-                :fill="node.isGhost ? 'none' : node.statusColor"
+              <!-- Portrait clipped to the core; the warm accent stays on the ring. -->
+              <image
+                class="node-avatar"
+                :class="{ ghost: node.isGhost }"
+                :href="node.avatarUrl"
+                :x="-node.coreR"
+                :y="-node.coreR"
+                :width="node.coreR * 2"
+                :height="node.coreR * 2"
+                :style="{ clipPath: `circle(${node.coreR}px at center)` }"
+                preserveAspectRatio="xMidYMid slice"
               />
+              <circle class="node-core-ring" :r="node.coreR" :style="{ stroke: node.accent }" />
               <circle
                 v-if="node.showHalo"
                 class="node-live-halo"
-                :cx="node.shellR - 8"
-                :cy="-node.shellR + 8"
-                r="5.5"
+                :cx="node.shellR - 9"
+                :cy="-node.shellR + 9"
+                r="7"
                 :style="{ stroke: node.statusColor }"
+              />
+              <!-- Presence badge (top-right) + operational badge (bottom-right) -->
+              <image
+                class="node-badge"
+                :href="node.presenceUrl"
+                :x="node.shellR - 18"
+                :y="-node.shellR"
+                width="18"
+                height="18"
+              />
+              <image
+                v-if="!node.isOperator"
+                class="node-badge"
+                :href="node.operationUrl"
+                :x="node.shellR - 18"
+                :y="node.shellR - 18"
+                width="18"
+                height="18"
               />
               <g v-if="node.pending" class="node-pending" :transform="`translate(${-node.shellR + 4}, ${-node.shellR + 6})`">
                 <circle r="9.5" />
                 <text y="3.5" text-anchor="middle">{{ node.pendingLabel }}</text>
               </g>
               <path v-if="node.isChief" class="node-crown" :transform="`translate(0, ${-node.shellR - 10})`" d="M-9 4 L-6 -4 L-3 0 L0 -6 L3 0 L6 -4 L9 4 Z" />
-              <g v-if="node.busy" class="node-workbars" :transform="`translate(${node.shellR - 7}, ${node.shellR - 5})`">
-                <rect x="-6" y="-5" width="2.4" height="5" rx="1.2" />
-                <rect x="-2.2" y="-9" width="2.4" height="9" rx="1.2" />
-                <rect x="1.6" y="-7" width="2.4" height="7" rx="1.2" />
-              </g>
-              <g v-if="node.isOperator" class="node-person">
-                <circle cy="-4.5" r="3.4" />
-                <path d="M-6.5 8c0-4.2 2.9-6.6 6.5-6.6s6.5 2.4 6.5 6.6" />
-              </g>
-              <text v-else class="node-glyph" y="4" text-anchor="middle">{{ node.initials }}</text>
               <text class="node-label" :x="node.label.nameX" :y="node.label.nameY" :text-anchor="node.label.anchor">{{ node.labelName }}</text>
               <text class="node-subtext" :x="node.label.subX" :y="node.label.subY" :text-anchor="node.label.anchor">{{ node.labelSub }}</text>
             </g>
@@ -190,7 +210,10 @@ import {
   messageActionType, actionChipClass, deliveryMode, deliveryClass, actionTone, floatTagLabel,
   recentMemberActivity, memberActivity, mapRoutePath, sortedMembers,
   eventClass, type TrafficLevel,
+  avatarForMember, presenceIconName, operationIconName, memberOperationalState, memberIssues,
+  linkFreshness, type LinkFreshness,
 } from '../../composables/sessionHelpers'
+import { avatarUrl, stateIconUrl } from '../../assets/acp/acpAssets'
 import { translateStatus } from '../../composables/dashboardTranslations'
 import type { SessionMember, SessionDetailPayload } from '../../api/sessions'
 
@@ -359,7 +382,9 @@ interface MapNode {
   showHalo: boolean
   pending: number
   pendingLabel: string
-  initials: string
+  avatarUrl: string
+  presenceUrl: string
+  operationUrl: string
   coreR: number
   shellR: number
   auraR: number
@@ -378,6 +403,11 @@ interface MapEdge {
   heat: 'fresh' | 'warm' | 'cold'
   held: boolean
   title: string
+  freshness: LinkFreshness
+  showLabel: boolean
+  label: string
+  labelX: number
+  labelY: number
 }
 
 interface MapFlight {
@@ -506,9 +536,14 @@ const graph = computed(() => {
     if (held && heat === 'cold') heat = 'warm'
 
     const involvesChief = pair.a === chiefMember.agent_name || pair.b === chiefMember.agent_name
+    const freshness = linkFreshness(Math.round(age / 1000))
     let path: string
+    let labelX: number
+    let labelY: number
     if (involvesChief) {
       path = `M ${na.x.toFixed(1)} ${na.y.toFixed(1)} L ${nb.x.toFixed(1)} ${nb.y.toFixed(1)}`
+      labelX = (na.x + nb.x) / 2
+      labelY = (na.y + nb.y) / 2
     } else {
       const midX = (na.x + nb.x) / 2
       const midY = (na.y + nb.y) / 2
@@ -533,8 +568,19 @@ const graph = computed(() => {
       const ctrlX = midX + (px / plen) * bulge
       const ctrlY = midY + (py / plen) * bulge
       path = `M ${na.x.toFixed(1)} ${na.y.toFixed(1)} Q ${ctrlX.toFixed(1)} ${ctrlY.toFixed(1)} ${nb.x.toFixed(1)} ${nb.y.toFixed(1)}`
+      // Quadratic bezier midpoint (t=0.5): 0.25·A + 0.5·ctrl + 0.25·B.
+      labelX = 0.25 * na.x + 0.5 * ctrlX + 0.25 * nb.x
+      labelY = 0.25 * na.y + 0.5 * ctrlY + 0.25 * nb.y
     }
-    edges.push({ id: key, path, heat, held, title: `${pair.a} ⇄ ${pair.b} · ${pair.count}` })
+    // Only the chief's spokes carry a freshness label — mirrors the reference
+    // and keeps member-member arcs uncluttered (their heat colour already reads).
+    edges.push({
+      id: key, path, heat, held, freshness,
+      showLabel: involvesChief,
+      label: t('sd_link_' + freshness),
+      labelX, labelY,
+      title: `${pair.a} ⇄ ${pair.b} · ${pair.count}`,
+    })
   })
 
   // Pending messages queue up as amber dots on the freshest INBOUND edge of
@@ -617,6 +663,7 @@ const graph = computed(() => {
     const accent = isOperator ? '#a1aab5' : palette.accent
     const isGhost = heartbeatState(m, cs) === 'stale'
     const activity = memberActivity(m, activityMap)
+    const opState = memberOperationalState(m, activity, memberIssues(m, cs))
     // Motion budget: only nodes that are part of something drift.
     const drifts = !isGhost && (pos.tier <= 1 || activity.isBusy)
     const coreR = isChief ? 27 : 22
@@ -649,7 +696,9 @@ const graph = computed(() => {
       showHalo: isConnected && !isGhost,
       pending,
       pendingLabel: pending > 9 ? '9+' : String(pending),
-      initials: nameInitials(m.agent_name),
+      avatarUrl: avatarUrl(avatarForMember(m), 256),
+      presenceUrl: stateIconUrl(presenceIconName(m, cs)),
+      operationUrl: stateIconUrl(operationIconName(opState, pending)),
       coreR,
       shellR,
       auraR: isChief ? 47 : 41,
@@ -756,18 +805,18 @@ const graph = computed(() => {
 .node-ring.online { filter:drop-shadow(0 0 8px rgba(133,183,235,0.2)); }
 .node-ring.offline { opacity:0.55; }
 .node-ring.offline .node-shell { stroke-dasharray:4 5; }
-/* Ghost: presence reads from the FILL — a stale member is hollow and still. */
-.node-ring.ghost { opacity:0.45; }
-.node-ring.ghost .node-core { fill:transparent !important; stroke:var(--core-accent, var(--muted)); stroke-width:2; stroke-dasharray:3 4; }
-.node-ring.ghost .node-glyph { fill:var(--muted); }
-.node-ring.ghost .node-person { stroke:var(--muted); }
-.node-ring.ghost .node-person circle { fill:var(--muted); }
+/* Portrait fills the core; a thin accent ring keeps the role colour reading. */
+.node-avatar { transition:filter 0.3s ease; }
+.node-core-ring { fill:none; stroke-width:2.5; opacity:0.9; }
+.node-badge { filter:drop-shadow(0 1px 2px rgba(0,0,0,0.4)); }
+/* Ghost: a stale member desaturates and dims — the life drains out. */
+.node-ring.ghost { opacity:0.5; }
+.node-avatar.ghost { filter:grayscale(1) brightness(0.7); }
+.node-ring.ghost .node-core-ring { stroke-dasharray:3 4; opacity:0.5; }
 .node-aura { fill:none; stroke:var(--member-accent, var(--accent)); stroke-width:2; opacity:0.16; transform-origin:center; transform-box:fill-box; }
 .node-ring.busy .node-aura { animation:node-aura-pulse 1.8s ease-in-out infinite; }
 .node-ring.message-send .node-aura { animation:node-aura-ripple 1.2s ease-out infinite; }
 .node-ring.message-receive .node-aura { animation:node-aura-ripple 1.35s ease-out infinite reverse; }
-.node-status { stroke:var(--node-core); stroke-width:2; }
-.node-status.stale { fill:none; stroke:var(--muted); stroke-width:2; }
 .node-live-halo {
   fill:none;
   stroke-width:1.6;
@@ -778,17 +827,16 @@ const graph = computed(() => {
 .node-pending circle { fill:#EF9F27; stroke:var(--node-core); stroke-width:2; }
 .node-pending text { fill:#231a02; font-size:10px; font-weight:800; }
 .node-crown { fill:#EF9F27; stroke:var(--node-core); stroke-width:1; }
-.node-person { fill:none; stroke:var(--glyph-ink); stroke-width:1.8; stroke-linecap:round; }
-.node-person circle { fill:var(--glyph-ink); stroke:none; }
-.node-ring.operator .node-shell { stroke-dasharray:3 4; }
-.node-glyph { font-size:12.5px; font-weight:800; fill:var(--glyph-ink); letter-spacing:0.06em; }
-.node-workbars rect {
-  fill:#5DCAA5;
-  transform-box:fill-box; transform-origin:bottom;
-  animation:map-work-bars 1s steps(3, end) infinite;
+
+/* Freshness label on the chief's spokes */
+.relation-label {
+  font-size:10px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase;
+  paint-order:stroke; stroke:var(--canvas-bottom, #0c1414); stroke-width:3px; stroke-linejoin:round;
 }
-.node-workbars rect:nth-child(2) { animation-delay:0.16s; }
-.node-workbars rect:nth-child(3) { animation-delay:0.32s; }
+.relation-label.current { fill:#5DCAA5; }
+.relation-label.recent { fill:#EF9F27; }
+.relation-label.old { fill:var(--muted); }
+.relation-label.expired { fill:#F0997B; }
 
 /* Relationship edges: heat = recency. Fresh conversations glow, cooling ones
    fade to a thin dashed whisper, held ones stay warm while work is unread.
@@ -832,7 +880,6 @@ const graph = computed(() => {
 @keyframes node-live-halo { 0% { transform:scale(0.7); opacity:0.75; } 100% { transform:scale(2.1); opacity:0; } }
 @keyframes node-drift { 0%, 100% { transform:translate(0, 0); } 50% { transform:translate(var(--dx, 0px), var(--dy, -2.4px)); } }
 @keyframes queue-dot { 0%, 100% { transform:scale(0.85); opacity:0.55; } 50% { transform:scale(1.1); opacity:1; } }
-@keyframes map-work-bars { 0%, 100% { transform:scaleY(0.7); opacity:0.55; } 45% { transform:scaleY(1.05); opacity:1; } }
 @keyframes node-aura-pulse { 0% { transform:scale(0.92); opacity:0.14; } 55% { transform:scale(1.12); opacity:0.34; } 100% { transform:scale(1.22); opacity:0; } }
 @keyframes node-aura-ripple { 0% { transform:scale(0.88); opacity:0.2; } 50% { transform:scale(1.08); opacity:0.3; } 100% { transform:scale(1.26); opacity:0; } }
 
@@ -840,8 +887,7 @@ html[data-motion="reduced"] .flight-route,
 html[data-motion="reduced"] .flight-impact,
 html[data-motion="reduced"] .node-aura,
 html[data-motion="reduced"] .node-live-halo,
-html[data-motion="reduced"] .queue-dot,
-html[data-motion="reduced"] .node-workbars rect {
+html[data-motion="reduced"] .queue-dot {
   animation-duration: 1.8s !important;
 }
 html[data-motion="reduced"] .node-ring,
@@ -865,7 +911,6 @@ html[data-motion="off"] .flight-tag,
 html[data-motion="off"] .node-aura,
 html[data-motion="off"] .node-live-halo,
 html[data-motion="off"] .queue-dot,
-html[data-motion="off"] .node-workbars rect,
 html[data-motion="off"] .node-ring {
   animation: none !important;
 }

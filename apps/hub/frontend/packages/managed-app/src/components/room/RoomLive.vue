@@ -117,18 +117,15 @@
     <template v-if="session.payload.value">
       <!-- Signal legend (toggled from the bar) -->
       <div v-if="legendOpen" class="signal-legend">
-        <span class="legend-chip"><span class="legend-line" style="background:#EF9F27"></span>{{ st('sd_legend_task') }}</span>
-        <span class="legend-chip"><span class="legend-line" style="background:#85B7EB"></span>{{ st('sd_legend_info') }}</span>
-        <span class="legend-chip"><span class="legend-line" style="background:#AFA9EC"></span>{{ st('sd_legend_reply') }}</span>
-        <span class="legend-chip">
-          <span class="legend-work" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
-          {{ st('sd_legend_working') }}
-        </span>
-        <span class="legend-chip" :title="st('sd_legend_edge_fresh_help')"><span class="legend-line" style="background:rgba(93, 202, 165, 0.85); height:2.5px"></span>{{ st('sd_legend_edge_fresh') }}</span>
-        <span class="legend-chip" :title="st('sd_legend_edge_cooling_help')"><span class="legend-line legend-line-dashed"></span>{{ st('sd_legend_edge_cooling') }}</span>
-        <span class="legend-chip" :title="st('sd_legend_queued_help')"><span class="legend-dot" style="background:#EF9F27"></span>{{ st('sd_legend_queued') }}</span>
-        <span class="legend-chip" :title="st('sd_legend_connected_help')"><span class="legend-halo"></span>{{ st('sd_legend_connected') }}</span>
-        <span class="legend-chip" :title="st('sd_legend_stale_help')"><span class="legend-stale"></span>{{ st('sd_legend_stale') }}</span>
+        <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('presence-online')" alt="" aria-hidden="true" />{{ st('sd_legend_connected') }}</span>
+        <span class="legend-chip" :title="st('sd_legend_stale_help')"><img class="legend-icon" :src="stateIconUrl('presence-disconnected')" alt="" aria-hidden="true" />{{ st('sd_legend_stale') }}</span>
+        <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('operation-working')" alt="" aria-hidden="true" />{{ st('sd_legend_working') }}</span>
+        <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('message-task')" alt="" aria-hidden="true" />{{ st('sd_legend_task') }}</span>
+        <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('message-information')" alt="" aria-hidden="true" />{{ st('sd_legend_info') }}</span>
+        <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('message-response')" alt="" aria-hidden="true" />{{ st('sd_legend_reply') }}</span>
+        <span class="legend-chip" :title="st('sd_legend_edge_fresh_help')"><img class="legend-icon" :src="stateIconUrl('link-current')" alt="" aria-hidden="true" />{{ st('sd_legend_edge_fresh') }}</span>
+        <span class="legend-chip" :title="st('sd_legend_edge_cooling_help')"><img class="legend-icon" :src="stateIconUrl('link-old')" alt="" aria-hidden="true" />{{ st('sd_legend_edge_cooling') }}</span>
+        <span class="legend-chip" :title="st('sd_legend_queued_help')"><img class="legend-icon" :src="stateIconUrl('result-pending')" alt="" aria-hidden="true" />{{ st('sd_legend_queued') }}</span>
       </div>
 
       <!-- Pulse strip: what is happening right now -->
@@ -262,6 +259,7 @@ import {
   memberActivity,
 } from '@acp/public-app/composables/sessionHelpers'
 import { translateDelivery } from '@acp/public-app/composables/dashboardTranslations'
+import { stateIconUrl } from '@acp/public-app/assets/acp/acpAssets'
 import type { RoomWallPost, WorkspaceSession } from '../../api/managed'
 import { useManagedI18n } from '../../i18n'
 import { useToast } from '../../composables/useToast'
@@ -678,18 +676,7 @@ watchEffect(() => {
 /* Signal legend */
 .signal-legend { display: flex; flex-wrap: wrap; gap: 10px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--card-bg-soft); }
 .legend-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700; color: var(--muted); letter-spacing: 0.05em; }
-.legend-line { width: 18px; height: 3px; border-radius: 2px; }
-.legend-dot { width: 8px; height: 8px; border-radius: 50%; }
-.legend-line-dashed { background: repeating-linear-gradient(90deg, var(--muted) 0 4px, transparent 4px 8px); opacity: 0.6; }
-.legend-halo { width: 8px; height: 8px; border-radius: 50%; background: #5DCAA5; box-shadow: 0 0 0 3px rgba(93, 202, 165, 0.25); }
-.legend-stale { width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--muted); background: transparent; }
-.legend-work { display: inline-flex; align-items: flex-end; gap: 3px; height: 14px; }
-.legend-work span { display: inline-block; width: 4px; border-radius: 999px; background: #5DCAA5; animation: work-bars 1s steps(3, end) infinite; transform-origin: bottom; }
-.legend-work span:nth-child(1) { height: 5px; animation-delay: 0s; }
-.legend-work span:nth-child(2) { height: 11px; animation-delay: 0.16s; }
-.legend-work span:nth-child(3) { height: 7px; animation-delay: 0.32s; }
-.legend-work span:nth-child(4) { height: 12px; animation-delay: 0.48s; }
-@keyframes work-bars { 0%, 100% { transform: scaleY(0.72); opacity: 0.52; } 45% { transform: scaleY(1.08); opacity: 1; } }
+.legend-icon { width: 16px; height: 16px; display: block; flex-shrink: 0; }
 
 /* Pinned wall banner */
 .pinned-banner {
@@ -778,10 +765,8 @@ watchEffect(() => {
 .dock-panel-inner.bare :deep(.panel) { border: none; background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
 
 /* Motion accessibility */
-html[data-motion="off"] .health-dot.polling,
-html[data-motion="off"] .legend-work span { animation: none !important; }
-html[data-motion="reduced"] .health-dot.polling,
-html[data-motion="reduced"] .legend-work span { animation-duration: 2.4s !important; }
+html[data-motion="off"] .health-dot.polling { animation: none !important; }
+html[data-motion="reduced"] .health-dot.polling { animation-duration: 2.4s !important; }
 
 /* Responsive */
 @media (max-width: 1200px) { .cockpit-grid { grid-template-columns: 1fr; } }
