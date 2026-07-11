@@ -2823,3 +2823,92 @@ def test_reconnect_backoff_escalates_when_hello_keeps_failing(tmp_path: Path, mo
     # immediately fails HELLO never escalates -> [0.5, 0.5, 0.5] (hub spam on bad token).
     # Correct: backoff escalates while HELLO keeps failing.
     assert sleeps == [0.5, 1.0, 2.0]
+
+
+def test_room_collaboration_parsers_expose_wall_and_file_operations() -> None:
+    wall = acp_cli.build_parser().parse_args(
+        ["room-wall", "post", "--session-id", "session-1", "--body", "Decision"]
+    )
+    files = acp_cli.build_parser().parse_args(
+        ["room-files", "upload", "--session-id", "session-1", "--path", "handoff.md", "--purpose", "instruction"]
+    )
+
+    assert wall.command == "room-wall"
+    assert wall.action == "post"
+    assert files.command == "room-files"
+    assert files.action == "upload"
+    assert files.purpose == "instruction"
+
+
+def test_room_wall_post_uses_managed_agent_identity(monkeypatch: Any) -> None:
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(
+        acp_cli,
+        "_managed_room_command_context",
+        lambda args, command_name: ("https://hub.example", "team-one", "agent-secret", {"agent_name": "worker-1"}),
+    )
+
+    def _request_json(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"status": "created", "post": {"post_id": "post-1"}}
+
+    monkeypatch.setattr(acp_cli, "request_json", _request_json)
+    result = acp_cli.room_wall_from_args(
+        argparse.Namespace(action="post", session_id="session-1", body="Decision", agent=None)
+    )
+
+    assert captured["url"] == "https://hub.example/managed/agent/workspaces/team-one/sessions/session-1/wall"
+    assert captured["payload"] == {"agent_name": "worker-1", "body": "Decision"}
+    assert result["managed_command"] == "room-wall post"
+
+
+def test_room_files_upload_and_download_use_safe_local_paths(monkeypatch: Any, tmp_path: Path) -> None:
+    source = tmp_path / "handoff.md"
+    source.write_text("# Handoff", encoding="utf-8")
+    destination = tmp_path / "downloads" / "handoff.md"
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(
+        acp_cli,
+        "_managed_room_command_context",
+        lambda args, command_name: ("https://hub.example", None, "agent-secret", {"agent_name": "worker-1"}),
+    )
+
+    def _upload(**kwargs: Any) -> dict[str, Any]:
+        captured["upload"] = kwargs
+        return {"status": "created", "file": {"file_id": "file-1"}}
+
+    monkeypatch.setattr(acp_cli, "request_multipart_json", _upload)
+    uploaded = acp_cli.room_files_from_args(
+        argparse.Namespace(
+            action="upload",
+            session_id="session-1",
+            path=str(source),
+            purpose="instruction",
+            agent=None,
+            file_id=None,
+            output=None,
+        )
+    )
+    assert captured["upload"]["fields"] == {"agent_name": "worker-1", "purpose": "instruction"}
+    assert captured["upload"]["file_path"] == source.resolve()
+    assert uploaded["managed_command"] == "room-files upload"
+
+    monkeypatch.setattr(
+        acp_cli,
+        "request_binary",
+        lambda **kwargs: (b"# Handoff", {"content-type": "text/markdown"}),
+    )
+    downloaded = acp_cli.room_files_from_args(
+        argparse.Namespace(
+            action="download",
+            session_id="session-1",
+            path=None,
+            purpose="artifact",
+            agent=None,
+            file_id="file-1",
+            output=str(destination),
+        )
+    )
+    assert destination.read_bytes() == b"# Handoff"
+    assert downloaded["status"] == "downloaded"
+    assert downloaded["output_path"] == str(destination.resolve())

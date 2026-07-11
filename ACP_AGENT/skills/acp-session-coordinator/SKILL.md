@@ -123,7 +123,25 @@ python ACP_AGENT/acp.py onboard-help --project <PROJECT_ID> --agent <agent>
 
 Use the bundled `ACP_AGENT/acp.py` and bundled skill as the source of truth.
 
-## 9. Feedback self-fix
+## 9. Durable room context
+
+Use the room wall for durable decisions/instructions and room files for shared
+artifacts. These commands use the managed agent token and never expose owner
+credentials:
+
+```powershell
+python ACP_AGENT/acp.py room-wall list --config ACP_AGENT/agents/<agent>.json --session-id <ID>
+python ACP_AGENT/acp.py room-wall post --config ACP_AGENT/agents/<agent>.json --session-id <ID> --body "Decision"
+python ACP_AGENT/acp.py room-files list --config ACP_AGENT/agents/<agent>.json --session-id <ID>
+python ACP_AGENT/acp.py room-files upload --config ACP_AGENT/agents/<agent>.json --session-id <ID> --path handoff.md --purpose instruction
+python ACP_AGENT/acp.py room-files download --config ACP_AGENT/agents/<agent>.json --session-id <ID> --file-id <FILE_ID> --output handoff.md
+```
+
+Agents publish unpinned wall posts and can list/upload/download files. Owner-only
+pin/delete controls remain separate. File quotas are 256 KiB each, 20 files,
+and 1 MiB total per room.
+
+## 10. Feedback self-fix
 
 Feedback received over ACP is actionable work even when it arrives as `INFO` or
 `REPLY`: acknowledge it, apply the correction inside your assigned boundary,

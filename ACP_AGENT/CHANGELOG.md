@@ -1,5 +1,12 @@
 # ACP_AGENT Changelog
 
+## 0.3.12 - 2026-07-10
+
+- EN: Added first-class managed room collaboration commands: `room-wall list|post` and `room-files list|upload|download`, with workspace auto-discovery, Bearer agent-token scoping, atomic local downloads, and artifact/instruction upload purpose.
+- ES: Se agregaron comandos first-class de colaboracion de sala managed: `room-wall list|post` y `room-files list|upload|download`, con autodeteccion del workspace, alcance por agent-token Bearer, descargas locales atomicas y proposito artifact/instruction al subir.
+- EN: Managed agents can now upload room artifacts through the public generic API under the same 256 KiB/file, 20-file, and 1 MiB/room quotas already enforced for owners; owner-only pin/delete controls remain unchanged.
+- ES: Los agentes managed ahora pueden subir artefactos de sala mediante la API publica generica con las mismas cuotas de 256 KiB/archivo, 20 archivos y 1 MiB/sala ya aplicadas a owners; fijar/eliminar sigue reservado al owner.
+
 ## 0.3.11 - 2026-07-10
 
 - EN: Session receive commands now request explicit delivery leases, persist each inbound message atomically under `ACP_AGENT/inbox/`, and acknowledge it only after durable local acceptance; acknowledging clears unread delivery without completing an open TASK.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import mimetypes
 import os
 import re
 import signal
@@ -441,6 +442,29 @@ def build_parser() -> argparse.ArgumentParser:
     managed_close_parser.add_argument("--agent-token", default=None, help="Managed workspace agent token. Defaults to managed_agent_token in the selected config.")
     managed_close_parser.add_argument("--session-id", required=True, help="Workspace session id to close")
     managed_close_parser.add_argument("--detail", default=None, help="Optional close reason")
+
+    room_wall_parser = subparsers.add_parser("room-wall", help="List or publish durable managed-room wall posts")
+    room_wall_parser.add_argument("action", choices=("list", "post"))
+    room_wall_parser.add_argument("--config", default=None, help="JSON config path for the local agent")
+    room_wall_parser.add_argument("--agent", "--name", dest="agent", default=None, help="Agent name/config stem")
+    room_wall_parser.add_argument("--hub-http", default=None, help="Override managed Hub HTTP base URL")
+    room_wall_parser.add_argument("--workspace", default=None, help="Optional managed workspace slug")
+    room_wall_parser.add_argument("--agent-token", default=None, help="Managed workspace agent token")
+    room_wall_parser.add_argument("--session-id", required=True, help="Managed room session id")
+    room_wall_parser.add_argument("--body", default=None, help="Post body (required for action=post)")
+
+    room_files_parser = subparsers.add_parser("room-files", help="List, download, or upload managed-room files")
+    room_files_parser.add_argument("action", choices=("list", "download", "upload"))
+    room_files_parser.add_argument("--config", default=None, help="JSON config path for the local agent")
+    room_files_parser.add_argument("--agent", "--name", dest="agent", default=None, help="Agent name/config stem")
+    room_files_parser.add_argument("--hub-http", default=None, help="Override managed Hub HTTP base URL")
+    room_files_parser.add_argument("--workspace", default=None, help="Optional managed workspace slug")
+    room_files_parser.add_argument("--agent-token", default=None, help="Managed workspace agent token")
+    room_files_parser.add_argument("--session-id", required=True, help="Managed room session id")
+    room_files_parser.add_argument("--file-id", default=None, help="Room file id (required for action=download)")
+    room_files_parser.add_argument("--path", default=None, help="Local input path for upload")
+    room_files_parser.add_argument("--output", default=None, help="Local output path for download")
+    room_files_parser.add_argument("--purpose", default="artifact", choices=("artifact", "instruction"))
 
     onboard_parser = subparsers.add_parser(
         "onboard",
@@ -1498,6 +1522,68 @@ def request_json(
     )
 
 
+def request_binary(*, url: str, headers: dict[str, str], timeout_seconds: float = 30.0) -> tuple[bytes, dict[str, str]]:
+    request = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            return response.read(), {str(key).lower(): str(value) for key, value in response.headers.items()}
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise ValueError(f"hub HTTP {exc.code}: {body}") from exc
+
+
+def request_multipart_json(
+    *,
+    url: str,
+    fields: dict[str, str],
+    file_path: Path,
+    headers: dict[str, str],
+    timeout_seconds: float = 30.0,
+) -> dict[str, Any]:
+    if not file_path.is_file():
+        raise ValueError(f"upload path does not exist: {file_path}")
+    content = file_path.read_bytes()
+    if not content:
+        raise ValueError("room file must not be empty.")
+    if len(content) > 256 * 1024:
+        raise ValueError("room file exceeds 256 KiB limit.")
+    boundary = f"----acp-{uuid4().hex}"
+    chunks: list[bytes] = []
+    for name, value in fields.items():
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode(),
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
+                str(value).encode("utf-8"),
+                b"\r\n",
+            ]
+        )
+    safe_filename = file_path.name.replace('"', "_").replace("\r", "_").replace("\n", "_")
+    content_type = mimetypes.guess_type(safe_filename)[0] or "application/octet-stream"
+    chunks.extend(
+        [
+            f"--{boundary}\r\n".encode(),
+            f'Content-Disposition: form-data; name="file"; filename="{safe_filename}"\r\n'.encode("utf-8"),
+            f"Content-Type: {content_type}\r\n\r\n".encode(),
+            content,
+            b"\r\n",
+            f"--{boundary}--\r\n".encode(),
+        ]
+    )
+    request_headers = {key: value for key, value in headers.items() if key.lower() != "content-type"}
+    request_headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
+    request = urllib.request.Request(url, data=b"".join(chunks), headers=request_headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise ValueError(f"hub HTTP {exc.code}: {body}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("managed room upload returned a non-object payload")
+    return payload
+
+
 def managed_agent_token_from_args(args: argparse.Namespace, config: dict[str, Any] | None = None) -> str:
     raw_token = getattr(args, "agent_token", None)
     if not (isinstance(raw_token, str) and raw_token.strip()) and isinstance(config, dict):
@@ -2266,6 +2352,108 @@ def managed_sessions_from_args(args: argparse.Namespace) -> dict[str, Any]:
         response["managed_workspace_slug"] = response["workspace"].get("slug") if isinstance(response["workspace"], dict) else None
     response["managed_command"] = "managed-sessions"
     return response
+
+
+def _managed_room_command_context(args: argparse.Namespace, *, command_name: str) -> tuple[str, str | None, str, dict[str, Any]]:
+    hub_http, config = managed_command_hub_http_from_args(args, command_name=command_name)
+    workspace_slug = _managed_workspace_slug_arg(args)
+    agent_token = managed_agent_token_from_args(args, config)
+    return hub_http, workspace_slug, agent_token, config
+
+
+def room_wall_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    hub_http, workspace_slug, agent_token, config = _managed_room_command_context(args, command_name="room-wall")
+    session_id = str(args.session_id or "").strip()
+    if not session_id:
+        raise ValueError("--session-id is required for room-wall.")
+    suffix = f"/sessions/{urllib.parse.quote(session_id, safe='')}/wall"
+    route = _managed_agent_route(workspace_slug=workspace_slug, suffix=suffix)
+    if args.action == "list":
+        response = request_json(
+            method="GET",
+            url=f"{hub_http.rstrip('/')}{route}",
+            payload=None,
+            headers=_managed_agent_headers(agent_token),
+            timeout_seconds=30.0,
+        )
+    else:
+        body = str(getattr(args, "body", None) or "").strip()
+        if not body:
+            raise ValueError("--body is required for room-wall post.")
+        if len(body) > 4_000:
+            raise ValueError("room wall post exceeds 4000 characters.")
+        agent_name = str(getattr(args, "agent", None) or get_config_value(config, "agent_name") or "").strip()
+        if not agent_name:
+            raise ValueError("agent name is required for room-wall post. Pass --agent or select a config.")
+        response = request_json(
+            method="POST",
+            url=f"{hub_http.rstrip('/')}{route}",
+            payload={"agent_name": agent_name, "body": body},
+            headers=_managed_agent_headers(agent_token),
+            timeout_seconds=30.0,
+        )
+    response["managed_command"] = f"room-wall {args.action}"
+    return response
+
+
+def room_files_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    hub_http, workspace_slug, agent_token, config = _managed_room_command_context(args, command_name="room-files")
+    session_id = str(args.session_id or "").strip()
+    if not session_id:
+        raise ValueError("--session-id is required for room-files.")
+    base_suffix = f"/sessions/{urllib.parse.quote(session_id, safe='')}/files"
+    base_url = f"{hub_http.rstrip('/')}{_managed_agent_route(workspace_slug=workspace_slug, suffix=base_suffix)}"
+    headers = _managed_agent_headers(agent_token)
+    if args.action == "list":
+        response = request_json(method="GET", url=base_url, payload=None, headers=headers, timeout_seconds=30.0)
+        response["managed_command"] = "room-files list"
+        return response
+    if args.action == "upload":
+        raw_path = str(getattr(args, "path", None) or "").strip()
+        if not raw_path:
+            raise ValueError("--path is required for room-files upload.")
+        agent_name = str(getattr(args, "agent", None) or get_config_value(config, "agent_name") or "").strip()
+        if not agent_name:
+            raise ValueError("agent name is required for room-files upload. Pass --agent or select a config.")
+        response = request_multipart_json(
+            url=base_url,
+            fields={"agent_name": agent_name, "purpose": str(args.purpose or "artifact")},
+            file_path=Path(raw_path).expanduser().resolve(),
+            headers=headers,
+            timeout_seconds=30.0,
+        )
+        response["managed_command"] = "room-files upload"
+        return response
+
+    file_id = str(getattr(args, "file_id", None) or "").strip()
+    if not file_id:
+        raise ValueError("--file-id is required for room-files download.")
+    content, response_headers = request_binary(
+        url=f"{base_url}/{urllib.parse.quote(file_id, safe='')}",
+        headers=headers,
+        timeout_seconds=30.0,
+    )
+    output_arg = str(getattr(args, "output", None) or "").strip()
+    if output_arg:
+        output_path = Path(output_arg).expanduser().resolve()
+    else:
+        disposition = response_headers.get("content-disposition", "")
+        marker = "filename*=UTF-8''"
+        remote_name = urllib.parse.unquote(disposition.split(marker, 1)[1].split(";", 1)[0]) if marker in disposition else file_id
+        output_path = (Path.cwd() / Path(remote_name).name).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("wb", delete=False, dir=output_path.parent, suffix=".tmp") as handle:
+        handle.write(content)
+        temp_path = Path(handle.name)
+    temp_path.replace(output_path)
+    return {
+        "status": "downloaded",
+        "managed_command": "room-files download",
+        "file_id": file_id,
+        "output_path": str(output_path),
+        "size_bytes": len(content),
+        "content_type": response_headers.get("content-type", "application/octet-stream").split(";", 1)[0],
+    }
 
 
 def onboard_from_args(args: argparse.Namespace) -> dict[str, Any]:
@@ -5552,7 +5740,7 @@ def main(argv: list[str] | None = None) -> int:
             pass
         elif args.command == "onboard-help":
             pass
-        elif args.command in {"managed-sessions", "managed-close"}:
+        elif args.command in {"managed-sessions", "managed-close", "room-wall", "room-files"}:
             managed_command_hub_http_from_args(args, command_name=args.command)
         elif args.command in {"update-check", "self-update"}:
             _resolve_hub_http_simple(args)
@@ -5620,6 +5808,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "managed-close":
             print(json.dumps(managed_close_from_args(args), ensure_ascii=True))
+            return 0
+        if args.command == "room-wall":
+            print(json.dumps(room_wall_from_args(args), ensure_ascii=True))
+            return 0
+        if args.command == "room-files":
+            print(json.dumps(room_files_from_args(args), ensure_ascii=True))
             return 0
         if args.command == "onboard":
             print(json.dumps(onboard_from_args(args), ensure_ascii=True))

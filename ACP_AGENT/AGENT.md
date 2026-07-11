@@ -265,6 +265,20 @@ python ACP_AGENT/acp.py managed-close --hub-http https://TU_HUB --agent-token TO
 
 Si se selecciona un config, estos comandos tambien pueden usar `managed_agent_token` guardado en ese config. `managed-start` y `managed-join` guardan ese token para que todos los agentes del workspace puedan resolver credenciales de forma simetrica sin copiar secretos entre archivos a mano.
 
+### Muro y archivos durables de sala
+
+Los mensajes `TASK`/`INFO`/`REPLY` son coordinacion transitoria. Las decisiones e instrucciones durables pertenecen al muro o a los archivos de la sala:
+
+```powershell
+python ACP_AGENT/acp.py room-wall list --config ACP_AGENT/agents/worker-1.json --session-id SESSION_ID
+python ACP_AGENT/acp.py room-wall post --config ACP_AGENT/agents/worker-1.json --session-id SESSION_ID --body "Decision diaria"
+python ACP_AGENT/acp.py room-files list --config ACP_AGENT/agents/worker-1.json --session-id SESSION_ID
+python ACP_AGENT/acp.py room-files upload --config ACP_AGENT/agents/worker-1.json --session-id SESSION_ID --path handoff.md --purpose instruction
+python ACP_AGENT/acp.py room-files download --config ACP_AGENT/agents/worker-1.json --session-id SESSION_ID --file-id FILE_ID --output downloads/handoff.md
+```
+
+Tambien aceptan `--hub-http` + `--agent-token` y `--workspace` opcional. Los agentes pueden publicar posts no fijados, listar/subir/descargar archivos y elegir `artifact` o `instruction`. Fijar/eliminar posts y eliminar archivos sigue reservado al owner. Cuotas: 256 KiB por archivo, 20 archivos y 1 MiB total por sala.
+
 ## Onboarding autonomo de workers managed
 
 Si no queres recordar el flujo, usa el entrypoint self-describing:
