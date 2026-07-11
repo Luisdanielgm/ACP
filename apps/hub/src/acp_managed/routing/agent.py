@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 import urllib.parse
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 
 from acp.hub.coordination_service import SessionAccessError
@@ -318,6 +318,60 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
             }
         )
 
+    async def _managed_agent_upload_workspace_session_file_response(
+        *,
+        request: Request,
+        session_id: str,
+        agent_name: str,
+        purpose: str,
+        file: UploadFile,
+        slug: str | None = None,
+    ) -> JSONResponse:
+        requested_agent_name = agent_name.strip()
+        if not requested_agent_name:
+            raise HTTPException(status_code=422, detail="agent_name is required")
+        token_record, workspace = current_agent_token(
+            request=request,
+            slug=slug,
+            requested_agent_name=requested_agent_name,
+        )
+        record = principal_store.get_workspace_session(session_id=session_id)
+        if record is None or record.workspace_id != workspace.workspace_id:
+            raise HTTPException(status_code=404, detail="managed workspace session does not exist")
+        content = await file.read(_MAX_ROOM_FILE_BYTES + 1)
+        if len(content) > _MAX_ROOM_FILE_BYTES:
+            raise HTTPException(status_code=413, detail="room file exceeds 256 KiB limit")
+        if not content:
+            raise HTTPException(status_code=422, detail="room file must not be empty")
+        normalized_purpose = purpose.strip().lower() if isinstance(purpose, str) else "artifact"
+        if normalized_purpose not in {"artifact", "instruction"}:
+            raise HTTPException(status_code=422, detail="room file purpose must be artifact or instruction")
+        existing_files = principal_store.list_room_files(session_id=record.session_id)
+        total_bytes = sum(item.size_bytes for item in existing_files)
+        if len(existing_files) >= _MAX_ROOM_FILES:
+            raise HTTPException(status_code=409, detail="room file count quota exceeded")
+        if total_bytes + len(content) > _MAX_ROOM_TOTAL_BYTES:
+            raise HTTPException(status_code=413, detail="room file total bytes quota exceeded")
+        created = principal_store.create_room_file(
+            session_id=record.session_id,
+            workspace_id=workspace.workspace_id,
+            filename=file.filename or "room-file",
+            purpose=normalized_purpose,
+            content_type=file.content_type or "application/octet-stream",
+            content=content,
+            uploaded_by_type="agent",
+            uploaded_by_name=requested_agent_name,
+        )
+        return JSONResponse(
+            {
+                "status": "created",
+                "workspace": _sanitize_workspace(workspace),
+                "agent_token": _sanitize_agent_token(token_record),
+                "workspace_session": _sanitize_workspace_session(record),
+                "file": _sanitize_room_file(created),
+            }
+        )
+
     async def _managed_agent_workspace_session_file_download_response(
         *,
         request: Request,
@@ -579,6 +633,40 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
         request: Request,
     ) -> JSONResponse:
         return await _managed_agent_workspace_session_files_response(request=request, session_id=session_id, slug=slug)
+
+    @router.post("/managed/agent/sessions/{session_id}/files")
+    async def managed_agent_upload_workspace_session_file_auto(
+        session_id: str,
+        request: Request,
+        agent_name: str = Form(...),
+        purpose: str = Form(default="artifact"),
+        file: UploadFile = File(...),
+    ) -> JSONResponse:
+        return await _managed_agent_upload_workspace_session_file_response(
+            request=request,
+            session_id=session_id,
+            agent_name=agent_name,
+            purpose=purpose,
+            file=file,
+        )
+
+    @router.post("/managed/agent/workspaces/{slug}/sessions/{session_id}/files")
+    async def managed_agent_upload_workspace_session_file(
+        slug: str,
+        session_id: str,
+        request: Request,
+        agent_name: str = Form(...),
+        purpose: str = Form(default="artifact"),
+        file: UploadFile = File(...),
+    ) -> JSONResponse:
+        return await _managed_agent_upload_workspace_session_file_response(
+            request=request,
+            session_id=session_id,
+            agent_name=agent_name,
+            purpose=purpose,
+            file=file,
+            slug=slug,
+        )
 
     @router.get("/managed/agent/sessions/{session_id}/files/{file_id}")
     async def managed_agent_workspace_session_file_download_auto(

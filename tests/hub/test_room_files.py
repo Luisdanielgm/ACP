@@ -1,8 +1,8 @@
 ﻿"""Managed room files â€” M4 storage slice 1.
 
 Room files are durable per-session storage, separate from wall posts and replay.
-The owner can upload/delete; agents can read/download through their workspace
-agent token without receiving owner credentials.
+Owners can upload/delete; agents can upload/read/download through their
+workspace agent token without receiving owner credentials.
 """
 
 from __future__ import annotations
@@ -142,6 +142,34 @@ def test_room_files_support_instruction_artifacts(monkeypatch, tmp_path) -> None
     )
     assert agent_list.status_code == 200, agent_list.text
     assert agent_list.json()["files"][0]["purpose"] == "instruction"
+
+
+def test_room_files_agents_can_upload_scoped_artifacts_without_owner_credentials(monkeypatch, tmp_path) -> None:
+    app, owner, session_id = _owner_with_session(monkeypatch, tmp_path)
+    token = _workspace_agent_token(owner)
+    agent = TestClient(app)
+
+    uploaded = agent.post(
+        f"/managed/agent/workspaces/team-one/sessions/{session_id}/files",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"agent_name": "worker-1", "purpose": "instruction"},
+        files={"file": ("handoff.md", b"# Handoff\nContinue with tests.\n", "text/markdown")},
+    )
+
+    assert uploaded.status_code == 200, uploaded.text
+    file_item = uploaded.json()["file"]
+    assert file_item["filename"] == "handoff.md"
+    assert file_item["purpose"] == "instruction"
+    assert file_item["uploaded_by_type"] == "agent"
+    assert file_item["uploaded_by_name"] == "worker-1"
+    assert "owner_member_token" not in uploaded.json()["workspace_session"]
+
+    downloaded = agent.get(
+        f"/managed/agent/workspaces/team-one/sessions/{session_id}/files/{file_item['file_id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert downloaded.status_code == 200
+    assert downloaded.content == b"# Handoff\nContinue with tests.\n"
 
 
 def test_room_files_enforce_per_room_count_quota(monkeypatch, tmp_path) -> None:
