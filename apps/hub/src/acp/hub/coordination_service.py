@@ -320,6 +320,58 @@ class SessionCoordinationService:
             )
             return {"status": "closed", "session_id": session_id, "closed_by": actor, "session_closed": True, "removed_members": affected_members}
 
+    async def admin_reset_session_messages(
+        self,
+        *,
+        session_id: str,
+        actor: str = "admin",
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        """Reset room messaging while preserving the durable collaboration room."""
+        async with self._lock:
+            session = self._store.get_session(session_id)
+            if session is None:
+                raise SessionNotFoundError("session does not exist.")
+            cleared = self._store.reset_session_messages(session_id=session_id)
+            for member in session.members.values():
+                member.current_task = None
+                member.status = "waiting"
+                member.status_text = "room messages reset"
+                self._store.update_member(session_id, member)
+                notice = self._system_message(
+                    session_id=session_id,
+                    to=member.agent_name,
+                    payload_text="room messages were reset by workspace administration",
+                    system_event="MESSAGES_RESET",
+                    session_closed=False,
+                    forced=True,
+                    removed_by=actor,
+                )
+                self._store.put_notice(
+                    session_id=session_id,
+                    agent_name=member.agent_name,
+                    member_token=member.member_token,
+                    notice=notice,
+                )
+                waiter = self._waiters.pop((session_id, member.agent_name), None)
+                if waiter is not None and not waiter.future.done():
+                    waiter.future.set_result({"message": dict(notice), "delivery": None})
+            self._record_event(
+                session_id,
+                event="MESSAGES_RESET",
+                actor=actor,
+                detail=reason or "room messages reset by workspace administrator",
+                extra={**cleared, "administrative": True},
+            )
+            return {
+                "status": "messages_reset",
+                "session_id": session_id,
+                "reset_by": actor,
+                "reason": reason,
+                **cleared,
+                "preserved": ["session", "members", "wall", "files", "operator"],
+            }
+
     async def admin_remove_member(self, *, session_id: str, agent_name: str, actor: str = "admin", detail: str | None = None) -> dict[str, Any]:
         async with self._lock:
             session = self._store.get_session(session_id)
@@ -812,6 +864,12 @@ class SessionCoordinationService:
         async with self._lock:
             notice = self._member_notice(session_id=session_id, agent_name=agent_name, member_token=member_token)
             if notice is not None:
+                if notice.get("system_event") == "MESSAGES_RESET":
+                    self._store.clear_notice(
+                        session_id=session_id,
+                        agent_name=agent_name,
+                        member_token=member_token,
+                    )
                 return {"message": dict(notice), "delivery": None}
             _, member = self._authorize(session_id=session_id, agent_name=agent_name, member_token=member_token)
             self._mark_member_waiting_if_available(session_id=session_id, agent_name=agent_name, member=member)

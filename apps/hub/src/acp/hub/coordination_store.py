@@ -146,6 +146,8 @@ class CoordinationStore(Protocol):
 
     def clear_pending(self, *, session_id: str, agent_name: str) -> None: ...
 
+    def reset_session_messages(self, *, session_id: str) -> dict[str, int]: ...
+
     def record_delivery_if_new(
         self,
         *,
@@ -173,6 +175,8 @@ class CoordinationStore(Protocol):
     ) -> None: ...
 
     def get_notice(self, *, session_id: str, agent_name: str, member_token: str) -> dict[str, Any] | None: ...
+
+    def clear_notice(self, *, session_id: str, agent_name: str, member_token: str) -> None: ...
 
     def cleanup_stale_sessions(self, *, stale_after_seconds: int) -> list[str]: ...
 
@@ -360,6 +364,28 @@ class InMemoryCoordinationStore:
     def clear_pending(self, *, session_id: str, agent_name: str) -> None:
         self._pending_messages.pop((session_id, agent_name), None)
 
+    def reset_session_messages(self, *, session_id: str) -> dict[str, int]:
+        queue_keys = [key for key in self._pending_messages if key[0] == session_id]
+        pending_count = sum(len(self._pending_messages[key]) for key in queue_keys)
+        for key in queue_keys:
+            self._pending_messages.pop(key, None)
+        before_events = list(self._session_events.get(session_id, ()))
+        kept_events = [
+            event
+            for event in before_events
+            if str(event.get("event") or "")
+            not in {"MESSAGE_SENT", "MESSAGE_DELIVERED", "MESSAGE_ACKNOWLEDGED"}
+        ]
+        removed_events = len(before_events) - len(kept_events)
+        self._session_events[session_id] = deque(kept_events)
+        delivered_count = sum(1 for key in self._delivered if key[0] == session_id)
+        self._delivered = {key for key in self._delivered if key[0] != session_id}
+        return {
+            "cleared_pending_messages": pending_count,
+            "cleared_message_events": removed_events,
+            "cleared_delivery_ids": delivered_count,
+        }
+
     def record_delivery_if_new(
         self,
         *,
@@ -405,6 +431,9 @@ class InMemoryCoordinationStore:
     def get_notice(self, *, session_id: str, agent_name: str, member_token: str) -> dict[str, Any] | None:
         notice = self._member_notices.get((session_id, agent_name, member_token))
         return dict(notice) if notice is not None else None
+
+    def clear_notice(self, *, session_id: str, agent_name: str, member_token: str) -> None:
+        self._member_notices.pop((session_id, agent_name, member_token), None)
 
     def cleanup_stale_sessions(self, *, stale_after_seconds: int) -> list[str]:
         from datetime import datetime, timezone
@@ -821,6 +850,41 @@ class SqliteCoordinationStore:
             )
             conn.commit()
 
+    def reset_session_messages(self, *, session_id: str) -> dict[str, int]:
+        with self._connection() as conn:
+            pending = conn.execute(
+                "SELECT COUNT(*) FROM coordination_pending_messages WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            events = conn.execute(
+                """
+                SELECT COUNT(*) FROM coordination_events
+                WHERE session_id = ?
+                  AND event_type IN ('MESSAGE_SENT', 'MESSAGE_DELIVERED', 'MESSAGE_ACKNOWLEDGED')
+                """,
+                (session_id,),
+            ).fetchone()
+            deliveries = conn.execute(
+                "SELECT COUNT(*) FROM message_idempotency WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            conn.execute("DELETE FROM coordination_pending_messages WHERE session_id = ?", (session_id,))
+            conn.execute(
+                """
+                DELETE FROM coordination_events
+                WHERE session_id = ?
+                  AND event_type IN ('MESSAGE_SENT', 'MESSAGE_DELIVERED', 'MESSAGE_ACKNOWLEDGED')
+                """,
+                (session_id,),
+            )
+            conn.execute("DELETE FROM message_idempotency WHERE session_id = ?", (session_id,))
+            conn.commit()
+        return {
+            "cleared_pending_messages": int(pending[0]) if pending else 0,
+            "cleared_message_events": int(events[0]) if events else 0,
+            "cleared_delivery_ids": int(deliveries[0]) if deliveries else 0,
+        }
+
     def record_delivery_if_new(
         self,
         *,
@@ -946,6 +1010,17 @@ class SqliteCoordinationStore:
                 return None
             payload = json.loads(str(row["payload_json"]))
             return payload if isinstance(payload, dict) else None
+
+    def clear_notice(self, *, session_id: str, agent_name: str, member_token: str) -> None:
+        with self._connection() as conn:
+            conn.execute(
+                """
+                DELETE FROM coordination_member_notices
+                WHERE session_id = ? AND agent_name = ? AND member_token = ?
+                """,
+                (session_id, agent_name, member_token),
+            )
+            conn.commit()
 
     def cleanup_stale_sessions(self, *, stale_after_seconds: int) -> list[str]:
         from datetime import datetime, timezone

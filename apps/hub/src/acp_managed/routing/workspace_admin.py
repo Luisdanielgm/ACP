@@ -28,6 +28,7 @@ from acp_managed.contracts import (
     CreateRoomWallPostRequest,
     CreateWorkspacePresetRequest,
     ReceiveRoomOperatorMessageRequest,
+    ResetRoomMessagesRequest,
     SendRoomOperatorMessageRequest,
     CreateWorkspaceSessionRequest,
     UpdateRoomWallPostRequest,
@@ -922,6 +923,42 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
                 "send_result": sent,
             }
         )
+
+    @router.post("/managed/workspaces/{slug}/sessions/{session_id}/messages/reset")
+    async def managed_workspace_session_reset_messages(
+        slug: str,
+        session_id: str,
+        payload: ResetRoomMessagesRequest,
+        request: Request,
+        acp_managed_session: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        principal, workspace, record = _require_workspace_session_record(
+            slug=slug,
+            session_id=session_id,
+            acp_managed_session=acp_managed_session,
+        )
+        try:
+            result = await runtime.coordination.admin_reset_session_messages(
+                session_id=record.session_id,
+                actor=principal.email,
+                reason=payload.reason.strip() if payload.reason else None,
+            )
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="managed workspace session is not active") from exc
+        _audit(
+            request,
+            "managed.room_messages_reset",
+            actor_email=principal.email,
+            target_type="workspace_session",
+            target_id=record.session_id,
+            metadata={
+                "workspace_id": workspace.workspace_id,
+                "workspace_slug": workspace.slug,
+                "cleared_pending_messages": result.get("cleared_pending_messages", 0),
+                "cleared_message_events": result.get("cleared_message_events", 0),
+            },
+        )
+        return JSONResponse({"workspace": _sanitize_workspace(workspace), **result})
 
     @router.post("/managed/workspaces/{slug}/sessions/{session_id}/operator/receive")
     async def managed_workspace_session_operator_receive(

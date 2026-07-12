@@ -25,6 +25,7 @@ from acp.hub.coordination_service import SessionAccessError
 from acp_managed.contracts import (
     CreateAgentRoomWallPostRequest,
     CloseWorkspaceSessionRequest,
+    ResetRoomMessagesRequest,
     CreateWorkspaceSessionRequest,
     JoinWorkspaceSessionRequest,
 )
@@ -605,6 +606,51 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
             payload=payload,
         )
 
+    async def _managed_agent_reset_workspace_session_messages_response(
+        *,
+        request: Request,
+        session_id: str,
+        payload: ResetRoomMessagesRequest,
+        slug: str | None = None,
+    ) -> JSONResponse:
+        token_record, workspace = current_agent_token(request=request, slug=slug)
+        if isinstance(token_record.agent_name, str) and token_record.agent_name.strip():
+            raise HTTPException(status_code=403, detail="message reset requires a workspace-scoped integration token")
+        record = principal_store.get_workspace_session(session_id=session_id)
+        if record is None or record.workspace_id != workspace.workspace_id:
+            raise HTTPException(status_code=404, detail="managed workspace session does not exist")
+        try:
+            result = await runtime.coordination.admin_reset_session_messages(
+                session_id=record.session_id,
+                actor="managed-agent:workspace-token",
+                reason=payload.reason.strip() if payload.reason else None,
+            )
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="managed workspace session is not active") from exc
+        _audit(
+            request,
+            "managed.agent_room_messages_reset",
+            actor_email=token_record.created_by_email,
+            target_type="workspace_session",
+            target_id=record.session_id,
+            metadata={
+                "workspace_id": workspace.workspace_id,
+                "workspace_slug": workspace.slug,
+                "token_id": token_record.token_id,
+                "token_scope": "workspace",
+                "cleared_pending_messages": result.get("cleared_pending_messages", 0),
+                "cleared_message_events": result.get("cleared_message_events", 0),
+            },
+        )
+        return JSONResponse(
+            {
+                "workspace": _sanitize_workspace(workspace),
+                "agent_token": _sanitize_agent_token(token_record),
+                "workspace_session": _sanitize_workspace_session(record),
+                **result,
+            }
+        )
+
     @router.post("/managed/agent/workspaces/{slug}/sessions/{session_id}/wall")
     async def managed_agent_create_workspace_session_wall_post(
         slug: str,
@@ -730,6 +776,32 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
             request=request,
             session_id=session_id,
             payload=payload,
+        )
+
+    @router.post("/managed/agent/sessions/{session_id}/messages/reset")
+    async def managed_agent_reset_workspace_session_messages_auto(
+        session_id: str,
+        payload: ResetRoomMessagesRequest,
+        request: Request,
+    ) -> JSONResponse:
+        return await _managed_agent_reset_workspace_session_messages_response(
+            request=request,
+            session_id=session_id,
+            payload=payload,
+        )
+
+    @router.post("/managed/agent/workspaces/{slug}/sessions/{session_id}/messages/reset")
+    async def managed_agent_reset_workspace_session_messages(
+        slug: str,
+        session_id: str,
+        payload: ResetRoomMessagesRequest,
+        request: Request,
+    ) -> JSONResponse:
+        return await _managed_agent_reset_workspace_session_messages_response(
+            request=request,
+            session_id=session_id,
+            payload=payload,
+            slug=slug,
         )
 
     @router.post("/managed/agent/workspaces/{slug}/sessions/{session_id}/close")

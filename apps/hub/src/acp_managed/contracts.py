@@ -79,6 +79,10 @@ class ReceiveRoomOperatorMessageRequest(BaseModel):
     timeout_seconds: float = Field(default=0.2, ge=0, le=20)
 
 
+class ResetRoomMessagesRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=240)
+
+
 class AcceptWorkspaceInvitationRequest(BaseModel):
     password: str | None = Field(default=None, min_length=8, max_length=128)
 
