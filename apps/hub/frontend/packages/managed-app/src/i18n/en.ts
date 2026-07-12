@@ -248,6 +248,11 @@ export const en: Record<string, string> = {
   web_operator_inbox_listen: 'Listen',
   web_operator_inbox_empty: 'No new messages in the inbox.',
   web_operator_inbox_reply: 'Reply',
+  web_operator_reset_title: 'Reset room messages',
+  web_operator_reset_help: 'Clears pending messages and message history. The room, members, wall and files stay intact.',
+  web_operator_reset_action: 'Reset messages',
+  web_operator_reset_confirm: 'Reset messages for this room? Pending deliveries and visible message history will be cleared.',
+  web_operator_reset_success: 'Room messages reset. {count} pending deliveries cleared.',
 
   // ── Admin Workspaces ──
   admin_kicker: 'VPS Admin',

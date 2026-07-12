@@ -359,6 +359,26 @@ export async function receiveSessionOperatorMessage(
   )
 }
 
+export interface ResetSessionMessagesResult {
+  status: 'messages_reset'
+  session_id: string
+  cleared_pending_messages: number
+  cleared_message_events: number
+  cleared_delivery_ids: number
+  preserved: string[]
+}
+
+export async function resetSessionMessages(slug: string, sessionId: string, reason?: string) {
+  return apiFetch<ResetSessionMessagesResult>(
+    `/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/messages/reset`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: reason || null }),
+    },
+  )
+}
+
 // ── Invitations ──
 
 export interface InvitationPreview {

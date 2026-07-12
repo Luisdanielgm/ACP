@@ -248,6 +248,11 @@ export const es: Record<string, string> = {
   web_operator_inbox_listen: 'Escuchar',
   web_operator_inbox_empty: 'Sin mensajes nuevos en la bandeja.',
   web_operator_inbox_reply: 'Responder',
+  web_operator_reset_title: 'Reiniciar mensajes de la sala',
+  web_operator_reset_help: 'Limpia mensajes pendientes y el historial de mensajes. La sala, miembros, muro y archivos se conservan.',
+  web_operator_reset_action: 'Reiniciar mensajes',
+  web_operator_reset_confirm: '¿Reiniciar los mensajes de esta sala? Se limpiarán las entregas pendientes y el historial visible.',
+  web_operator_reset_success: 'Mensajes reiniciados. Se limpiaron {count} entregas pendientes.',
 
   // ── Admin Workspaces ──
   admin_kicker: 'VPS Admin',

@@ -1,5 +1,5 @@
 {
-  "route_count": 106,
+  "route_count": 109,
   "routes": [
     {
       "path": "/",
@@ -172,6 +172,12 @@
       ]
     },
     {
+      "path": "/managed/agent/sessions/{session_id}/messages/reset",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
       "path": "/managed/agent/sessions/{session_id}/replay",
       "methods": [
         "GET"
@@ -233,6 +239,12 @@
     },
     {
       "path": "/managed/agent/workspaces/{slug}/sessions/{session_id}/join",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/agent/workspaces/{slug}/sessions/{session_id}/messages/reset",
       "methods": [
         "POST"
       ]
@@ -461,6 +473,12 @@
       "path": "/managed/workspaces/{slug}/sessions/{session_id}/files/{file_id}",
       "methods": [
         "GET"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/sessions/{session_id}/messages/reset",
+      "methods": [
+        "POST"
       ]
     },
     {

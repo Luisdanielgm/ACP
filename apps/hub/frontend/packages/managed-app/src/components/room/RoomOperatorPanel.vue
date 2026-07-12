@@ -81,12 +81,28 @@
         </li>
       </ul>
     </section>
+
+    <section class="message-reset">
+      <div>
+        <strong class="message-reset-title">{{ t('web_operator_reset_title') }}</strong>
+        <p class="panel-note">{{ t('web_operator_reset_help') }}</p>
+      </div>
+      <button class="danger-button" type="button" :disabled="resettingMessages" @click="handleResetMessages">
+        <span v-if="resettingMessages" class="spinner" aria-hidden="true"></span>
+        {{ t('web_operator_reset_action') }}
+      </button>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onUnmounted, ref, watch } from 'vue'
-import { sendSessionOperatorMessage, receiveSessionOperatorMessage, type OperatorInboxMessage } from '../../api/managed'
+import {
+  sendSessionOperatorMessage,
+  receiveSessionOperatorMessage,
+  resetSessionMessages,
+  type OperatorInboxMessage,
+} from '../../api/managed'
 import { getApiErrorMessage } from '../../api/client'
 import { useManagedI18n } from '../../i18n'
 import { useToast } from '../../composables/useToast'
@@ -108,6 +124,7 @@ const operatorTo = ref('all')
 const operatorAction = ref<(typeof ACTIONS)[number]>('TASK')
 const operatorPayload = ref('')
 const lastOperatorName = ref('')
+const resettingMessages = ref(false)
 
 watch(
   () => props.members,
@@ -187,6 +204,24 @@ async function handleSendOperatorMessage() {
     operatorSending.value = false
   }
 }
+
+async function handleResetMessages() {
+  if (!confirm(t('web_operator_reset_confirm'))) return
+  resettingMessages.value = true
+  listening.value = false
+  try {
+    const result = await resetSessionMessages(props.slug, props.sessionId, 'Reset from ACP managed dashboard')
+    inbox.value = []
+    toast.show(
+      t('web_operator_reset_success').replace('{count}', String(result.cleared_pending_messages)),
+      'success',
+    )
+  } catch (err) {
+    toast.show(getApiErrorMessage(err), 'error')
+  } finally {
+    resettingMessages.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -253,7 +288,12 @@ textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent
 .inbox-reply { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; transition: all 0.15s ease; }
 .inbox-reply:hover { color: var(--accent); border-color: var(--accent-glow); }
 .inbox-body { margin: 8px 0 0; font-size: 0.86rem; line-height: 1.5; color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+.message-reset { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
+.message-reset-title { display: block; margin-bottom: 4px; font-size: 0.82rem; color: var(--ink); }
+.danger-button { flex: 0 0 auto; padding: 9px 14px; border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 10px; background: rgba(239, 68, 68, 0.08); color: #ef4444; font-weight: 700; cursor: pointer; }
+.danger-button:disabled { opacity: 0.55; cursor: default; }
 @media (max-width: 720px) {
   .action-toggle { margin-left: 0; }
+  .message-reset { align-items: stretch; flex-direction: column; }
 }
 </style>
