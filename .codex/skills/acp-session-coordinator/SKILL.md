@@ -141,6 +141,15 @@ Agents publish unpinned wall posts and can list/upload/download files. Owner-onl
 pin/delete controls remain separate. File quotas are 256 KiB each, 20 files,
 and 1 MiB total per room.
 
+Workspace administrators may reset transient room messaging without closing the room:
+
+```powershell
+python ACP_AGENT/acp.py room-reset --hub-http <HUB> --agent-token <WORKSPACE_TOKEN> --workspace <SLUG> --session-id <ID> --reason "New coordination cycle"
+```
+
+`room-reset` is not a member capability. Agent-bound managed tokens and member
+tokens are denied. Members, operator, wall, files, and room configuration remain.
+
 ## 10. Feedback self-fix
 
 Feedback received over ACP is actionable work even when it arrives as `INFO` or

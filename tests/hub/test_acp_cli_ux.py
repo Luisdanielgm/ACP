@@ -2840,6 +2840,42 @@ def test_room_collaboration_parsers_expose_wall_and_file_operations() -> None:
     assert files.purpose == "instruction"
 
 
+def test_room_reset_parser_and_request_use_workspace_integration_token(monkeypatch: Any) -> None:
+    args = acp_cli.build_parser().parse_args(
+        [
+            "room-reset",
+            "--hub-http",
+            "https://hub.example",
+            "--agent-token",
+            "workspace-token",
+            "--workspace",
+            "team-one",
+            "--session-id",
+            "session-1",
+            "--reason",
+            "New daily cycle",
+        ]
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_request_json(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"status": "messages_reset", "cleared_pending_messages": 2}
+
+    monkeypatch.setattr(acp_cli, "request_json", fake_request_json)
+
+    result = acp_cli.room_reset_from_args(args)
+
+    assert captured["method"] == "POST"
+    assert captured["url"] == "https://hub.example/managed/agent/workspaces/team-one/sessions/session-1/messages/reset"
+    assert captured["payload"] == {"reason": "New daily cycle"}
+    assert captured["headers"] == {
+        "Authorization": "Bearer workspace-token",
+        "Content-Type": "application/json",
+    }
+    assert result["managed_command"] == "room-reset"
+
+
 def test_room_wall_post_uses_managed_agent_identity(monkeypatch: Any) -> None:
     captured: dict[str, Any] = {}
     monkeypatch.setattr(

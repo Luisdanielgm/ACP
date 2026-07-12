@@ -1,5 +1,12 @@
 # ACP_AGENT Changelog
 
+## 0.3.13 - 2026-07-12
+
+- EN: Added workspace-admin room message reset through `room-reset`, preserving the room, members, operator, wall, and files while clearing pending deliveries and coordination message history.
+- ES: Se agrego el reinicio administrativo de mensajes mediante `room-reset`, conservando sala, miembros, operador, muro y archivos mientras limpia entregas pendientes e historial de coordinacion.
+- EN: Reset emits a one-shot `MESSAGES_RESET` system notice so connected clients can rotate or clear their local room chat safely.
+- ES: El reinicio emite un aviso de sistema `MESSAGES_RESET` de una sola entrega para que los clientes conectados limpien o roten su chat local de forma segura.
+
 ## 0.3.12 - 2026-07-10
 
 - EN: Added first-class managed room collaboration commands: `room-wall list|post` and `room-files list|upload|download`, with workspace auto-discovery, Bearer agent-token scoping, atomic local downloads, and artifact/instruction upload purpose.

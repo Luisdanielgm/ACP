@@ -261,6 +261,7 @@ Si el Hub/gateway devuelve HTTP 502/503/504, no asumir que la sesion murio. El C
 ```powershell
 python ACP_AGENT/acp.py managed-sessions --hub-http https://TU_HUB --agent-token TOKEN
 python ACP_AGENT/acp.py managed-close --hub-http https://TU_HUB --agent-token TOKEN --session-id SESSION_ID
+python ACP_AGENT/acp.py room-reset --hub-http https://TU_HUB --agent-token WORKSPACE_TOKEN --workspace WORKSPACE --session-id SESSION_ID --reason "Nuevo ciclo diario"
 ```
 
 Si se selecciona un config, estos comandos tambien pueden usar `managed_agent_token` guardado en ese config. `managed-start` y `managed-join` guardan ese token para que todos los agentes del workspace puedan resolver credenciales de forma simetrica sin copiar secretos entre archivos a mano.
@@ -278,6 +279,8 @@ python ACP_AGENT/acp.py room-files download --config ACP_AGENT/agents/worker-1.j
 ```
 
 Tambien aceptan `--hub-http` + `--agent-token` y `--workspace` opcional. Los agentes pueden publicar posts no fijados, listar/subir/descargar archivos y elegir `artifact` o `instruction`. Fijar/eliminar posts y eliminar archivos sigue reservado al owner. Cuotas: 256 KiB por archivo, 20 archivos y 1 MiB total por sala.
+
+`room-reset` es exclusivamente administrativo: requiere un token de integracion con alcance de workspace. Los tokens ligados a un agente y los member tokens no pueden reiniciar la mensajeria. Conserva sala, miembros, operador, muro y archivos.
 
 ## Onboarding autonomo de workers managed
 

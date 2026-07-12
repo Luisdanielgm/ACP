@@ -443,6 +443,18 @@ def build_parser() -> argparse.ArgumentParser:
     managed_close_parser.add_argument("--session-id", required=True, help="Workspace session id to close")
     managed_close_parser.add_argument("--detail", default=None, help="Optional close reason")
 
+    room_reset_parser = subparsers.add_parser(
+        "room-reset",
+        help="Administratively reset room messages while preserving members, wall, and files",
+    )
+    room_reset_parser.add_argument("--config", default=None, help="JSON config path for the workspace integration")
+    room_reset_parser.add_argument("--agent", "--name", dest="agent", default=None, help="Config stem used to resolve a workspace-scoped token")
+    room_reset_parser.add_argument("--hub-http", default=None, help="Override managed Hub HTTP base URL")
+    room_reset_parser.add_argument("--workspace", default=None, help="Optional managed workspace slug")
+    room_reset_parser.add_argument("--agent-token", default=None, help="Workspace-scoped managed integration token")
+    room_reset_parser.add_argument("--session-id", required=True, help="Managed room session id")
+    room_reset_parser.add_argument("--reason", default=None, help="Optional administrative reset reason")
+
     room_wall_parser = subparsers.add_parser("room-wall", help="List or publish durable managed-room wall posts")
     room_wall_parser.add_argument("action", choices=("list", "post"))
     room_wall_parser.add_argument("--config", default=None, help="JSON config path for the local agent")
@@ -2359,6 +2371,27 @@ def _managed_room_command_context(args: argparse.Namespace, *, command_name: str
     workspace_slug = _managed_workspace_slug_arg(args)
     agent_token = managed_agent_token_from_args(args, config)
     return hub_http, workspace_slug, agent_token, config
+
+
+def room_reset_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    hub_http, workspace_slug, agent_token, _ = _managed_room_command_context(args, command_name="room-reset")
+    session_id = str(args.session_id or "").strip()
+    if not session_id:
+        raise ValueError("--session-id is required for room-reset.")
+    reason = str(getattr(args, "reason", None) or "").strip() or None
+    if reason is not None and len(reason) > 240:
+        raise ValueError("room reset reason exceeds 240 characters.")
+    suffix = f"/sessions/{urllib.parse.quote(session_id, safe='')}/messages/reset"
+    route = _managed_agent_route(workspace_slug=workspace_slug, suffix=suffix)
+    response = request_json(
+        method="POST",
+        url=f"{hub_http.rstrip('/')}{route}",
+        payload={"reason": reason},
+        headers=_managed_agent_headers(agent_token),
+        timeout_seconds=30.0,
+    )
+    response["managed_command"] = "room-reset"
+    return response
 
 
 def room_wall_from_args(args: argparse.Namespace) -> dict[str, Any]:
@@ -5740,7 +5773,7 @@ def main(argv: list[str] | None = None) -> int:
             pass
         elif args.command == "onboard-help":
             pass
-        elif args.command in {"managed-sessions", "managed-close", "room-wall", "room-files"}:
+        elif args.command in {"managed-sessions", "managed-close", "room-reset", "room-wall", "room-files"}:
             managed_command_hub_http_from_args(args, command_name=args.command)
         elif args.command in {"update-check", "self-update"}:
             _resolve_hub_http_simple(args)
@@ -5808,6 +5841,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "managed-close":
             print(json.dumps(managed_close_from_args(args), ensure_ascii=True))
+            return 0
+        if args.command == "room-reset":
+            print(json.dumps(room_reset_from_args(args), ensure_ascii=True))
             return 0
         if args.command == "room-wall":
             print(json.dumps(room_wall_from_args(args), ensure_ascii=True))
