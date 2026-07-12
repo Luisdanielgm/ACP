@@ -17,6 +17,7 @@
         :class="laneClasses(member)"
         :data-role="normalizedRole(member.role)"
         :style="{ '--role-accent': avatarAccent(member) }"
+        :title="laneTooltip(member)"
       >
         <span class="lane-avatar">
           <img class="lane-avatar-face" :class="{ ghost: isStale(member) }" :src="avatarSrc(member)" :alt="member.agent_name" />
@@ -39,6 +40,7 @@
               <img class="op-icon" :src="operationSrc(member)" alt="" aria-hidden="true" />{{ t('sd_' + getOpState(member).key) }}
             </span>
             <span class="lane-task">{{ member.current_task || member.status_text || t('sd_no_detail') }}</span>
+            <span v-if="member.provider && member.provider !== '-'" class="lane-provider">{{ member.provider }}</span>
           </div>
         </div>
         <div class="lane-stats">
@@ -73,7 +75,7 @@ import { messages } from '../../i18n'
 import {
   normalizedRole, memberPalette, isWebOperator,
   memberIssues, memberActivity, memberOperationalState, heartbeatState,
-  timeAgo, maxIssueLevel, commonNamePrefix, humanizeAgentName,
+  timeAgo, maxIssueLevel, agentDisplayNames, humanizeAgentName, compactPath, runSummary,
   avatarForMember, presenceIconName, operationIconName,
   type Issue, type MemberActivityData, type TrafficLevel,
 } from '../../composables/sessionHelpers'
@@ -97,12 +99,12 @@ defineEmits<{
 
 const { locale, t } = useI18n(messages)
 
-const namePrefix = computed(() =>
-  commonNamePrefix(props.members.filter(m => !isWebOperator(m.agent_name)).map(m => m.agent_name))
+const displayNames = computed(() =>
+  agentDisplayNames(props.members.filter(m => !isWebOperator(m.agent_name)).map(m => m.agent_name))
 )
 
 function displayName(member: SessionMember): string {
-  return humanizeAgentName(member.agent_name, namePrefix.value)
+  return displayNames.value.get(member.agent_name) || humanizeAgentName(member.agent_name)
 }
 
 function isStale(member: SessionMember): boolean {
@@ -147,6 +149,18 @@ function presenceSrc(member: SessionMember): string {
 
 function operationSrc(member: SessionMember): string {
   return stateIconUrl(operationIconName(getOpState(member), pendingOf(member)))
+}
+
+// Full detail on hover: the compact row hides provider/workspace/run info,
+// the tooltip keeps it one hover away.
+function laneTooltip(member: SessionMember): string {
+  const lines = [member.agent_name]
+  if (member.provider && member.provider !== '-') lines.push(`${member.provider} · ${compactPath(member.workspace_path)}`)
+  const current = runSummary(member.current_run)
+  if (current !== '-') lines.push(`run: ${current}`)
+  const last = runSummary(member.last_run)
+  if (last !== '-') lines.push(`last: ${last}`)
+  return lines.join('\n')
 }
 
 function laneClasses(member: SessionMember): string[] {
@@ -215,6 +229,7 @@ function laneClasses(member: SessionMember): string[] {
 .op-chip.warning { color:#F0997B; background:rgba(240,153,123,0.08); border:1px solid rgba(240,153,123,0.18); }
 .op-icon { width:12px; height:12px; display:inline-block; }
 .lane-task { font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.lane-provider { flex-shrink:0; margin-left:auto; padding:1px 7px; border-radius:999px; border:1px solid var(--line); background:var(--soft); font-size:8.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:var(--muted); }
 
 .lane-stats { display:flex; align-items:center; gap:12px; flex-shrink:0; }
 .stat { display:flex; flex-direction:column; align-items:center; gap:1px; min-width:30px; }

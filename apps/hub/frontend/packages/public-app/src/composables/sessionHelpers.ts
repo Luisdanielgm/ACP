@@ -47,20 +47,6 @@ export function isWebOperator(name: string | undefined): boolean {
   return String(name || '').startsWith('web-operator-')
 }
 
-// Longest common prefix across agent names, cut back to a separator boundary —
-// "acme-airlines-chief" + "acme-airlines-ops" share "acme-airlines-".
-// Lets displays drop the noise humans skip anyway.
-export function commonNamePrefix(names: string[]): string {
-  const list = names.filter(Boolean)
-  if (list.length < 2) return ''
-  let prefix = list[0]
-  for (const name of list.slice(1)) {
-    while (prefix && !name.startsWith(prefix)) prefix = prefix.slice(0, -1)
-  }
-  const cut = Math.max(prefix.lastIndexOf('-'), prefix.lastIndexOf('_'), prefix.lastIndexOf('.'))
-  return cut >= 4 ? prefix.slice(0, cut + 1) : ''
-}
-
 // Human-legible display name: strip the shared prefix and hex hash suffixes,
 // then title-case what remains ("people_manager-6a2b15e1" -> "People Manager").
 // The FULL agent name stays available in tooltips and detail views.
@@ -73,6 +59,65 @@ export function humanizeAgentName(name: string, prefix = ''): string {
     .filter(part => !/^[0-9a-f]{6,}$/i.test(part))
   if (!parts.length) return raw
   return parts.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+}
+
+// Display names for a whole roster. Token-based (not raw prefix) because real
+// fleets drift in spelling: "acme-air-chief" + "acmecorp-air-people_manager"
+// share the token "air" but no usable string prefix. Drops tokens present in
+// EVERY name, then leading brand tokens that only differ in spelling, so the
+// distinctive part ("Chief", "People Manager") is what humans read.
+export function agentDisplayNames(names: string[]): Map<string, string> {
+  const map = new Map<string, string>()
+  const tokenized = names.filter(Boolean).map(name => ({
+    name,
+    tokens: name
+      .split(/[-_.\s]+/)
+      .filter(Boolean)
+      .filter(part => !/^[0-9a-f]{6,}$/i.test(part)),
+  }))
+  if (!tokenized.length) return map
+
+  let common = new Set(tokenized[0].tokens.map(t => t.toLowerCase()))
+  for (const { tokens } of tokenized.slice(1)) {
+    const mine = new Set(tokens.map(t => t.toLowerCase()))
+    common = new Set([...common].filter(t => mine.has(t)))
+  }
+  if (tokenized.length < 2) common = new Set()
+
+  let remaining = tokenized.map(({ name, tokens }) => {
+    const kept = tokens.filter(t => !common.has(t.toLowerCase()))
+    // Never drop a name to zero tokens: keep at least the last one.
+    return { name, tokens: kept.length ? kept : tokens.slice(-1) }
+  })
+
+  // Leading brand tokens that vary in spelling ("aero" vs "aerocorp") still
+  // share a long string prefix across every member — drop those too.
+  if (remaining.length >= 2 && remaining.every(r => r.tokens.length >= 2)) {
+    const firsts = remaining.map(r => r.tokens[0].toLowerCase())
+    let shared = firsts[0]
+    for (const f of firsts.slice(1)) {
+      let i = 0
+      while (i < shared.length && i < f.length && shared[i] === f[i]) i++
+      shared = shared.slice(0, i)
+    }
+    if (shared.length >= 4) {
+      remaining = remaining.map(r => ({ name: r.name, tokens: r.tokens.slice(1) }))
+    }
+  }
+
+  for (const { name, tokens } of remaining) {
+    const parts = tokens.length ? tokens : [name]
+    map.set(name, parts.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '))
+  }
+  // Two members must never collapse onto the same label, and a label that
+  // shrank to almost nothing ("A") reads worse than the full name — fall back
+  // to the full humanized name in both cases.
+  const counts = new Map<string, number>()
+  for (const v of map.values()) counts.set(v, (counts.get(v) || 0) + 1)
+  for (const [name, label] of map) {
+    if ((counts.get(label) || 0) > 1 || label.length < 3) map.set(name, humanizeAgentName(name))
+  }
+  return map
 }
 
 export function statusTone(status: string | undefined): string {

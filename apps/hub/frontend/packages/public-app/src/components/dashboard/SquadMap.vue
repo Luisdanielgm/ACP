@@ -1,28 +1,5 @@
 <template>
   <div ref="cardRef" class="cockpit-card" :class="{ expanded, fit: fitHeight }" :data-load="trafficLevel">
-    <div class="cockpit-head">
-      <div>
-        <div class="cockpit-title">{{ t('sd_squad_map_title') }}</div>
-        <div class="cockpit-sub">{{ t('sd_squad_map_sub') }}</div>
-      </div>
-      <button
-        class="map-tool"
-        type="button"
-        :aria-label="t(expanded ? 'sd_map_collapse' : 'sd_map_expand')"
-        :title="t(expanded ? 'sd_map_collapse' : 'sd_map_expand')"
-        @click="expanded = !expanded"
-      >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <template v-if="expanded">
-            <path d="M18 6L6 18" /><path d="M6 6l12 12" />
-          </template>
-          <template v-else>
-            <path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M16 3h3a2 2 0 0 1 2 2v3" />
-            <path d="M16 21h3a2 2 0 0 0 2-2v-3" /><path d="M8 21H5a2 2 0 0 1-2-2v-3" />
-          </template>
-        </svg>
-      </button>
-    </div>
     <div class="squad-map">
       <div v-if="!graph" class="empty-state">
         <span>{{ t('sd_map_empty') }}</span>
@@ -37,6 +14,28 @@
         ripples) play exactly once when their event first appears.
       -->
       <div v-else class="squad-canvas" @click="onCanvasClick">
+        <!-- In-canvas chrome: live status chips (top-left) and the expand
+             toggle (top-right) live ON the map — the map needs no header. -->
+        <div class="canvas-status">
+          <slot name="status" />
+        </div>
+        <button
+          class="map-tool canvas-expand"
+          type="button"
+          :aria-label="t(expanded ? 'sd_map_collapse' : 'sd_map_expand')"
+          :title="t(expanded ? 'sd_map_collapse' : 'sd_map_expand')"
+          @click.stop="expanded = !expanded"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <template v-if="expanded">
+              <path d="M18 6L6 18" /><path d="M6 6l12 12" />
+            </template>
+            <template v-else>
+              <path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M16 3h3a2 2 0 0 1 2 2v3" />
+              <path d="M16 21h3a2 2 0 0 0 2-2v-3" /><path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+            </template>
+          </svg>
+        </button>
         <svg :viewBox="`0 0 ${graph.width} ${graph.height}`" role="img" :aria-label="t('sd_squad_map_title')">
           <circle
             v-for="(ring, ri) in graph.rings"
@@ -179,9 +178,10 @@
       :aria-label="selectedMember.agent_name"
     >
       <div class="map-popover-head">
-        <span class="map-popover-avatar" :style="{ background: selectedAccent }">{{ selectedInitials }}</span>
+        <img class="map-popover-avatar" :src="selectedAvatarUrl" :alt="selectedMember.agent_name" :style="{ borderColor: selectedAccent }" />
         <div class="map-popover-id">
-          <strong>{{ selectedMember.agent_name }}</strong>
+          <strong>{{ selectedDisplayName }}</strong>
+          <span class="map-popover-full" :title="selectedMember.agent_name">{{ selectedMember.agent_name }}</span>
           <span class="map-popover-status">{{ translateStatus(t, selectedMember.status) || selectedMember.status }}</span>
         </div>
         <button class="map-tool" type="button" :aria-label="t('sd_map_close_popover')" @click="closePopover">
@@ -198,8 +198,29 @@
         <span v-if="connectedSet.has(selectedMember.agent_name)" class="map-popover-chip live">{{ t('sd_legend_connected') }}</span>
         <span v-else-if="heartbeatState(selectedMember, connectedSet) === 'stale'" class="map-popover-chip stale">{{ t('sd_legend_stale') }}</span>
       </div>
+      <!-- Inline send: message this agent right from the card, no dock trip. -->
+      <div v-if="canMessage" class="map-popover-send">
+        <div class="map-send-actions" role="radiogroup" :aria-label="t('sd_map_message_btn')">
+          <button
+            v-for="action in SEND_ACTIONS"
+            :key="action"
+            type="button"
+            class="map-send-action"
+            :class="[action.toLowerCase(), { active: sendAction === action }]"
+            :aria-pressed="sendAction === action"
+            @click="sendAction = action"
+          >{{ action }}</button>
+        </div>
+        <textarea
+          v-model="sendText"
+          class="map-send-text"
+          rows="2"
+          :placeholder="t('sd_map_send_placeholder')"
+          @keydown.enter.exact.prevent="submitSend"
+        ></textarea>
+      </div>
       <div v-if="canMessage || adminActionsAvailable" class="map-popover-actions">
-        <button v-if="canMessage" class="map-popover-btn" type="button" @click="onMessageMember">
+        <button v-if="canMessage" class="map-popover-btn" type="button" :disabled="!sendText.trim()" @click="submitSend">
           {{ t('sd_map_message_btn') }}
         </button>
         <button v-if="adminActionsAvailable" class="map-popover-btn danger" type="button" @click="onDisconnectMember">
@@ -216,10 +237,10 @@ import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from '@acp/shared'
 import { messages } from '../../i18n'
 import {
-  normalizedRole, memberPalette, heartbeatState, statusTone, nameInitials, isWebOperator,
+  normalizedRole, memberPalette, heartbeatState, statusTone, isWebOperator,
   messageActionType, actionChipClass, deliveryMode, deliveryClass, actionTone, floatTagLabel,
   recentMemberActivity, memberActivity, mapRoutePath, sortedMembers,
-  eventClass, hashValue, commonNamePrefix, humanizeAgentName, type TrafficLevel,
+  eventClass, hashValue, agentDisplayNames, humanizeAgentName, type TrafficLevel,
   avatarForMember, presenceIconName, operationIconName, memberOperationalState, memberIssues,
   linkFreshness, type LinkFreshness,
 } from '../../composables/sessionHelpers'
@@ -238,7 +259,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   invite: []
-  'message-member': [agentName: string]
+  'send-message': [message: { to: string; action: 'TASK' | 'INFO' | 'REPLY'; payload: string }]
   'disconnect-member': [agentName: string]
 }>()
 
@@ -267,7 +288,36 @@ const selectedAccent = computed(() => {
   return isWebOperator(m.agent_name) ? '#a1aab5' : memberPalette(m).accent
 })
 
-const selectedInitials = computed(() => nameInitials(selectedMember.value?.agent_name || ''))
+const selectedAvatarUrl = computed(() => {
+  const m = selectedMember.value
+  return m ? avatarUrl(avatarForMember(m), 256) : ''
+})
+
+const rosterDisplayNames = computed(() =>
+  agentDisplayNames(
+    (props.payload?.members || []).filter(m => !isWebOperator(m.agent_name)).map(m => m.agent_name)
+  )
+)
+
+const selectedDisplayName = computed(() => {
+  const name = selectedMember.value?.agent_name || ''
+  return rosterDisplayNames.value.get(name) || humanizeAgentName(name)
+})
+
+// ── Inline send form ──
+
+const SEND_ACTIONS = ['TASK', 'INFO', 'REPLY'] as const
+const sendAction = ref<'TASK' | 'INFO' | 'REPLY'>('INFO')
+const sendText = ref('')
+
+function submitSend() {
+  const body = sendText.value.trim()
+  const to = selectedName.value
+  if (!body || !to) return
+  emit('send-message', { to, action: sendAction.value, payload: body })
+  sendText.value = ''
+  closePopover()
+}
 
 type FlightMotionEl = SVGElement & { beginElement?: () => void; __begun?: boolean }
 
@@ -290,7 +340,7 @@ function onCanvasClick(event: MouseEvent) {
   const agentName = target.getAttribute('data-agent') || ''
   if (!agentName) return
   const POPOVER_W = 280
-  const POPOVER_H = 230
+  const POPOVER_H = 350
   popoverX.value = Math.max(8, Math.min(event.clientX + 8, window.innerWidth - POPOVER_W - 8))
   popoverY.value = Math.max(8, Math.min(event.clientY + 8, window.innerHeight - POPOVER_H - 8))
   selectedName.value = agentName
@@ -298,12 +348,6 @@ function onCanvasClick(event: MouseEvent) {
 
 function closePopover() {
   selectedName.value = ''
-}
-
-function onMessageMember() {
-  const name = selectedName.value
-  closePopover()
-  if (name) emit('message-member', name)
 }
 
 function onDisconnectMember() {
@@ -504,39 +548,47 @@ const graph = computed(() => {
   const crowd = others.length
   const scale = crowd <= 2 ? 1.5 : crowd <= 4 ? 1.22 : 1
   const ringRadius = crowd ? Math.max(190, Math.min(320, 130 + crowd * 24)) : 0
-  const outerR = ringRadius * 1.05
-  const gutterX = crowd <= 2 ? 320 : 440
-  const gutterY = crowd <= 2 ? 160 : 190
-  const width = crowd ? Math.round(outerR * 2 + gutterX) : 1040
-  const height = crowd ? Math.round(outerR * 2 + gutterY) : 530
-  const cx = width / 2
-  const cy = height / 2
 
-  // Human-legible display names: strip the prefix every agent shares.
-  const namePrefix = commonNamePrefix(
-    members.filter(m => !isWebOperator(m.agent_name)).map(m => m.agent_name)
-  )
+  // Human-legible display names: drop the branding tokens every agent shares.
+  const displayNames = rosterDisplayNames.value
 
   // Orbit radii ARE the semantics: inner = conversing, mid = recent or with
-  // pending work, outer = quiet. The dashed rings mark those bands.
+  // pending work, outer = quiet. The dashed rings mark those bands. Every
+  // radius has a FLOOR of the scaled node sizes plus a clear gap, so big
+  // nodes in a small room can never touch the chief.
   const tight = others.length > 6
-  const tierRadii = [
-    ringRadius * (tight ? 0.75 : 0.6),
-    ringRadius * (tight ? 0.9 : 0.82),
-    ringRadius * 1.05,
-  ]
-  const rings = others.length ? tierRadii : [90, 150, 210]
-
-  const positions = new Map<string, { x: number; y: number; tier: number; member: SessionMember }>()
-  positions.set(chiefMember.agent_name, { x: cx, y: cy, tier: 0, member: chiefMember })
+  const chiefShellR = 38 * scale
+  const memberShellR = 32 * scale
+  const tier0 = Math.max(ringRadius * (tight ? 0.75 : 0.6), chiefShellR + memberShellR + 72 * scale)
+  const tier1 = Math.max(ringRadius * (tight ? 0.9 : 0.82), tier0 + 46 * scale)
+  const tier2 = Math.max(ringRadius * 1.05, tier1 + 40 * scale)
+  const tierRadii = [tier0, tier1, tier2]
 
   // Angles stay STABLE (alphabetical) so members never swap places — only
   // their distance to the center glides as relationships heat and cool.
   const orbiting = [...others].sort((a, b) => a.agent_name.localeCompare(b.agent_name))
+  const tiersByName = new Map(orbiting.map(member => [member.agent_name, activityTier(member)]))
+  const maxTier = orbiting.length ? Math.max(...tiersByName.values()) : 0
+
+  // The canvas hugs the outermost OCCUPIED orbit — an empty outer band is
+  // dead space that shrinks every node on screen.
+  const occupiedR = crowd ? tierRadii[maxTier] : 0
+  const outerR = crowd ? occupiedR + memberShellR + 64 : 0
+  const gutterX = crowd <= 2 ? 280 : 420
+  const gutterY = crowd <= 2 ? 130 : 180
+  const width = crowd ? Math.round(outerR * 2 + gutterX) : 1040
+  const height = crowd ? Math.round(outerR * 2 + gutterY) : 530
+  const cx = width / 2
+  const cy = height / 2
+  const rings = crowd ? tierRadii.slice(0, maxTier + 1) : [90, 150, 210]
+
+  const positions = new Map<string, { x: number; y: number; tier: number; member: SessionMember }>()
+  positions.set(chiefMember.agent_name, { x: cx, y: cy, tier: 0, member: chiefMember })
+
   const startAngle = orbiting.length <= 2 ? 0 : -Math.PI / 2
   orbiting.forEach((member, mi) => {
     const angle = startAngle + (mi * 2 * Math.PI) / orbiting.length
-    const tier = activityTier(member)
+    const tier = tiersByName.get(member.agent_name) ?? 2
     positions.set(member.agent_name, {
       x: cx + tierRadii[tier] * Math.cos(angle),
       y: cy + tierRadii[tier] * Math.sin(angle),
@@ -660,7 +712,7 @@ const graph = computed(() => {
     const seed = Number.isNaN(ts) ? ri : Math.abs(ts) % 6
     const action = messageActionType(event)
     const delivery = deliveryMode(event)
-    const preview = clipText(String(event.payload_preview || '').trim(), 16)
+    const preview = clipText(String(event.payload_preview || '').trim(), 22)
     const tag = preview ? `${floatTagLabel(action, delivery)} ${preview}` : floatTagLabel(action, delivery)
     const pillW = Math.max(42, 14 + tag.length * 5.6)
     // The tag floats ABOVE the receiver, clear of its shell and clamped to the
@@ -707,6 +759,8 @@ const graph = computed(() => {
     const dxRaw = pos.x - cx
     const dyRaw = pos.y - cy
     const len = Math.max(1, Math.hypot(dxRaw, dyRaw))
+    const lbl = labelFor(dxRaw / len, dyRaw / len, shellR, isChief, others.length)
+    const displayName = displayNames.get(m.agent_name) || humanizeAgentName(m.agent_name)
     const idx = nodeIndex
     nodeIndex += 1
     nodes.push({
@@ -738,9 +792,9 @@ const graph = computed(() => {
       auraR: (isChief ? 47 : 41) * scale,
       badgeSize: Math.round(18 * scale),
       crownScale: scale,
-      label: labelFor(dxRaw / len, dyRaw / len, shellR, isChief, others.length),
-      labelName: clipText(humanizeAgentName(m.agent_name, namePrefix), 24),
-      labelSub: clipText(m.current_task || statusLabel, 28),
+      label: lbl,
+      labelName: clipText(displayName, lbl.clip),
+      labelSub: clipText(m.current_task || statusLabel, lbl.clip + 4),
       title: `${m.agent_name || '-'} · ${statusLabel}${pending ? ` · +${pending}` : ''}`,
       dx: `${[0, 1.6, -1.6][idx % 3]}px`,
       dy: `${idx % 2 === 0 ? -2.4 : 2.4}px`,
@@ -759,9 +813,11 @@ const graph = computed(() => {
 .cockpit-card[data-load="medium"] { border-color:rgba(239,159,39,0.24); }
 .cockpit-card[data-load="high"] { border-color:rgba(240,153,123,0.28); }
 .cockpit-card[data-load="critical"] { border-color:rgba(175,169,236,0.3); }
-.cockpit-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:16px; }
-.cockpit-title { font-size:15px; font-weight:700; letter-spacing:-0.02em; }
-.cockpit-sub { font-size:12px; color:var(--muted); line-height:1.5; margin-top:4px; }
+
+/* In-canvas chrome */
+.canvas-status { position:absolute; top:12px; left:12px; z-index:3; display:flex; gap:8px; flex-wrap:wrap; max-width:calc(100% - 110px); pointer-events:none; }
+.canvas-status > :deep(*) { pointer-events:auto; }
+.canvas-expand { position:absolute; top:12px; right:12px; z-index:3; background:var(--panel); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
 
 /* War-room mode */
 .cockpit-card.expanded {
@@ -795,13 +851,33 @@ const graph = computed(() => {
 }
 .map-popover-head { display:flex; align-items:center; gap:10px; }
 .map-popover-avatar {
-  width:32px; height:32px; border-radius:50%; flex-shrink:0;
-  display:inline-flex; align-items:center; justify-content:center;
-  color:var(--glyph-ink); font-size:11px; font-weight:800;
+  width:40px; height:40px; border-radius:50%; flex-shrink:0;
+  object-fit:cover; border:2px solid transparent; display:block;
 }
-.map-popover-id { min-width:0; display:flex; flex-direction:column; gap:2px; flex:1; }
-.map-popover-id strong { font-size:0.86rem; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.map-popover-id { min-width:0; display:flex; flex-direction:column; gap:1px; flex:1; }
+.map-popover-id strong { font-size:0.9rem; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.map-popover-full { font-size:0.68rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; opacity:0.8; }
 .map-popover-status { font-size:0.72rem; color:var(--muted); }
+
+/* Inline send */
+.map-popover-send { display:flex; flex-direction:column; gap:8px; }
+.map-send-actions { display:flex; gap:6px; }
+.map-send-action {
+  padding:4px 11px; border-radius:999px; border:1px solid var(--line);
+  background:var(--soft); color:var(--muted);
+  font-size:0.66rem; font-weight:800; letter-spacing:0.05em;
+  cursor:pointer; transition:all 0.15s ease;
+}
+.map-send-action.active.task { color:#EF9F27; border-color:rgba(239,159,39,0.4); background:rgba(239,159,39,0.1); }
+.map-send-action.active.info { color:#85B7EB; border-color:rgba(133,183,235,0.4); background:rgba(133,183,235,0.1); }
+.map-send-action.active.reply { color:#AFA9EC; border-color:rgba(175,169,236,0.4); background:rgba(175,169,236,0.1); }
+.map-send-text {
+  width:100%; padding:9px 11px; resize:vertical; min-height:44px;
+  border:1px solid var(--line); border-radius:10px;
+  background:var(--soft); color:var(--ink); font-size:0.82rem; font-family:inherit;
+}
+.map-send-text:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); outline:none; }
+.map-popover-btn:disabled { opacity:0.5; cursor:default; }
 .map-popover-task { margin:0; font-size:0.8rem; color:var(--muted); line-height:1.45; word-break:break-word; }
 .map-popover-meta { display:flex; gap:6px; flex-wrap:wrap; }
 .map-popover-chip {

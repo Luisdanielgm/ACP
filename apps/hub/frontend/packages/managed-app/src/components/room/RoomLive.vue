@@ -139,11 +139,6 @@
         <span class="legend-chip" :title="st('sd_legend_queued_help')"><img class="legend-icon" :src="stateIconUrl('result-pending')" alt="" aria-hidden="true" />{{ st('sd_legend_queued') }}</span>
       </div>
 
-      <!-- Pulse strip: what is happening right now -->
-      <div v-if="pulseChips.length" class="pulse-strip">
-        <span v-for="chip in pulseChips" :key="chip.key" class="pulse-chip" :class="chip.className">{{ chip.label }}</span>
-      </div>
-
       <!-- Pinned wall note: durable context stays visible without opening the dock -->
       <button
         v-if="pinnedPost"
@@ -167,9 +162,13 @@
           :can-message="true"
           :fit-height="true"
           @invite="copyInvite"
-          @message-member="messageMember"
+          @send-message="sendInlineMessage"
           @disconnect-member="confirmDisconnect"
-        />
+        >
+          <template #status>
+            <span v-for="chip in pulseChips" :key="chip.key" class="pulse-chip" :class="chip.className">{{ chip.label }}</span>
+          </template>
+        </SquadMap>
         <MemberLanes
           :members="session.visibleMembers.value"
           :activity-map="session.activityMap.value"
@@ -216,7 +215,6 @@
             :slug="slug"
             :session-id="sessionId"
             :members="operatorMembers"
-            :target="operatorTarget"
           />
         </div>
         <div v-show="activeTab === 'team'" class="dock-panel-inner bare">
@@ -272,7 +270,8 @@ import {
 } from '@acp/public-app/composables/sessionHelpers'
 import { translateDelivery } from '@acp/public-app/composables/dashboardTranslations'
 import { stateIconUrl } from '@acp/public-app/assets/acp/acpAssets'
-import type { RoomWallPost, WorkspaceSession } from '../../api/managed'
+import { sendSessionOperatorMessage, type RoomWallPost, type WorkspaceSession } from '../../api/managed'
+import { getApiErrorMessage } from '../../api/client'
 import { useManagedI18n } from '../../i18n'
 import { useToast } from '../../composables/useToast'
 import ConfirmDialog from '../ConfirmDialog.vue'
@@ -438,11 +437,15 @@ const activeTab = ref<DockTabId | null>(null)
 const wallCount = ref(0)
 const filesCount = ref(0)
 const pinnedPost = ref<RoomWallPost | null>(null)
-const operatorTarget = ref('')
 
-function messageMember(agentName: string) {
-  operatorTarget.value = agentName
-  activeTab.value = 'operator'
+// Direct send from the map popover — same owner identity as the operator tab.
+async function sendInlineMessage(message: { to: string; action: 'TASK' | 'INFO' | 'REPLY'; payload: string }) {
+  try {
+    await sendSessionOperatorMessage(props.slug, props.sessionId, message)
+    toast.show(st('sd_map_message_sent', { agent: message.to }), 'success')
+  } catch (err) {
+    toast.show(getApiErrorMessage(err), 'error')
+  }
 }
 
 const dockTabs = computed<DockTab[]>(() => [
@@ -749,9 +752,8 @@ watchEffect(() => {
 }
 .pinned-banner-meta { color: var(--muted); font-size: 0.74rem; flex-shrink: 0; }
 
-/* Pulse strip */
-.pulse-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.pulse-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--soft); color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
+/* Pulse chips (rendered inside the map canvas via the status slot) */
+.pulse-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 4px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
 .pulse-chip.task { color: #EF9F27; border-color: rgba(239, 159, 39, 0.24); background: rgba(239, 159, 39, 0.1); }
 .pulse-chip.info { color: #85B7EB; border-color: rgba(133, 183, 235, 0.24); background: rgba(133, 183, 235, 0.1); }
 .pulse-chip.reply { color: #AFA9EC; border-color: rgba(175, 169, 236, 0.24); background: rgba(175, 169, 236, 0.1); }
