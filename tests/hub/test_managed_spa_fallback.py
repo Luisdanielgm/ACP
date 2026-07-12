@@ -57,6 +57,41 @@ def test_managed_overlay_serves_frontend_dist_fallback(monkeypatch, tmp_path) ->
     assert "fallback" in asset_response.text
 
 
+def test_managed_spa_and_assets_send_correct_cache_headers(monkeypatch, tmp_path) -> None:
+    # The SPA entry (index.html) must never be cached hard: it is the pointer to
+    # the current hashed chunks. Hashed assets are content-addressed and must be
+    # cached immutably. Without this, a redeploy (emptyOutDir wipes old chunks)
+    # leaves Cloudflare/browsers serving a stale index that 404s on gone chunks.
+    _bootstrap_env(monkeypatch, tmp_path)
+    module = _load_managed_app()
+
+    dist_dir = tmp_path / "frontend" / "packages" / "managed-app" / "dist"
+    assets_dir = dist_dir / "assets"
+    assets_dir.mkdir(parents=True)
+    (dist_dir / "index.html").write_text(
+        "<!doctype html><html><body><div id='app'>shell</div></body></html>",
+        encoding="utf-8",
+    )
+    (assets_dir / "app.js").write_text("console.log('shell');", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "acp_managed.ui.spa._MANAGED_STATIC_DIR_CANDIDATES",
+        (tmp_path / "static" / "managed", dist_dir),
+    )
+
+    client = TestClient(module.create_managed_app())
+
+    index = client.get("/managed/login")
+    assert index.status_code == 200
+    assert "no-cache" in index.headers.get("cache-control", "")
+
+    asset = client.get("/managed/assets/app.js")
+    assert asset.status_code == 200
+    cache_control = asset.headers.get("cache-control", "")
+    assert "immutable" in cache_control
+    assert "max-age=31536000" in cache_control
+
+
 def test_managed_overlay_serves_static_dir_from_process_cwd(monkeypatch, tmp_path) -> None:
     _bootstrap_env(monkeypatch, tmp_path)
     monkeypatch.chdir(tmp_path)

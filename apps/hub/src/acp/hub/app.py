@@ -515,6 +515,22 @@ def _register_public_web_endpoints(app: FastAPI, runtime: HubRuntime) -> None:
 
 _PUBLIC_STATIC_DIR = Path(__file__).resolve().parent.parent.parent.parent / "static" / "public"
 
+# Hashed Vite chunks are content-addressed and safe to cache forever; index.html
+# is the pointer to the current chunks and must always revalidate so a redeploy
+# is picked up instead of 404ing on chunks that emptyOutDir already wiped.
+_IMMUTABLE_CACHE_CONTROL = "public, max-age=31536000, immutable"
+_NO_CACHE_CONTROL = "no-cache"
+
+
+class _ImmutableStaticFiles(StaticFiles):
+    """StaticFiles that tags successful responses as immutable, cache-forever."""
+
+    async def get_response(self, path: str, scope):  # type: ignore[override]
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = _IMMUTABLE_CACHE_CONTROL
+        return response
+
 
 def _vue_views_from_env() -> set[str]:
     configured = os.getenv("ACP_VUE_VIEWS", "")
@@ -530,7 +546,7 @@ def _register_vue_spa_fallback(app: FastAPI, vue_views: set[str]) -> None:
         return
     assets_dir = _PUBLIC_STATIC_DIR / "assets"
     if assets_dir.is_dir():
-        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="public-assets")
+        app.mount("/assets", _ImmutableStaticFiles(directory=str(assets_dir)), name="public-assets")
 
     index_html = _PUBLIC_STATIC_DIR / "index.html"
     if not index_html.is_file():
@@ -546,7 +562,10 @@ def _register_vue_spa_fallback(app: FastAPI, vue_views: set[str]) -> None:
 def _register_spa_route(app: FastAPI, path: str, index_html: Path) -> None:
     @app.get(path, response_class=HTMLResponse, include_in_schema=False)
     async def _spa_fallback() -> HTMLResponse:
-        return HTMLResponse(content=index_html.read_text(encoding="utf-8"))
+        return HTMLResponse(
+            content=index_html.read_text(encoding="utf-8"),
+            headers={"Cache-Control": _NO_CACHE_CONTROL},
+        )
 
     _spa_fallback.__name__ = f"spa_{path.strip('/').replace('/', '_') or 'root'}"
 
