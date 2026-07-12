@@ -124,12 +124,14 @@ watchEffect(() => {
 
 <style scoped>
 .room-page {
-  max-width: 1400px;
-  margin: 24px auto;
-  padding: 0 24px;
+  /* The live room uses the whole viewport: slim margins, wide cap — the
+     collapsed sidebar's leftover space belongs to the cockpit. */
+  max-width: 1760px;
+  margin: 12px auto;
+  padding: 0 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
 }
 .room-skeleton { display: flex; flex-direction: column; gap: 14px; }
 .closed-notice {

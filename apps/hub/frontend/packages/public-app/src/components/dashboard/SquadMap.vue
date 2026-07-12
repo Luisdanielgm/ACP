@@ -65,13 +65,20 @@
           <g v-for="edge in graph.edges" :key="edge.id" class="relation" :class="[edge.heat, edge.freshness, { held: edge.held }]">
             <title>{{ edge.title }}</title>
             <path :d="edge.path" :marker-end="`url(#edge-arrow-${edge.markerKey})`" />
-            <image class="edge-icon" :href="edge.iconUrl" :x="edge.labelX - 13" :y="edge.labelY - 13" width="26" height="26" />
+            <image
+              class="edge-icon"
+              :href="edge.iconUrl"
+              :x="edge.labelX - graph.orbSize / 2"
+              :y="edge.labelY - graph.orbSize / 2"
+              :width="graph.orbSize"
+              :height="graph.orbSize"
+            />
             <text
               v-if="edge.showLabel"
               class="relation-label"
               :class="edge.freshness"
               :x="edge.labelX"
-              :y="edge.labelY - 22"
+              :y="edge.labelY - graph.orbSize / 2 - 9"
               text-anchor="middle"
             >{{ edge.label }}</text>
           </g>
@@ -159,7 +166,7 @@
                 <text x="0" y="1" :text-anchor="node.label.anchor">{{ node.stateLabel }}</text>
               </g>
               <g class="node-hb">
-                <image :href="node.hbIconUrl" :x="node.hbIconX" :y="node.hbY - 12" width="15" height="15" />
+                <image :href="node.hbIconUrl" :x="node.hbIconX" :y="node.hbY - 14" width="18" height="18" />
                 <text :x="node.hbTextX" :y="node.hbY" :text-anchor="node.label.anchor">{{ node.hbLabel }}</text>
               </g>
               <g v-if="node.showQueue" class="node-queue">
@@ -672,6 +679,8 @@ const graph = computed(() => {
   // gets the wide orbit. `scale` multiplies every node metric.
   const crowd = others.length
   const scale = crowd <= 2 ? 1.5 : crowd <= 4 ? 1.22 : 1
+  // Mid-wire message orb: large enough to READ (mockup-sized), scales with the room.
+  const orbSize = Math.round(36 * scale)
   const ringRadius = crowd ? Math.max(190, Math.min(320, 130 + crowd * 24)) : 0
 
   // Human-legible display names: drop the branding tokens every agent shares.
@@ -949,13 +958,13 @@ const graph = computed(() => {
     let hbTextX: number
     if (lbl.anchor === 'start') {
       hbIconX = lbl.subX
-      hbTextX = lbl.subX + 19
+      hbTextX = lbl.subX + 23
     } else if (lbl.anchor === 'end') {
       hbTextX = lbl.subX
-      hbIconX = lbl.subX - hbTextW - 19
+      hbIconX = lbl.subX - hbTextW - 23
     } else {
-      hbTextX = 9
-      hbIconX = -hbTextW / 2 - 10
+      hbTextX = 11
+      hbIconX = -hbTextW / 2 - 12
     }
     // Queue bar: honest load — pending messages, only when there are any.
     const showQueue = pending > 0
@@ -992,7 +1001,7 @@ const graph = computed(() => {
       coreR,
       shellR,
       auraR: (isChief ? 47 : 41) * scale,
-      badgeSize: Math.round(18 * scale),
+      badgeSize: Math.round(24 * scale),
       crownScale: scale,
       label: lbl,
       labelName: clipText(displayName, lbl.clip),
@@ -1017,7 +1026,7 @@ const graph = computed(() => {
     })
   })
 
-  return { width, height, cx, cy, rings, nodes, edges, queueDots, flights }
+  return { width, height, cx, cy, rings, nodes, edges, queueDots, flights, orbSize }
 })
 </script>
 
@@ -1155,7 +1164,7 @@ const graph = computed(() => {
 .node-state.warning text { fill:#F0997B; }
 
 /* Heartbeat line + queue bar under the node */
-.node-hb text { font-size:10.5px; fill:var(--muted); }
+.node-hb text { font-size:11.5px; fill:var(--muted); }
 .node-queue-track { fill:rgba(148,163,184,0.16); }
 .node-queue-fill { fill:#EF9F27; }
 .node-queue-text { font-size:9.5px; font-weight:800; fill:#EF9F27; }

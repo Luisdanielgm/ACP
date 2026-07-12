@@ -19,50 +19,55 @@
         :style="{ '--role-accent': avatarAccent(member) }"
         :title="laneTooltip(member)"
       >
-        <span class="lane-avatar">
-          <img class="lane-avatar-face" :class="{ ghost: isStale(member) }" :src="avatarSrc(member)" :alt="member.agent_name" />
-          <img class="lane-avatar-badge" :src="presenceSrc(member)" alt="" aria-hidden="true" />
-          <span v-if="normalizedRole(member.role) === 'chief'" class="lane-crown" aria-hidden="true">♛</span>
-        </span>
-        <div class="lane-body">
-          <div class="lane-line">
-            <span class="lane-name" :title="member.agent_name">{{ displayName(member) }}</span>
-            <span class="lane-role-pill" :class="'role-' + normalizedRole(member.role)">{{ translateRole(t, member.role) }}</span>
-            <span
-              v-if="topIssue(member)"
-              class="lane-issue"
-              :class="topIssue(member)!.level"
-              :title="t('sd_' + topIssue(member)!.label)"
-            ></span>
-          </div>
-          <div class="lane-line2">
-            <span class="op-chip" :class="getOpState(member).tone">
-              <img class="op-icon" :src="operationSrc(member)" alt="" aria-hidden="true" />{{ t('sd_' + getOpState(member).key) }}
-            </span>
-            <span class="lane-task">{{ member.current_task || member.status_text || t('sd_no_detail') }}</span>
-            <span v-if="member.provider && member.provider !== '-'" class="lane-provider">{{ member.provider }}</span>
+        <div class="lane-id">
+          <span class="lane-avatar">
+            <img class="lane-avatar-face" :class="{ ghost: isStale(member) }" :src="avatarSrc(member)" :alt="member.agent_name" />
+            <img class="lane-avatar-badge" :src="presenceSrc(member)" alt="" aria-hidden="true" />
+            <span v-if="normalizedRole(member.role) === 'chief'" class="lane-crown" aria-hidden="true">♛</span>
+          </span>
+          <div class="lane-id-text">
+            <div class="lane-line">
+              <span class="lane-name" :title="member.agent_name">{{ displayName(member) }}</span>
+              <span class="lane-role-pill" :class="'role-' + normalizedRole(member.role)">{{ translateRole(t, member.role) }}</span>
+              <span
+                v-if="topIssue(member)"
+                class="lane-issue"
+                :class="topIssue(member)!.level"
+                :title="t('sd_' + topIssue(member)!.label)"
+              ></span>
+            </div>
+            <div class="lane-line2">
+              <span class="op-chip" :class="getOpState(member).tone">
+                <img class="op-icon" :src="operationSrc(member)" alt="" aria-hidden="true" />{{ t('sd_' + getOpState(member).key) }}
+              </span>
+              <span v-if="member.provider && member.provider !== '-'" class="lane-provider">{{ member.provider }}</span>
+            </div>
           </div>
         </div>
-        <div class="lane-stats">
-          <div class="stat" :class="{ warn: pendingOf(member) > 0 }">
-            <span class="stat-val">{{ pendingOf(member) }}</span>
-            <span class="stat-lbl">{{ t('sd_pending_label') }}</span>
+        <div class="lane-cells">
+          <div class="lane-cell" :class="{ warn: pendingOf(member) > 0 }">
+            <span class="cell-label">{{ t('sd_pending_label') }}</span>
+            <span class="cell-value">{{ pendingOf(member) }}</span>
           </div>
-          <div class="stat">
-            <span class="stat-val">{{ lastSeen(member) }}</span>
-            <span class="stat-lbl">{{ t('sd_last_event_meta') }}</span>
+          <div class="lane-cell">
+            <span class="cell-label">{{ t('sd_last_event_meta') }}</span>
+            <span class="cell-value">{{ lastSeen(member) }}</span>
           </div>
-          <button
-            v-if="adminActionsAvailable"
-            class="lane-kick"
-            type="button"
-            :title="t('sd_disconnect_member_btn')"
-            :aria-label="t('sd_disconnect_member_btn')"
-            @click="$emit('disconnect-member', member.agent_name)"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18" /><path d="M6 6l12 12" /></svg>
-          </button>
+          <div class="lane-cell task-cell">
+            <span class="cell-label">{{ t('sd_current_task_label') }}</span>
+            <span class="cell-value clamp">{{ member.current_task || member.status_text || t('sd_no_detail') }}</span>
+          </div>
         </div>
+        <button
+          v-if="adminActionsAvailable"
+          class="lane-kick"
+          type="button"
+          :title="t('sd_disconnect_member_btn')"
+          :aria-label="t('sd_disconnect_member_btn')"
+          @click="$emit('disconnect-member', member.agent_name)"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18" /><path d="M6 6l12 12" /></svg>
+        </button>
       </article>
     </div>
   </div>
@@ -195,8 +200,8 @@ function laneClasses(member: SessionMember): string[] {
 .lane-stack::-webkit-scrollbar-thumb:hover { background:var(--scroll-thumb-hover); }
 
 .lane {
-  display:flex; align-items:center; gap:11px;
-  padding:9px 11px; border:1px solid var(--line); border-radius:12px;
+  display:flex; align-items:center; gap:12px;
+  padding:11px 12px; border:1px solid var(--line); border-radius:12px;
   background:var(--card-bg-strong); position:relative; overflow:hidden;
   transition:border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -211,9 +216,10 @@ function laneClasses(member: SessionMember): string[] {
 .lane-avatar-badge { position:absolute; right:-2px; bottom:-2px; width:15px; height:15px; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.45)); }
 .lane-crown { position:absolute; top:-9px; left:50%; transform:translateX(-50%); font-size:12px; color:#EF9F27; line-height:1; text-shadow:0 1px 2px rgba(0,0,0,0.5); }
 
-.lane-body { flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; }
+.lane-id { flex:1; min-width:0; display:flex; align-items:center; gap:10px; }
+.lane-id-text { min-width:0; display:flex; flex-direction:column; gap:4px; }
 .lane-line { display:flex; align-items:center; gap:8px; min-width:0; }
-.lane-name { font-size:12.5px; font-weight:700; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lane-name { font-size:13px; font-weight:700; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .lane-role-pill { flex-shrink:0; padding:1px 8px; border-radius:999px; border:1px solid var(--line); background:var(--soft); font-size:9px; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; }
 .lane-role-pill.role-chief { color:#EF9F27; border-color:rgba(239,159,39,0.24); background:rgba(239,159,39,0.09); }
 .lane-role-pill.role-collaborator { color:#1D9E75; border-color:rgba(29,158,117,0.24); background:rgba(29,158,117,0.09); }
@@ -231,14 +237,16 @@ function laneClasses(member: SessionMember): string[] {
 .op-chip.working { color:#85B7EB; background:rgba(133,183,235,0.08); border:1px solid rgba(133,183,235,0.18); }
 .op-chip.warning { color:#F0997B; background:rgba(240,153,123,0.08); border:1px solid rgba(240,153,123,0.18); }
 .op-icon { width:12px; height:12px; display:inline-block; }
-.lane-task { font-size:11px; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
-.lane-provider { flex-shrink:0; margin-left:auto; padding:1px 7px; border-radius:999px; border:1px solid var(--line); background:var(--soft); font-size:8.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:var(--muted); }
+.lane-provider { flex-shrink:0; padding:1px 7px; border-radius:999px; border:1px solid var(--line); background:var(--soft); font-size:8.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:var(--muted); }
 
-.lane-stats { display:flex; align-items:center; gap:12px; flex-shrink:0; }
-.stat { display:flex; flex-direction:column; align-items:center; gap:1px; min-width:30px; }
-.stat-val { font-size:13px; font-weight:800; color:var(--ink); line-height:1; }
-.stat.warn .stat-val { color:#EF9F27; }
-.stat-lbl { font-size:8px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:var(--muted); }
+/* Boxed stat cells (mockup style): label on top, value below */
+.lane-cells { display:flex; gap:8px; flex-shrink:0; align-items:stretch; }
+.lane-cell { display:flex; flex-direction:column; gap:3px; justify-content:center; min-width:72px; padding:6px 10px; border:1px solid var(--line); border-radius:10px; background:var(--card-bg-soft); }
+.cell-label { font-size:8.5px; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; color:var(--muted); white-space:nowrap; }
+.cell-value { font-size:12.5px; font-weight:800; color:var(--ink); line-height:1.15; }
+.lane-cell.warn .cell-value { color:#EF9F27; }
+.lane-cell.task-cell { min-width:120px; max-width:170px; }
+.cell-value.clamp { font-size:10.5px; font-weight:600; color:var(--muted); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; word-break:break-word; }
 .lane-kick { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; padding:0; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--muted); cursor:pointer; transition:all 0.15s ease; }
 .lane-kick:hover { color:#F0997B; border-color:rgba(240,153,123,0.4); background:rgba(240,153,123,0.08); }
 
@@ -253,7 +261,7 @@ function laneClasses(member: SessionMember): string[] {
 /* Responsive */
 @media (max-width:768px) {
   .cockpit-card { padding:12px; border-radius:14px; }
-  .lane-task { display:none; }
+  .lane-cell.task-cell { display:none; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration:0.01ms !important; transition-duration:0.01ms !important; }

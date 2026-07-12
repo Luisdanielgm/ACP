@@ -133,6 +133,7 @@
 
       <!-- Cockpit: map + lanes -->
       <div class="cockpit-grid">
+        <div class="cockpit-left">
         <SquadMap
           :payload="session.payload.value"
           :connected-set="session.connectedSet.value"
@@ -150,6 +151,17 @@
             <span v-for="chip in pulseChips" :key="chip.key" class="pulse-chip" :class="chip.className">{{ chip.label }}</span>
           </template>
         </SquadMap>
+        <!-- Real-time activity feed: sessions, messages, waits and detailed
+             states, right under the live map -->
+        <section class="feed-strip">
+          <EventTimeline
+            :events="session.filteredHistory.value"
+            :members="session.members.value"
+            v-model:timeline-filter="session.timelineFilter.value"
+            :effective-motion="effectiveMotion"
+          />
+        </section>
+        </div>
         <div class="cockpit-right">
           <MemberLanes
             :members="session.visibleMembers.value"
@@ -177,16 +189,6 @@
           </div>
         </div>
       </div>
-
-      <!-- Real-time activity feed: always visible under the cockpit -->
-      <section class="feed-strip">
-        <EventTimeline
-          :events="session.filteredHistory.value"
-          :members="session.members.value"
-          v-model:timeline-filter="session.timelineFilter.value"
-          :effective-motion="effectiveMotion"
-        />
-      </section>
 
       <!-- Dock: collapsible room panels -->
       <nav class="dock" :aria-label="t('room_dock_label')">
@@ -575,9 +577,10 @@ watchEffect(() => {
 </script>
 
 <style scoped>
-/* Fill the viewport below the fixed 78px topbar (plus room-page margins) so the
-   live cockpit sits in one window; opening a dock panel lets the page scroll. */
-.room { display: flex; flex-direction: column; gap: 11px; min-height: calc(100dvh - 112px); }
+/* Fill the viewport below the fixed 78px topbar (plus the slimmed room-page
+   margins) so the live cockpit sits in one window; opening a dock panel lets
+   the page scroll. */
+.room { display: flex; flex-direction: column; gap: 10px; min-height: calc(100dvh - 96px); }
 
 /* Live bar — teleported into the shell topbar, so no panel chrome of its own */
 .room-bar {
@@ -780,13 +783,27 @@ watchEffect(() => {
 .pulse-chip.dequeued { color: #f8fafc; border-color: rgba(248, 250, 252, 0.22); background: rgba(148, 163, 184, 0.12); }
 
 /* Cockpit — fills the remaining room height; each column manages its own overflow */
-.cockpit-grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 0.9fr); flex: 1; min-height: 0; }
+.cockpit-grid { display: grid; gap: 12px; grid-template-columns: minmax(0, 1.5fr) minmax(380px, 1fr); flex: 1; min-height: 0; }
 .cockpit-grid > * { min-height: 0; }
-.cockpit-right { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+
+/* Left column: live map on top, activity feed under it */
+.cockpit-left { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.cockpit-left > :first-child { flex: 1; min-height: 0; }
+
+/* Right column: ONE panel — lanes scroll inside, legend pinned at the bottom */
+.cockpit-right {
+  display: flex; flex-direction: column; gap: 10px; min-height: 0;
+  border: 1px solid var(--line); border-radius: 18px;
+  background: linear-gradient(180deg, var(--card-bg-soft), var(--soft));
+  padding: 14px;
+}
 .cockpit-right > :first-child { flex: 1; min-height: 0; }
+.cockpit-right :deep(.cockpit-card) { border: none; background: none; padding: 0; border-radius: 0; overflow: visible; }
+.cockpit-right :deep(.cockpit-card::before) { display: none; }
+.cockpit-right .signal-legend { border: none; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding: 12px 0 0; flex-shrink: 0; }
 
 /* Activity feed strip: always visible, scrolls inside itself */
-.feed-strip { max-height: 240px; overflow-y: auto; flex-shrink: 0; border-radius: 18px; }
+.feed-strip { max-height: 220px; overflow-y: auto; flex-shrink: 0; border-radius: 18px; }
 .feed-strip::-webkit-scrollbar { width: 6px; }
 .feed-strip::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 10px; }
 
