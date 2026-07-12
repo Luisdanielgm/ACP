@@ -161,6 +161,8 @@
           :admin-actions-available="session.adminActionsAvailable.value"
           :can-message="true"
           :fit-height="true"
+          :inbox-agent="wsSession.owner_member_token ? wsSession.owner_agent_name : undefined"
+          :receive-inbox="receiveInboxForMap"
           @invite="copyInvite"
           @send-message="sendInlineMessage"
           @disconnect-member="confirmDisconnect"
@@ -270,7 +272,7 @@ import {
 } from '@acp/public-app/composables/sessionHelpers'
 import { translateDelivery } from '@acp/public-app/composables/dashboardTranslations'
 import { stateIconUrl } from '@acp/public-app/assets/acp/acpAssets'
-import { sendSessionOperatorMessage, type RoomWallPost, type WorkspaceSession } from '../../api/managed'
+import { sendSessionOperatorMessage, receiveSessionOperatorMessage, type RoomWallPost, type WorkspaceSession } from '../../api/managed'
 import { getApiErrorMessage } from '../../api/client'
 import { useManagedI18n } from '../../i18n'
 import { useToast } from '../../composables/useToast'
@@ -445,6 +447,18 @@ async function sendInlineMessage(message: { to: string; action: 'TASK' | 'INFO' 
     toast.show(st('sd_map_message_sent', { agent: message.to }), 'success')
   } catch (err) {
     toast.show(getApiErrorMessage(err), 'error')
+  }
+}
+
+// Read the owner agent's next queued message from the map popover. Errors
+// surface as toasts here; the popover only needs message-or-null.
+async function receiveInboxForMap() {
+  try {
+    const result = await receiveSessionOperatorMessage(props.slug, props.sessionId, { timeout_seconds: 0.5 })
+    return result.status === 'delivered' ? result.message : null
+  } catch (err) {
+    toast.show(getApiErrorMessage(err), 'error')
+    return null
   }
 }
 

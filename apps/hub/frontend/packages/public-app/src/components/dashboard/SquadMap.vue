@@ -198,6 +198,20 @@
         <span v-if="connectedSet.has(selectedMember.agent_name)" class="map-popover-chip live">{{ t('sd_legend_connected') }}</span>
         <span v-else-if="heartbeatState(selectedMember, connectedSet) === 'stale'" class="map-popover-chip stale">{{ t('sd_legend_stale') }}</span>
       </div>
+      <!-- Inline inbox: read the next message queued for the owner agent. -->
+      <div v-if="canReadInbox" class="map-popover-inbox">
+        <button class="map-popover-btn" type="button" :disabled="inboxReading" @click="readInbox">
+          {{ t('sd_map_read_btn') }}{{ Number(selectedMember.pending_count || 0) > 0 ? ` (${selectedMember.pending_count})` : '' }}
+        </button>
+        <p v-if="inboxEmpty" class="map-inbox-empty">{{ t('sd_map_inbox_empty') }}</p>
+        <div v-else-if="inboxMessage" class="map-inbox-message">
+          <div class="map-inbox-meta">
+            <span class="map-inbox-action" :class="(inboxMessage.action || 'info').toLowerCase()">{{ inboxMessage.action || 'INFO' }}</span>
+            <strong>{{ inboxMessage.from }}</strong>
+          </div>
+          <p class="map-inbox-body">{{ inboxMessage.payload }}</p>
+        </div>
+      </div>
       <!-- Inline send: message this agent right from the card, no dock trip. -->
       <div v-if="canMessage" class="map-popover-send">
         <div class="map-send-actions" role="radiogroup" :aria-label="t('sd_map_message_btn')">
@@ -248,6 +262,13 @@ import { avatarUrl, stateIconUrl } from '../../assets/acp/acpAssets'
 import { translateStatus } from '../../composables/dashboardTranslations'
 import type { SessionMember, SessionDetailPayload } from '../../api/sessions'
 
+export interface InboxMessage {
+  from?: string
+  action?: string
+  payload?: string
+  ts?: string
+}
+
 const props = defineProps<{
   payload: SessionDetailPayload | null
   connectedSet: Set<string>
@@ -255,6 +276,10 @@ const props = defineProps<{
   adminActionsAvailable?: boolean
   canMessage?: boolean
   fitHeight?: boolean
+  /** Agent whose inbox the viewer can read (the dashboard-controlled owner). */
+  inboxAgent?: string
+  /** Reads the next queued message for inboxAgent; null when the inbox is empty. */
+  receiveInbox?: () => Promise<InboxMessage | null>
 }>()
 
 const emit = defineEmits<{
@@ -319,6 +344,36 @@ function submitSend() {
   closePopover()
 }
 
+// ── Inline inbox (owner agent only) ──
+
+const canReadInbox = computed(() =>
+  Boolean(props.receiveInbox && props.inboxAgent && selectedName.value === props.inboxAgent)
+)
+const inboxReading = ref(false)
+const inboxMessage = ref<InboxMessage | null>(null)
+const inboxEmpty = ref(false)
+
+watch(selectedName, () => {
+  inboxMessage.value = null
+  inboxEmpty.value = false
+})
+
+async function readInbox() {
+  if (!props.receiveInbox || inboxReading.value) return
+  inboxReading.value = true
+  inboxEmpty.value = false
+  try {
+    const message = await props.receiveInbox()
+    if (message) {
+      inboxMessage.value = message
+    } else {
+      inboxEmpty.value = true
+    }
+  } finally {
+    inboxReading.value = false
+  }
+}
+
 type FlightMotionEl = SVGElement & { beginElement?: () => void; __begun?: boolean }
 
 // Function refs re-fire on every patch with the same element — the __begun
@@ -340,7 +395,7 @@ function onCanvasClick(event: MouseEvent) {
   const agentName = target.getAttribute('data-agent') || ''
   if (!agentName) return
   const POPOVER_W = 280
-  const POPOVER_H = 350
+  const POPOVER_H = 430
   popoverX.value = Math.max(8, Math.min(event.clientX + 8, window.innerWidth - POPOVER_W - 8))
   popoverY.value = Math.max(8, Math.min(event.clientY + 8, window.innerHeight - POPOVER_H - 8))
   selectedName.value = agentName
@@ -712,7 +767,7 @@ const graph = computed(() => {
     const seed = Number.isNaN(ts) ? ri : Math.abs(ts) % 6
     const action = messageActionType(event)
     const delivery = deliveryMode(event)
-    const preview = clipText(String(event.payload_preview || '').trim(), 22)
+    const preview = clipText(String(event.payload_preview || '').trim(), 30)
     const tag = preview ? `${floatTagLabel(action, delivery)} ${preview}` : floatTagLabel(action, delivery)
     const pillW = Math.max(42, 14 + tag.length * 5.6)
     // The tag floats ABOVE the receiver, clear of its shell and clamped to the
@@ -858,6 +913,17 @@ const graph = computed(() => {
 .map-popover-id strong { font-size:0.9rem; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .map-popover-full { font-size:0.68rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; opacity:0.8; }
 .map-popover-status { font-size:0.72rem; color:var(--muted); }
+
+/* Inline inbox */
+.map-popover-inbox { display:flex; flex-direction:column; gap:8px; }
+.map-inbox-empty { margin:0; font-size:0.76rem; color:var(--muted); }
+.map-inbox-message { border:1px solid var(--line); border-radius:10px; padding:9px 11px; background:var(--card-bg-soft); }
+.map-inbox-meta { display:flex; align-items:center; gap:8px; font-size:0.76rem; color:var(--ink); }
+.map-inbox-action { padding:1px 7px; border-radius:999px; border:1px solid var(--line); font-size:0.62rem; font-weight:800; letter-spacing:0.05em; color:var(--muted); }
+.map-inbox-action.task { color:#EF9F27; border-color:rgba(239,159,39,0.3); background:rgba(239,159,39,0.08); }
+.map-inbox-action.info { color:#85B7EB; border-color:rgba(133,183,235,0.3); background:rgba(133,183,235,0.08); }
+.map-inbox-action.reply { color:#AFA9EC; border-color:rgba(175,169,236,0.3); background:rgba(175,169,236,0.08); }
+.map-inbox-body { margin:6px 0 0; font-size:0.8rem; line-height:1.5; color:var(--ink); white-space:pre-wrap; word-break:break-word; max-height:140px; overflow-y:auto; }
 
 /* Inline send */
 .map-popover-send { display:flex; flex-direction:column; gap:8px; }
