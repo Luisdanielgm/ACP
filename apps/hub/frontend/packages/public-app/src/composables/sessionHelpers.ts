@@ -342,14 +342,44 @@ export function mapAnimationEvents(payload: SessionDetailPayload, windowMs = 600
 
 // ── Asset selectors (state → visual, driven by real data) ──
 
+// Keyword → themed avatar id. Matched against the agent name so a "finance"
+// agent shows the finance portrait. This is a display heuristic over the real
+// name — NOT a domain-role field (we only track chief/collaborator/member).
+// Order matters: earlier, more specific keywords win.
+const DOMAIN_AVATAR_MATCHERS: Array<[RegExp, string]> = [
+  [/front[\s_-]?end|frontend|\bfe\b/i, 'frontend-developer'],
+  [/back[\s_-]?end|backend|\bbe\b/i, 'backend-developer'],
+  [/dev[\s_-]?ops|devops|sre|infra|platform/i, 'devops-engineer'],
+  [/\bqa\b|quality|tester|testing/i, 'quality-assurance'],
+  [/security|cyber|infosec|\bsec\b/i, 'cybersecurity'],
+  [/\bux\b|\bui\b|ux[\s_-]?ui|design/i, 'ux-ui-designer'],
+  [/\bdata\b|analytics|data[\s_-]?scien/i, 'data-analyst'],
+  [/research|knowledge|\bdocs?\b|librarian/i, 'research-knowledge'],
+  [/legal|compliance|counsel/i, 'legal-compliance'],
+  [/logistic|supply|warehouse|fulfil/i, 'logistics'],
+  [/customer[\s_-]?success|\bcs\b|success/i, 'customer-success'],
+  [/market|growth|seo|content/i, 'marketing'],
+  [/sales|revenue|account[\s_-]?exec|\bae\b/i, 'sales'],
+  [/product|\bpm\b|roadmap/i, 'product-manager'],
+  [/financ|finance|accounting|treasur|billing|payment/i, 'finance'],
+  [/operation|\bops\b/i, 'operations'],
+  [/human[\s_-]?resource|people|\bhr\b|rrhh|recruit|talent/i, 'human-resources'],
+  [/support|soporte|help[\s_-]?desk|service[\s_-]?desk/i, 'support'],
+]
+
 // Stable avatar per member: chief gets the leader portrait, the human operator gets the
-// human portrait, and every other agent hashes its name onto a consistent robot face.
+// human portrait, agents whose name matches a domain keyword get the themed portrait,
+// and everyone else hashes their name onto a consistent robot face.
 export function avatarForMember(member: SessionMember): string {
   if (normalizedRole(member.role) === 'chief') return AVATAR_LEADER
   if (isWebOperator(member.agent_name)) return AVATAR_HUMAN
+  const name = String(member.agent_name || '')
+  for (const [pattern, id] of DOMAIN_AVATAR_MATCHERS) {
+    if (pattern.test(name)) return id
+  }
   const pool = ROBOT_AVATAR_IDS
   if (!pool.length) return AVATAR_LEADER
-  return pool[hashValue(member.agent_name || '') % pool.length]
+  return pool[hashValue(name) % pool.length]
 }
 
 export type LinkFreshness = 'current' | 'recent' | 'old' | 'expired'

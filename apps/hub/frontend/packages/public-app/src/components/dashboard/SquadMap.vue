@@ -1,5 +1,5 @@
 <template>
-  <div ref="cardRef" class="cockpit-card" :class="{ expanded }" :data-load="trafficLevel">
+  <div ref="cardRef" class="cockpit-card" :class="{ expanded, fit: fitHeight }" :data-load="trafficLevel">
     <div class="cockpit-head">
       <div>
         <div class="cockpit-title">{{ t('sd_squad_map_title') }}</div>
@@ -223,6 +223,7 @@ const props = defineProps<{
   trafficLevel: TrafficLevel
   adminActionsAvailable?: boolean
   canMessage?: boolean
+  fitHeight?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -792,6 +793,14 @@ const graph = computed(() => {
 .squad-map { min-height:300px; }
 .squad-canvas { width:100%; min-height:300px; border:1px solid var(--canvas-border); border-radius:18px; background:radial-gradient(circle at top,var(--accent-soft),transparent 45%),linear-gradient(180deg,var(--canvas-top),var(--canvas-bottom)); overflow:hidden; position:relative; }
 .squad-canvas svg { width:100%; height:auto; display:block; }
+
+/* Fit-to-height mode (managed cockpit): the card fills its grid cell and the
+   SVG scales down to fit the available box (default preserveAspectRatio meet),
+   so the whole room fits one viewport without page scroll. */
+.cockpit-card.fit { display:flex; flex-direction:column; height:100%; min-height:0; }
+.cockpit-card.fit .squad-map { flex:1; min-height:0; display:flex; }
+.cockpit-card.fit .squad-canvas { flex:1; min-height:0; }
+.cockpit-card.fit .squad-canvas svg { width:100%; height:100%; }
 .node-label { font-size:15px; font-weight:700; fill:var(--ink); letter-spacing:-0.01em; }
 .node-subtext { font-size:12px; fill:var(--muted); }
 .radar-ring { fill:none; stroke:var(--signal-line); stroke-width:1; stroke-dasharray:3 7; opacity:0.55; }
@@ -930,6 +939,14 @@ html[data-motion="reduced"] .mail-glyph {
 }
 
 /* Responsive */
+/* On narrow screens the cockpit stacks and scrolls; the map returns to its
+   natural height so it never squishes to nothing. */
+@media (max-width:1200px) {
+  .cockpit-card.fit { height:auto; }
+  .cockpit-card.fit .squad-map { display:block; }
+  .cockpit-card.fit .squad-canvas { min-height:300px; }
+  .cockpit-card.fit .squad-canvas svg { height:auto; }
+}
 @media (max-width:768px) { .cockpit-card { padding:16px; border-radius:14px; } }
 @media (max-width:600px) {
   .squad-map { min-height:240px; } .squad-canvas { min-height:240px; }

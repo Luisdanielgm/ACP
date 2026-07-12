@@ -22,6 +22,17 @@
           <RoomIcon name="clock" :size="14" />{{ lastEventLabel }}
         </span>
         <span
+          v-if="activitySpark.length"
+          class="room-chip spark"
+          :class="trafficLevel"
+          :title="st('sd_traffic_recent_events', { count: String(session.trafficSnapshot.value.count) })"
+        >
+          <RoomIcon name="activity" :size="14" />
+          <span class="spark-bars" aria-hidden="true">
+            <i v-for="(h, i) in activitySpark" :key="i" :style="{ height: (2 + h * 13).toFixed(1) + 'px' }"></i>
+          </span>
+        </span>
+        <span
           class="room-chip traffic"
           :class="trafficLevel"
           :title="st('sd_traffic_recent_events', { count: String(session.trafficSnapshot.value.count) })"
@@ -154,6 +165,7 @@
           :traffic-level="trafficLevel"
           :admin-actions-available="session.adminActionsAvailable.value"
           :can-message="true"
+          :fit-height="true"
           @invite="copyInvite"
           @message-member="messageMember"
           @disconnect-member="confirmDisconnect"
@@ -319,6 +331,26 @@ const lastEventLabel = computed(() => {
   return timeAgo(p.summary?.last_event_at || p.created_at, locale.value)
 })
 
+// Real "recent activity" sparkline: event counts bucketed over the last 2 min.
+const activitySpark = computed<number[]>(() => {
+  const p = session.payload.value
+  if (!p) return []
+  const now = Date.now()
+  const BUCKETS = 14
+  const SPAN = 120_000
+  const buckets = new Array(BUCKETS).fill(0)
+  for (const e of p.history || []) {
+    const ts = Date.parse(String(e.ts || ''))
+    if (Number.isNaN(ts)) continue
+    const age = now - ts
+    if (age < 0 || age > SPAN) continue
+    const idx = Math.min(BUCKETS - 1, Math.floor(((SPAN - age) / SPAN) * BUCKETS))
+    buckets[idx] += 1
+  }
+  const max = Math.max(1, ...buckets)
+  return buckets.map(v => v / max)
+})
+
 const trafficLevel = computed(() => session.trafficSnapshot.value.level)
 const effectiveMotion = computed(() => resolveEffectiveMode(trafficLevel.value))
 const legendOpen = ref(false)
@@ -400,7 +432,9 @@ interface DockTab {
   badge?: number
 }
 
-const activeTab = ref<DockTabId | null>('wall')
+// Dock starts collapsed so the live cockpit (map + lanes) fills the viewport
+// without the page scrolling; the user opens a panel on demand.
+const activeTab = ref<DockTabId | null>(null)
 const wallCount = ref(0)
 const filesCount = ref(0)
 const pinnedPost = ref<RoomWallPost | null>(null)
@@ -522,7 +556,9 @@ watchEffect(() => {
 </script>
 
 <style scoped>
-.room { display: flex; flex-direction: column; gap: 14px; }
+/* Fill the viewport below the fixed 78px topbar (plus room-page margins) so the
+   live cockpit sits in one window; opening a dock panel lets the page scroll. */
+.room { display: flex; flex-direction: column; gap: 11px; min-height: calc(100dvh - 112px); }
 
 /* Live bar — teleported into the shell topbar, so no panel chrome of its own */
 .room-bar {
@@ -572,6 +608,14 @@ watchEffect(() => {
 .room-chip.traffic.medium { color: #EF9F27; border-color: rgba(239, 159, 39, 0.24); background: rgba(239, 159, 39, 0.1); }
 .room-chip.traffic.high { color: #F0997B; border-color: rgba(240, 153, 123, 0.24); background: rgba(240, 153, 123, 0.1); }
 .room-chip.traffic.critical { color: #AFA9EC; border-color: rgba(175, 169, 236, 0.24); background: rgba(175, 169, 236, 0.1); }
+
+/* Recent-activity sparkline chip */
+.room-chip.spark { padding: 4px 10px; color: #5DCAA5; }
+.room-chip.spark.medium { color: #EF9F27; }
+.room-chip.spark.high { color: #F0997B; }
+.room-chip.spark.critical { color: #AFA9EC; }
+.spark-bars { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 15px; }
+.spark-bars i { width: 2px; border-radius: 1px; background: currentColor; opacity: 0.75; min-height: 2px; transition: height 0.4s ease; }
 
 .room-actions { margin-left: auto; display: inline-flex; gap: 8px; }
 .icon-button {
@@ -716,8 +760,9 @@ watchEffect(() => {
 .pulse-chip.queued { color: #EF9F27; border-color: rgba(239, 159, 39, 0.2); background: rgba(239, 159, 39, 0.08); opacity: 0.88; }
 .pulse-chip.dequeued { color: #f8fafc; border-color: rgba(248, 250, 252, 0.22); background: rgba(148, 163, 184, 0.12); }
 
-/* Cockpit */
-.cockpit-grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.9fr); }
+/* Cockpit — fills the remaining room height; each column manages its own overflow */
+.cockpit-grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 0.9fr); flex: 1; min-height: 0; }
+.cockpit-grid > * { min-height: 0; }
 
 /* Dock */
 .dock { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
@@ -769,7 +814,10 @@ html[data-motion="off"] .health-dot.polling { animation: none !important; }
 html[data-motion="reduced"] .health-dot.polling { animation-duration: 2.4s !important; }
 
 /* Responsive */
-@media (max-width: 1200px) { .cockpit-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1200px) {
+  .cockpit-grid { grid-template-columns: 1fr; flex: none; min-height: auto; }
+  .room { min-height: auto; }
+}
 @media (max-width: 900px) {
   .room-chips { display: none; }
 }

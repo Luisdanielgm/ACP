@@ -76,18 +76,15 @@
           <div class="panel-body">
             <!-- Signal legend -->
             <div class="signal-legend" role="img" :aria-label="t('sd_squad_map_title')">
-              <span class="legend-chip"><span class="legend-line" style="background:#EF9F27"></span>{{ t('sd_legend_task') }}</span>
-              <span class="legend-chip"><span class="legend-line" style="background:#85B7EB"></span>{{ t('sd_legend_info') }}</span>
-              <span class="legend-chip"><span class="legend-line" style="background:#AFA9EC"></span>{{ t('sd_legend_reply') }}</span>
-              <span class="legend-chip">
-                <span class="legend-work" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
-                {{ t('sd_legend_working') }}
-              </span>
-              <span class="legend-chip" :title="t('sd_legend_edge_fresh_help')"><span class="legend-line" style="background:rgba(93, 202, 165, 0.85); height:2.5px"></span>{{ t('sd_legend_edge_fresh') }}</span>
-              <span class="legend-chip" :title="t('sd_legend_edge_cooling_help')"><span class="legend-line legend-line-dashed"></span>{{ t('sd_legend_edge_cooling') }}</span>
-              <span class="legend-chip" :title="t('sd_legend_queued_help')"><span class="legend-dot" style="background:#EF9F27"></span>{{ t('sd_legend_queued') }}</span>
-              <span class="legend-chip" :title="t('sd_legend_connected_help')"><span class="legend-halo"></span>{{ t('sd_legend_connected') }}</span>
-              <span class="legend-chip" :title="t('sd_legend_stale_help')"><span class="legend-stale"></span>{{ t('sd_legend_stale') }}</span>
+              <span class="legend-chip" :title="t('sd_legend_connected_help')"><img class="legend-icon" :src="stateIconUrl('presence-online')" alt="" aria-hidden="true" />{{ t('sd_legend_connected') }}</span>
+              <span class="legend-chip" :title="t('sd_legend_stale_help')"><img class="legend-icon" :src="stateIconUrl('presence-disconnected')" alt="" aria-hidden="true" />{{ t('sd_legend_stale') }}</span>
+              <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('operation-working')" alt="" aria-hidden="true" />{{ t('sd_legend_working') }}</span>
+              <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('message-task')" alt="" aria-hidden="true" />{{ t('sd_legend_task') }}</span>
+              <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('message-information')" alt="" aria-hidden="true" />{{ t('sd_legend_info') }}</span>
+              <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('message-response')" alt="" aria-hidden="true" />{{ t('sd_legend_reply') }}</span>
+              <span class="legend-chip" :title="t('sd_legend_edge_fresh_help')"><img class="legend-icon" :src="stateIconUrl('link-current')" alt="" aria-hidden="true" />{{ t('sd_legend_edge_fresh') }}</span>
+              <span class="legend-chip" :title="t('sd_legend_edge_cooling_help')"><img class="legend-icon" :src="stateIconUrl('link-old')" alt="" aria-hidden="true" />{{ t('sd_legend_edge_cooling') }}</span>
+              <span class="legend-chip" :title="t('sd_legend_queued_help')"><img class="legend-icon" :src="stateIconUrl('result-pending')" alt="" aria-hidden="true" />{{ t('sd_legend_queued') }}</span>
             </div>
             <div v-if="pulseChips.length" class="pulse-strip">
               <span class="pulse-strip-label">{{ t('sd_session_cockpit_title') }}</span>
@@ -153,6 +150,7 @@ import { useI18n, useTheme, useMotion, ThemeToggle, LangToggle, MotionToggle, Ui
 import { messages } from '../i18n'
 import { useSessionDashboard } from '../composables/useSessionDashboard'
 import { buildInvitePrompt, messageActionType, deliveryMode, actionChipClass, memberActivity } from '../composables/sessionHelpers'
+import { stateIconUrl } from '../assets/acp/acpAssets'
 import { translateDelivery } from '../composables/dashboardTranslations'
 import AccessStrip from '../components/dashboard/AccessStrip.vue'
 import SessionSummary from '../components/dashboard/SessionSummary.vue'
@@ -398,17 +396,7 @@ watchEffect(() => {
 /* Signal legend */
 .signal-legend { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:18px; padding:12px 16px; border:1px solid var(--line); border-radius:12px; background:var(--card-bg-soft); }
 .legend-chip { display:inline-flex; align-items:center; gap:6px; font-size:10px; font-weight:700; color:var(--muted); letter-spacing:0.05em; }
-.legend-line { width:18px; height:3px; border-radius:2px; }
-.legend-dot { width:8px; height:8px; border-radius:50%; }
-.legend-line-dashed { background:repeating-linear-gradient(90deg, var(--muted) 0 4px, transparent 4px 8px); opacity:0.6; }
-.legend-halo { width:8px; height:8px; border-radius:50%; background:#5DCAA5; box-shadow:0 0 0 3px rgba(93, 202, 165, 0.25); }
-.legend-stale { width:8px; height:8px; border-radius:50%; border:2px solid var(--muted); background:transparent; }
-.legend-work { display:inline-flex; align-items:flex-end; gap:3px; height:14px; }
-.legend-work span { display:inline-block; width:4px; border-radius:999px; background:#5DCAA5; box-shadow:0 0 12px rgba(93,202,165,0.26); animation:work-bars 1s steps(3, end) infinite; transform-origin:bottom; }
-.legend-work span:nth-child(1) { height:5px; animation-delay:0s; }
-.legend-work span:nth-child(2) { height:11px; animation-delay:0.16s; }
-.legend-work span:nth-child(3) { height:7px; animation-delay:0.32s; }
-.legend-work span:nth-child(4) { height:12px; animation-delay:0.48s; }
+.legend-icon { width:16px; height:16px; display:block; flex-shrink:0; }
 .pulse-strip { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:-2px 0 18px; padding:10px 14px; border:1px solid var(--line); border-radius:14px; background:linear-gradient(180deg,var(--card-bg-soft),transparent); }
 .pulse-strip-label { font-size:10px; font-weight:800; letter-spacing:0.12em; text-transform:uppercase; color:var(--muted); margin-right:4px; }
 .pulse-chip { display:inline-flex; align-items:center; gap:6px; min-height:28px; padding:6px 12px; border-radius:999px; border:1px solid var(--line); background:var(--soft); color:var(--muted); font-size:10px; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; }
@@ -428,11 +416,6 @@ watchEffect(() => {
 .empty-state { display:flex; flex-direction:column; align-items:center; gap:16px; padding:60px 24px; text-align:center; }
 .empty-state span { color:var(--muted); font-size:14px; }
 
-/* Animations */
-@keyframes work-bars { 0%, 100% { transform:scaleY(0.72); opacity:0.52; } 45% { transform:scaleY(1.08); opacity:1; } }
-
-html[data-motion="reduced"] .legend-work span { animation-duration: 1.8s !important; }
-html[data-motion="off"] .legend-work span { animation: none !important; }
 
 /* Responsive */
 @media (max-width:1400px) { .page { max-width:1200px; } }
