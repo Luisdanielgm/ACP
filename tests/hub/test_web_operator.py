@@ -141,6 +141,81 @@ def test_web_operator_reuses_room_chief_without_creating_members(monkeypatch, tm
     assert all(not item["agent_name"].startswith("web-operator-") for item in members)
 
 
+def test_web_operator_receives_queued_message_for_room_chief(monkeypatch, tmp_path) -> None:
+    app, owner, session_id = _owner_with_session(monkeypatch, tmp_path)
+    worker = _join_worker(app, owner, session_id=session_id)
+
+    sent = TestClient(app).post(
+        "/sessions/send",
+        json={
+            "session_id": session_id,
+            "agent_name": worker["agent_name"],
+            "member_token": worker["member_token"],
+            "to": "chief",
+            "action": "REPLY",
+            "payload": "Full reply body that the dashboard chief must be able to read.",
+        },
+    )
+    assert sent.status_code == 200, sent.text
+
+    received = owner.post(
+        f"/managed/workspaces/team-one/sessions/{session_id}/operator/receive",
+        json={},
+    )
+    assert received.status_code == 200, received.text
+    payload = received.json()
+    assert payload["status"] == "delivered"
+    message = payload["message"]
+    assert message["from"] == "worker-1"
+    assert message["to"] == "chief"
+    assert message["action"] == "REPLY"
+    assert message["payload"] == "Full reply body that the dashboard chief must be able to read."
+    assert payload["operator"]["agent_name"] == "chief"
+    assert payload["operator"]["identity_source"] == "session_owner"
+    assert "member_token" not in json.dumps(payload)
+
+    audit_events = app.state.managed_principal_store.list_audit_events(
+        action="managed.room_operator_message_received",
+    )
+    assert len(audit_events) == 1
+    metadata = json.loads(audit_events[0].metadata_json or "{}")
+    assert metadata["message_id"] == message["id"]
+    assert metadata["operator_agent_name"] == "chief"
+    assert "Full reply body" not in (audit_events[0].metadata_json or "")
+
+
+def test_web_operator_receive_reports_empty_inbox(monkeypatch, tmp_path) -> None:
+    app, owner, session_id = _owner_with_session(monkeypatch, tmp_path)
+    _join_worker(app, owner, session_id=session_id)
+
+    received = owner.post(
+        f"/managed/workspaces/team-one/sessions/{session_id}/operator/receive",
+        json={"timeout_seconds": 0},
+    )
+    assert received.status_code == 200, received.text
+    payload = received.json()
+    assert payload["status"] == "empty"
+    assert payload["message"] is None
+
+
+def test_web_operator_receive_conflicts_without_owner_identity(monkeypatch, tmp_path) -> None:
+    app, owner, session_id = _owner_with_session(monkeypatch, tmp_path)
+    store = app.state.managed_principal_store
+    original_get_workspace_session = store.get_workspace_session
+
+    def legacy_workspace_session(*, session_id: str):
+        record = original_get_workspace_session(session_id=session_id)
+        return None if record is None else replace(record, owner_member_token=None)
+
+    monkeypatch.setattr(store, "get_workspace_session", legacy_workspace_session)
+
+    received = owner.post(
+        f"/managed/workspaces/team-one/sessions/{session_id}/operator/receive",
+        json={},
+    )
+    assert received.status_code == 409, received.text
+
+
 def test_web_operator_falls_back_for_legacy_room_without_owner_token(monkeypatch, tmp_path) -> None:
     app, owner, session_id = _owner_with_session(monkeypatch, tmp_path)
     _join_worker(app, owner, session_id=session_id)

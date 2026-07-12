@@ -1,5 +1,5 @@
 {
-  "route_count": 105,
+  "route_count": 106,
   "routes": [
     {
       "path": "/",
@@ -461,6 +461,12 @@
       "path": "/managed/workspaces/{slug}/sessions/{session_id}/files/{file_id}",
       "methods": [
         "GET"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/sessions/{session_id}/operator/receive",
+      "methods": [
+        "POST"
       ]
     },
     {

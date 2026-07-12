@@ -47,6 +47,34 @@ export function isWebOperator(name: string | undefined): boolean {
   return String(name || '').startsWith('web-operator-')
 }
 
+// Longest common prefix across agent names, cut back to a separator boundary —
+// "acme-airlines-chief" + "acme-airlines-ops" share "acme-airlines-".
+// Lets displays drop the noise humans skip anyway.
+export function commonNamePrefix(names: string[]): string {
+  const list = names.filter(Boolean)
+  if (list.length < 2) return ''
+  let prefix = list[0]
+  for (const name of list.slice(1)) {
+    while (prefix && !name.startsWith(prefix)) prefix = prefix.slice(0, -1)
+  }
+  const cut = Math.max(prefix.lastIndexOf('-'), prefix.lastIndexOf('_'), prefix.lastIndexOf('.'))
+  return cut >= 4 ? prefix.slice(0, cut + 1) : ''
+}
+
+// Human-legible display name: strip the shared prefix and hex hash suffixes,
+// then title-case what remains ("people_manager-6a2b15e1" -> "People Manager").
+// The FULL agent name stays available in tooltips and detail views.
+export function humanizeAgentName(name: string, prefix = ''): string {
+  const raw = String(name || '')
+  const rest = prefix && raw.startsWith(prefix) && raw.length > prefix.length ? raw.slice(prefix.length) : raw
+  const parts = rest
+    .split(/[-_.\s]+/)
+    .filter(Boolean)
+    .filter(part => !/^[0-9a-f]{6,}$/i.test(part))
+  if (!parts.length) return raw
+  return parts.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+}
+
 export function statusTone(status: string | undefined): string {
   const s = String(status || '').toLowerCase()
   if (s === 'busy') return '#F0997B'

@@ -25,7 +25,7 @@
         </span>
         <div class="lane-body">
           <div class="lane-line">
-            <span class="lane-name">{{ member.agent_name || '-' }}</span>
+            <span class="lane-name" :title="member.agent_name">{{ displayName(member) }}</span>
             <span class="lane-role-pill" :class="'role-' + normalizedRole(member.role)">{{ translateRole(t, member.role) }}</span>
             <span
               v-if="topIssue(member)"
@@ -67,12 +67,13 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from '@acp/shared'
 import { messages } from '../../i18n'
 import {
   normalizedRole, memberPalette, isWebOperator,
   memberIssues, memberActivity, memberOperationalState, heartbeatState,
-  timeAgo, maxIssueLevel,
+  timeAgo, maxIssueLevel, commonNamePrefix, humanizeAgentName,
   avatarForMember, presenceIconName, operationIconName,
   type Issue, type MemberActivityData, type TrafficLevel,
 } from '../../composables/sessionHelpers'
@@ -95,6 +96,14 @@ defineEmits<{
 }>()
 
 const { locale, t } = useI18n(messages)
+
+const namePrefix = computed(() =>
+  commonNamePrefix(props.members.filter(m => !isWebOperator(m.agent_name)).map(m => m.agent_name))
+)
+
+function displayName(member: SessionMember): string {
+  return humanizeAgentName(member.agent_name, namePrefix.value)
+}
 
 function isStale(member: SessionMember): boolean {
   return heartbeatState(member, props.connectedSet) === 'stale'

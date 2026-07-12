@@ -110,32 +110,40 @@
               <image
                 class="node-badge"
                 :href="node.presenceUrl"
-                :x="node.shellR - 18"
+                :x="node.shellR - node.badgeSize"
                 :y="-node.shellR"
-                width="18"
-                height="18"
+                :width="node.badgeSize"
+                :height="node.badgeSize"
               />
               <image
                 v-if="!node.isOperator"
                 class="node-badge"
                 :href="node.operationUrl"
-                :x="node.shellR - 18"
-                :y="node.shellR - 18"
-                width="18"
-                height="18"
+                :x="node.shellR - node.badgeSize"
+                :y="node.shellR - node.badgeSize"
+                :width="node.badgeSize"
+                :height="node.badgeSize"
               />
-              <g v-if="node.pending" class="node-pending" :transform="`translate(${-node.shellR + 4}, ${-node.shellR + 6})`">
+              <g v-if="node.pending" class="node-pending" :transform="`translate(${-node.shellR + 4 * node.crownScale}, ${-node.shellR + 6 * node.crownScale}) scale(${node.crownScale})`">
                 <circle r="9.5" />
                 <text y="3.5" text-anchor="middle">{{ node.pendingLabel }}</text>
               </g>
-              <path v-if="node.isChief" class="node-crown" :transform="`translate(0, ${-node.shellR - 10})`" d="M-9 4 L-6 -4 L-3 0 L0 -6 L3 0 L6 -4 L9 4 Z" />
+              <path v-if="node.isChief" class="node-crown" :transform="`translate(0, ${-node.shellR - 10 * node.crownScale}) scale(${node.crownScale})`" d="M-9 4 L-6 -4 L-3 0 L0 -6 L3 0 L6 -4 L9 4 Z" />
               <text class="node-label" :x="node.label.nameX" :y="node.label.nameY" :text-anchor="node.label.anchor">{{ node.labelName }}</text>
               <text class="node-subtext" :x="node.label.subX" :y="node.label.subY" :text-anchor="node.label.anchor">{{ node.labelSub }}</text>
             </g>
           </g>
 
           <g v-for="flight in graph.flights" :key="flight.id" class="flight" :class="flight.classes" :style="{ '--impact-accent': flight.tone }">
-            <path class="flight-route" :d="flight.path" :style="{ stroke: flight.tone }" />
+            <defs>
+              <marker :id="flight.markerId" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" :fill="flight.tone" />
+              </marker>
+            </defs>
+            <!-- Route reads sender → receiver: dashes flow forward and an
+                 arrowhead lands on the receiver; the sender flashes a ring. -->
+            <path class="flight-route" :d="flight.path" :style="{ stroke: flight.tone }" :marker-end="`url(#${flight.markerId})`" />
+            <circle class="flight-origin" :cx="flight.fromX" :cy="flight.fromY" r="6" :style="{ stroke: flight.tone }" />
             <circle class="flight-impact" :cx="flight.toX" :cy="flight.toY" r="20" />
             <g class="flight-tag" :transform="`translate(${flight.tagX}, ${flight.tagY})`">
               <rect class="node-float-pill" x="-4" y="-14" :width="flight.pillW" height="20" rx="10" />
@@ -143,8 +151,10 @@
             </g>
             <g class="mail-glyph">
               <title>{{ flight.title }}</title>
-              <rect x="-8" y="-5.5" width="16" height="11" rx="2.5" />
-              <path d="M-8 -5.5 L0 1.5 L8 -5.5" />
+              <g :transform="`scale(${flight.glyphScale})`">
+                <rect x="-8" y="-5.5" width="16" height="11" rx="2.5" />
+                <path d="M-8 -5.5 L0 1.5 L8 -5.5" />
+              </g>
               <!-- SMIL clocks run on the SVG ROOT's timeline, not the element's
                    insertion time: with begin="0s" a late-mounted flight would
                    appear already frozen at its end. begin="indefinite" +
@@ -209,7 +219,7 @@ import {
   normalizedRole, memberPalette, heartbeatState, statusTone, nameInitials, isWebOperator,
   messageActionType, actionChipClass, deliveryMode, deliveryClass, actionTone, floatTagLabel,
   recentMemberActivity, memberActivity, mapRoutePath, sortedMembers,
-  eventClass, type TrafficLevel,
+  eventClass, hashValue, commonNamePrefix, humanizeAgentName, type TrafficLevel,
   avatarForMember, presenceIconName, operationIconName, memberOperationalState, memberIssues,
   linkFreshness, type LinkFreshness,
 } from '../../composables/sessionHelpers'
@@ -389,6 +399,8 @@ interface MapNode {
   coreR: number
   shellR: number
   auraR: number
+  badgeSize: number
+  crownScale: number
   label: NodeLabel
   labelName: string
   labelSub: string
@@ -413,6 +425,7 @@ interface MapEdge {
 
 interface MapFlight {
   id: string
+  markerId: string
   path: string
   tone: string
   classes: string
@@ -423,6 +436,9 @@ interface MapFlight {
   tagY: number
   toX: number
   toY: number
+  fromX: number
+  fromY: number
+  glyphScale: number
 }
 
 interface MapDot {
@@ -482,15 +498,24 @@ const graph = computed(() => {
     return tier
   }
 
-  // Generous canvas: the map takes the vertical room it has instead of
-  // huddling in a thin horizontal band. Width and height derive from the
-  // outer orbit so full rings AND side labels always fit.
-  const ringRadius = others.length ? Math.max(280, Math.min(320, 170 + others.length * 14)) : 0
+  // The canvas adapts to the crowd: a 2-agent room gets a SMALL viewBox with
+  // LARGE nodes (so it fills the card instead of two lost dots), a full room
+  // gets the wide orbit. `scale` multiplies every node metric.
+  const crowd = others.length
+  const scale = crowd <= 2 ? 1.5 : crowd <= 4 ? 1.22 : 1
+  const ringRadius = crowd ? Math.max(190, Math.min(320, 130 + crowd * 24)) : 0
   const outerR = ringRadius * 1.05
-  const width = others.length ? Math.round(outerR * 2 + 440) : 1040
-  const height = others.length ? Math.round(outerR * 2 + 190) : 530
+  const gutterX = crowd <= 2 ? 320 : 440
+  const gutterY = crowd <= 2 ? 160 : 190
+  const width = crowd ? Math.round(outerR * 2 + gutterX) : 1040
+  const height = crowd ? Math.round(outerR * 2 + gutterY) : 530
   const cx = width / 2
   const cy = height / 2
+
+  // Human-legible display names: strip the prefix every agent shares.
+  const namePrefix = commonNamePrefix(
+    members.filter(m => !isWebOperator(m.agent_name)).map(m => m.agent_name)
+  )
 
   // Orbit radii ARE the semantics: inner = conversing, mid = recent or with
   // pending work, outer = quiet. The dashed rings mark those bands.
@@ -637,18 +662,26 @@ const graph = computed(() => {
     const delivery = deliveryMode(event)
     const preview = clipText(String(event.payload_preview || '').trim(), 16)
     const tag = preview ? `${floatTagLabel(action, delivery)} ${preview}` : floatTagLabel(action, delivery)
+    const pillW = Math.max(42, 14 + tag.length * 5.6)
+    // The tag floats ABOVE the receiver, clear of its shell and clamped to the
+    // canvas, so it never covers the node it lands on.
+    const receiverShell = (String(event.target || '') === chiefMember.agent_name ? 38 : 32) * scale
     flights.push({
       id,
+      markerId: `fm${hashValue(id)}`,
       path: mapRoutePath(from, to, seed),
       tone: actionTone(action),
       classes: `${actionChipClass(action)} ${deliveryClass(delivery)}`,
       title: preview ? `${action || 'MSG'} · ${preview}` : action || 'MSG',
       tag,
-      pillW: Math.max(42, 14 + tag.length * 5.6),
-      tagX: to.x + 30,
-      tagY: Math.max(24, to.y - 34),
+      pillW,
+      tagX: Math.max(8, Math.min(to.x - pillW / 2, width - pillW - 8)),
+      tagY: Math.max(24, to.y - receiverShell - 26),
       toX: to.x,
       toY: to.y,
+      fromX: from.x,
+      fromY: from.y,
+      glyphScale: +(1.25 * scale).toFixed(2),
     })
   })
 
@@ -667,8 +700,8 @@ const graph = computed(() => {
     const opState = memberOperationalState(m, activity, memberIssues(m, cs))
     // Motion budget: only nodes that are part of something drift.
     const drifts = !isGhost && (pos.tier <= 1 || activity.isBusy)
-    const coreR = isChief ? 27 : 22
-    const shellR = isChief ? 38 : 32
+    const coreR = (isChief ? 27 : 22) * scale
+    const shellR = (isChief ? 38 : 32) * scale
     const pending = Number(m.pending_count || 0)
     const statusLabel = translateStatus(t, m.status) || m.status || '-'
     const dxRaw = pos.x - cx
@@ -702,10 +735,12 @@ const graph = computed(() => {
       operationUrl: stateIconUrl(operationIconName(opState, pending)),
       coreR,
       shellR,
-      auraR: isChief ? 47 : 41,
+      auraR: (isChief ? 47 : 41) * scale,
+      badgeSize: Math.round(18 * scale),
+      crownScale: scale,
       label: labelFor(dxRaw / len, dyRaw / len, shellR, isChief, others.length),
-      labelName: clipText(m.agent_name || '-', 26),
-      labelSub: clipText(m.current_task || statusLabel, 26),
+      labelName: clipText(humanizeAgentName(m.agent_name, namePrefix), 24),
+      labelSub: clipText(m.current_task || statusLabel, 28),
       title: `${m.agent_name || '-'} · ${statusLabel}${pending ? ` · +${pending}` : ''}`,
       dx: `${[0, 1.6, -1.6][idx % 3]}px`,
       dy: `${idx % 2 === 0 ? -2.4 : 2.4}px`,
@@ -867,6 +902,7 @@ const graph = computed(() => {
 .flight-route { stroke-width:2.5; stroke-dasharray:8 10; stroke-linecap:round; fill:none; animation:route-pulse 1.45s cubic-bezier(0.22,1,0.36,1) 2 both; }
 .flight.queued .flight-route { opacity:0.42; }
 .flight-impact { fill:none; stroke:var(--impact-accent, var(--accent)); stroke-width:3; opacity:0; animation:flight-impact 1.2s ease-out 2 both; }
+.flight-origin { fill:none; stroke-width:2.5; animation:flight-origin 1.1s ease-out 2 both; }
 /* Opacity-only fade-in: animating transform here would override the tag's
    positioning transform attribute and fling it to the SVG origin. */
 .flight-tag { animation:flight-tag-in 0.5s ease-out 1.2s both; }
@@ -885,6 +921,7 @@ const graph = computed(() => {
 @keyframes edge-in { from { opacity:0; } to { opacity:1; } }
 @keyframes route-pulse { 0% { stroke-dashoffset:0; opacity:0.18; } 18% { opacity:0.95; } 100% { stroke-dashoffset:-36; opacity:0.24; } }
 @keyframes flight-impact { 0% { r:16; opacity:0.45; } 100% { r:44; opacity:0; } }
+@keyframes flight-origin { 0% { r:4; opacity:0.9; } 100% { r:20; opacity:0; } }
 @keyframes flight-tag-in { from { opacity:0; } to { opacity:1; } }
 @keyframes node-live-halo { 0% { transform:scale(0.7); opacity:0.75; } 100% { transform:scale(2.1); opacity:0; } }
 @keyframes node-drift { 0%, 100% { transform:translate(0, 0); } 50% { transform:translate(var(--dx, 0px), var(--dy, -2.4px)); } }
@@ -894,6 +931,7 @@ const graph = computed(() => {
 
 html[data-motion="reduced"] .flight-route,
 html[data-motion="reduced"] .flight-impact,
+html[data-motion="reduced"] .flight-origin,
 html[data-motion="reduced"] .node-aura,
 html[data-motion="reduced"] .node-live-halo,
 html[data-motion="reduced"] .queue-dot {
@@ -916,6 +954,7 @@ html[data-motion="off"] .queue-dot {
 
 html[data-motion="off"] .flight-route,
 html[data-motion="off"] .flight-impact,
+html[data-motion="off"] .flight-origin,
 html[data-motion="off"] .flight-tag,
 html[data-motion="off"] .node-aura,
 html[data-motion="off"] .node-live-halo,

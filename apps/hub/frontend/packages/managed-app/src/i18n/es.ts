@@ -243,6 +243,11 @@ export const es: Record<string, string> = {
   web_operator_sending_as: 'Enviando como {agent}',
   web_operator_send: 'Enviar mensaje',
   web_operator_sent: 'Mensaje enviado',
+  web_operator_inbox_title: 'Bandeja del agente',
+  web_operator_inbox_receive: 'Recibir',
+  web_operator_inbox_listen: 'Escuchar',
+  web_operator_inbox_empty: 'Sin mensajes nuevos en la bandeja.',
+  web_operator_inbox_reply: 'Responder',
 
   // ── Admin Workspaces ──
   admin_kicker: 'VPS Admin',

@@ -27,6 +27,7 @@ from acp_managed.contracts import (
     CreateAgentTokenRequest,
     CreateRoomWallPostRequest,
     CreateWorkspacePresetRequest,
+    ReceiveRoomOperatorMessageRequest,
     SendRoomOperatorMessageRequest,
     CreateWorkspaceSessionRequest,
     UpdateRoomWallPostRequest,
@@ -919,6 +920,83 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
                     "action": action,
                 },
                 "send_result": sent,
+            }
+        )
+
+    @router.post("/managed/workspaces/{slug}/sessions/{session_id}/operator/receive")
+    async def managed_workspace_session_operator_receive(
+        slug: str,
+        session_id: str,
+        payload: ReceiveRoomOperatorMessageRequest,
+        request: Request,
+        acp_managed_session: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        principal, workspace, record = _require_workspace_session_record(
+            slug=slug,
+            session_id=session_id,
+            acp_managed_session=acp_managed_session,
+        )
+        # Reading the inbox consumes queued messages AS the owner agent, so it
+        # is only offered for rooms whose owner identity the dashboard holds.
+        if not record.owner_member_token:
+            raise HTTPException(
+                status_code=409,
+                detail="owner inbox is not available for this room",
+            )
+        await _active_session_detail_or_404(record.session_id)
+
+        try:
+            result = await runtime.coordination.wait_for_message(
+                session_id=record.session_id,
+                agent_name=record.owner_agent_name,
+                member_token=record.owner_member_token,
+                timeout_seconds=payload.timeout_seconds,
+            )
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="managed workspace session is not active") from exc
+        except SessionAccessError as exc:
+            # Includes wait conflicts: the real owner agent is already listening.
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        operator_payload = {
+            "operator_id": f"session-owner:{record.session_id}",
+            "agent_name": record.owner_agent_name,
+            "identity_source": "session_owner",
+        }
+        if result is None:
+            return JSONResponse(
+                {
+                    "status": "empty",
+                    "session_id": record.session_id,
+                    "operator": operator_payload,
+                    "message": None,
+                }
+            )
+
+        message = result.get("message") if isinstance(result, dict) else None
+        _audit(
+            request,
+            "managed.room_operator_message_received",
+            actor_email=principal.email,
+            target_type="workspace_session",
+            target_id=record.session_id,
+            metadata={
+                "workspace_id": workspace.workspace_id,
+                "workspace_slug": workspace.slug,
+                "operator_agent_name": record.owner_agent_name,
+                "identity_source": "session_owner",
+                "from": (message or {}).get("from"),
+                "action": (message or {}).get("action"),
+                "message_id": (message or {}).get("id"),
+            },
+        )
+
+        return JSONResponse(
+            {
+                "status": "delivered",
+                "session_id": record.session_id,
+                "operator": operator_payload,
+                "message": message,
             }
         )
 

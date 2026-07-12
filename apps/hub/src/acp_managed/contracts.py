@@ -73,6 +73,12 @@ class SendRoomOperatorMessageRequest(BaseModel):
     payload: str = Field(min_length=1, max_length=4000)
 
 
+class ReceiveRoomOperatorMessageRequest(BaseModel):
+    # Short poll by default: returns immediately when the owner inbox has a
+    # queued message, otherwise waits up to this long for one to arrive.
+    timeout_seconds: float = Field(default=0.2, ge=0, le=20)
+
+
 class AcceptWorkspaceInvitationRequest(BaseModel):
     password: str | None = Field(default=None, min_length=8, max_length=128)
 

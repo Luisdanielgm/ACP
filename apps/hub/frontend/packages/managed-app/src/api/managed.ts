@@ -326,6 +326,39 @@ export async function sendSessionOperatorMessage(
   )
 }
 
+export interface OperatorInboxMessage {
+  id?: string
+  from?: string
+  to?: string
+  action?: string
+  payload?: string
+  ts?: string
+}
+
+export interface ReceiveSessionOperatorMessageResult {
+  status: 'delivered' | 'empty'
+  session_id: string
+  operator: { operator_id: string; agent_name: string; identity_source: string }
+  message: OperatorInboxMessage | null
+}
+
+// Reads the next queued message addressed to the room's owner agent (the
+// dashboard-controlled chief). Consumes the message, exactly as the agent would.
+export async function receiveSessionOperatorMessage(
+  slug: string,
+  sessionId: string,
+  data: { timeout_seconds?: number } = {},
+) {
+  return apiFetch<ReceiveSessionOperatorMessageResult>(
+    `/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/operator/receive`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    },
+  )
+}
+
 // ── Invitations ──
 
 export interface InvitationPreview {
