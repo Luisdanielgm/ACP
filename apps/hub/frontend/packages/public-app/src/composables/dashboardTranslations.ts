@@ -37,3 +37,62 @@ export function translateEvent(t: Translator, value: string | undefined): string
   const result = t(key)
   return result !== key ? result : (value || '-')
 }
+
+// ── Display-name localization ──
+// Agent display names come from the agent's REAL name tokens ("Chief",
+// "People Manager"), which are usually English. When the UI runs in Spanish,
+// translate the common role phrases/words; anything unknown stays as-is.
+const ES_PHRASES: Record<string, string> = {
+  'people manager': 'Gerente de Personal',
+  'finance analyst': 'Analista de Finanzas',
+  'data analyst': 'Analista de Datos',
+  'ops agent': 'Agente de Operaciones',
+  'operations agent': 'Agente de Operaciones',
+  'support agent': 'Agente de Soporte',
+  'product manager': 'Gerente de Producto',
+  'project manager': 'Gerente de Proyecto',
+  'frontend developer': 'Desarrollador Frontend',
+  'backend developer': 'Desarrollador Backend',
+  'human resources': 'Recursos Humanos',
+  'customer success': 'Éxito del Cliente',
+}
+
+const ES_WORDS: Record<string, string> = {
+  chief: 'Jefe',
+  leader: 'Líder',
+  coordinator: 'Coordinador',
+  manager: 'Gerente',
+  agent: 'Agente',
+  worker: 'Trabajador',
+  assistant: 'Asistente',
+  analyst: 'Analista',
+  developer: 'Desarrollador',
+  designer: 'Diseñador',
+  engineer: 'Ingeniero',
+  researcher: 'Investigador',
+  writer: 'Redactor',
+  reviewer: 'Revisor',
+  tester: 'Probador',
+  support: 'Soporte',
+  finance: 'Finanzas',
+  operations: 'Operaciones',
+  ops: 'Operaciones',
+  sales: 'Ventas',
+  security: 'Seguridad',
+  legal: 'Legal',
+  research: 'Investigación',
+  people: 'Personal',
+}
+
+export function translateDisplayName(locale: string, label: string): string {
+  if (locale !== 'es') return label
+  const lower = label.toLowerCase()
+  if (ES_PHRASES[lower]) return ES_PHRASES[lower]
+  return label
+    .split(/\s+/)
+    .map(word => {
+      const hit = ES_WORDS[word.toLowerCase()]
+      return hit || word
+    })
+    .join(' ')
+}

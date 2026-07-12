@@ -129,7 +129,10 @@
               </g>
               <path v-if="node.isChief" class="node-crown" :transform="`translate(0, ${-node.shellR - 10 * node.crownScale}) scale(${node.crownScale})`" d="M-9 4 L-6 -4 L-3 0 L0 -6 L3 0 L6 -4 L9 4 Z" />
               <text class="node-label" :x="node.label.nameX" :y="node.label.nameY" :text-anchor="node.label.anchor">{{ node.labelName }}</text>
-              <text class="node-subtext" :x="node.label.subX" :y="node.label.subY" :text-anchor="node.label.anchor">{{ node.labelSub }}</text>
+              <g class="node-state" :class="node.stateTone" :transform="`translate(${node.label.subX}, ${node.label.subY})`">
+                <rect :x="node.statePillX" y="-11" :width="node.statePillW" height="16" rx="8" />
+                <text x="0" y="1" :text-anchor="node.label.anchor">{{ node.stateLabel }}</text>
+              </g>
             </g>
           </g>
 
@@ -144,7 +147,7 @@
             <path class="flight-route" :d="flight.path" :style="{ stroke: flight.tone }" :marker-end="`url(#${flight.markerId})`" />
             <circle class="flight-origin" :cx="flight.fromX" :cy="flight.fromY" r="6" :style="{ stroke: flight.tone }" />
             <circle class="flight-impact" :cx="flight.toX" :cy="flight.toY" r="20" />
-            <g class="flight-tag" :transform="`translate(${flight.tagX}, ${flight.tagY})`">
+            <g v-if="flight.tag" class="flight-tag" :transform="`translate(${flight.tagX}, ${flight.tagY})`">
               <rect class="node-float-pill" x="-4" y="-14" :width="flight.pillW" height="20" rx="10" />
               <text class="node-float-text" :x="flight.pillW / 2 - 4" y="0" text-anchor="middle">{{ flight.tag }}</text>
             </g>
@@ -259,7 +262,7 @@ import {
   linkFreshness, type LinkFreshness,
 } from '../../composables/sessionHelpers'
 import { avatarUrl, stateIconUrl } from '../../assets/acp/acpAssets'
-import { translateStatus } from '../../composables/dashboardTranslations'
+import { translateStatus, translateDisplayName } from '../../composables/dashboardTranslations'
 import type { SessionMember, SessionDetailPayload } from '../../api/sessions'
 
 export interface InboxMessage {
@@ -288,7 +291,7 @@ const emit = defineEmits<{
   'disconnect-member': [agentName: string]
 }>()
 
-const { t } = useI18n(messages)
+const { locale, t } = useI18n(messages)
 
 function clipText(value: string, max = 26): string {
   return value.length > max ? value.slice(0, max - 1) + '…' : value
@@ -326,7 +329,7 @@ const rosterDisplayNames = computed(() =>
 
 const selectedDisplayName = computed(() => {
   const name = selectedMember.value?.agent_name || ''
-  return rosterDisplayNames.value.get(name) || humanizeAgentName(name)
+  return translateDisplayName(locale.value, rosterDisplayNames.value.get(name) || humanizeAgentName(name))
 })
 
 // ── Inline send form ──
@@ -502,7 +505,10 @@ interface MapNode {
   crownScale: number
   label: NodeLabel
   labelName: string
-  labelSub: string
+  stateLabel: string
+  stateTone: string
+  statePillW: number
+  statePillX: number
   title: string
   dx: string
   dy: string
@@ -755,11 +761,20 @@ const graph = computed(() => {
     return !Number.isNaN(ts) && now - ts <= 30_000
   })
   flightEvents.slice(-4).forEach((event, ri) => {
-    const from = positions.get(String(event.actor || ''))
-    const to = positions.get(String(event.target || ''))
-    if (!from || !to) return
-    const id = `${event.ts}|${event.event}|${event.actor}|${event.target}`
-    if (seenFlightIds.has(id)) return
+    const actorName = String(event.actor || '')
+    const targetName = String(event.target || '')
+    const from = positions.get(actorName)
+    if (!from) return
+    // A broadcast ("all") fans out to every other member at once.
+    const isBroadcast = targetName.toLowerCase() === 'all' || targetName === '*'
+    const destinations = isBroadcast
+      ? [...positions.keys()].filter(name => name !== actorName).slice(0, 6)
+      : [targetName]
+    for (const destination of destinations) {
+    const to = positions.get(destination)
+    if (!to) continue
+    const id = `${event.ts}|${event.event}|${event.actor}|${destination}`
+    if (seenFlightIds.has(id)) continue
     seenFlightIds.add(id)
     const ts = Date.parse(String(event.ts || ''))
     // Curvature seed derives from the event itself, not the slice index, so a
@@ -768,11 +783,16 @@ const graph = computed(() => {
     const action = messageActionType(event)
     const delivery = deliveryMode(event)
     const preview = clipText(String(event.payload_preview || '').trim(), 30)
-    const tag = preview ? `${floatTagLabel(action, delivery)} ${preview}` : floatTagLabel(action, delivery)
+    // On a broadcast only the FIRST destination carries the floating tag —
+    // six identical pills at once would bury the map.
+    const showTag = !isBroadcast || destination === destinations[0]
+    const tag = showTag
+      ? (preview ? `${floatTagLabel(action, delivery)} ${preview}` : floatTagLabel(action, delivery))
+      : ''
     const pillW = Math.max(42, 14 + tag.length * 5.6)
     // The tag floats ABOVE the receiver, clear of its shell and clamped to the
     // canvas, so it never covers the node it lands on.
-    const receiverShell = (String(event.target || '') === chiefMember.agent_name ? 38 : 32) * scale
+    const receiverShell = (destination === chiefMember.agent_name ? 38 : 32) * scale
     flights.push({
       id,
       markerId: `fm${hashValue(id)}`,
@@ -790,6 +810,7 @@ const graph = computed(() => {
       fromY: from.y,
       glyphScale: +(1.25 * scale).toFixed(2),
     })
+    }
   })
 
   // ── Nodes ──
@@ -815,7 +836,14 @@ const graph = computed(() => {
     const dyRaw = pos.y - cy
     const len = Math.max(1, Math.hypot(dxRaw, dyRaw))
     const lbl = labelFor(dxRaw / len, dyRaw / len, shellR, isChief, others.length)
-    const displayName = displayNames.get(m.agent_name) || humanizeAgentName(m.agent_name)
+    const displayName = translateDisplayName(
+      locale.value,
+      displayNames.get(m.agent_name) || humanizeAgentName(m.agent_name)
+    )
+    // Status pill under the name (mockup style): coloured chip, not plain text.
+    const stateLabel = t('sd_' + opState.key)
+    const statePillW = Math.round(stateLabel.length * 6.6 + 18)
+    const statePillX = lbl.anchor === 'middle' ? -statePillW / 2 : lbl.anchor === 'start' ? -8 : -statePillW + 8
     const idx = nodeIndex
     nodeIndex += 1
     nodes.push({
@@ -849,7 +877,10 @@ const graph = computed(() => {
       crownScale: scale,
       label: lbl,
       labelName: clipText(displayName, lbl.clip),
-      labelSub: clipText(m.current_task || statusLabel, lbl.clip + 4),
+      stateLabel,
+      stateTone: opState.tone,
+      statePillW,
+      statePillX,
       title: `${m.agent_name || '-'} · ${statusLabel}${pending ? ` · +${pending}` : ''}`,
       dx: `${[0, 1.6, -1.6][idx % 3]}px`,
       dy: `${idx % 2 === 0 ? -2.4 : 2.4}px`,
@@ -979,7 +1010,20 @@ const graph = computed(() => {
 .cockpit-card.fit .squad-canvas { flex:1; min-height:0; }
 .cockpit-card.fit .squad-canvas svg { width:100%; height:100%; }
 .node-label { font-size:15px; font-weight:700; fill:var(--ink); letter-spacing:-0.01em; }
-.node-subtext { font-size:12px; fill:var(--muted); }
+
+/* Status pill under the node name — coloured chip per operational tone */
+.node-state text { font-size:9.5px; font-weight:800; letter-spacing:0.07em; text-transform:uppercase; }
+.node-state rect { stroke-width:1; }
+.node-state.idle rect { fill:rgba(161,161,170,0.1); stroke:rgba(161,161,170,0.25); }
+.node-state.idle text { fill:#a1a1aa; }
+.node-state.listening rect { fill:rgba(93,202,165,0.12); stroke:rgba(93,202,165,0.3); }
+.node-state.listening text { fill:#5DCAA5; }
+.node-state.alert rect { fill:rgba(239,159,39,0.12); stroke:rgba(239,159,39,0.3); }
+.node-state.alert text { fill:#EF9F27; }
+.node-state.working rect { fill:rgba(133,183,235,0.12); stroke:rgba(133,183,235,0.3); }
+.node-state.working text { fill:#85B7EB; }
+.node-state.warning rect { fill:rgba(240,153,123,0.12); stroke:rgba(240,153,123,0.3); }
+.node-state.warning text { fill:#F0997B; }
 .radar-ring { fill:none; stroke:var(--signal-line); stroke-width:1; stroke-dasharray:3 7; opacity:0.55; }
 
 /* Node positioning: the outer group carries the orbit position and GLIDES

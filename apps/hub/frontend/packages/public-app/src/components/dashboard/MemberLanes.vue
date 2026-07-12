@@ -80,7 +80,7 @@ import {
   type Issue, type MemberActivityData, type TrafficLevel,
 } from '../../composables/sessionHelpers'
 import { avatarUrl, stateIconUrl } from '../../assets/acp/acpAssets'
-import { translateRole } from '../../composables/dashboardTranslations'
+import { translateRole, translateDisplayName } from '../../composables/dashboardTranslations'
 import type { SessionMember } from '../../api/sessions'
 
 const props = defineProps<{
@@ -104,7 +104,10 @@ const displayNames = computed(() =>
 )
 
 function displayName(member: SessionMember): string {
-  return displayNames.value.get(member.agent_name) || humanizeAgentName(member.agent_name)
+  return translateDisplayName(
+    locale.value,
+    displayNames.value.get(member.agent_name) || humanizeAgentName(member.agent_name)
+  )
 }
 
 function isStale(member: SessionMember): boolean {

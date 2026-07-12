@@ -42,17 +42,9 @@
       </div>
 
       <div class="room-actions">
-        <button
-          class="icon-button"
-          type="button"
-          :class="{ active: legendOpen }"
-          :aria-label="t('room_legend_toggle')"
-          :title="t('room_legend_toggle')"
-          :aria-pressed="legendOpen"
-          @click="legendOpen = !legendOpen"
-        >
-          <RoomIcon name="info" :size="16" />
-        </button>
+        <span class="room-chip clock" :title="t('room_clock_title')">
+          <RoomIcon name="clock" :size="14" />{{ clockLabel }}
+        </span>
         <template v-if="session.adminActionsAvailable.value">
           <button
             class="icon-button"
@@ -126,19 +118,6 @@
     </div>
 
     <template v-if="session.payload.value">
-      <!-- Signal legend (toggled from the bar) -->
-      <div v-if="legendOpen" class="signal-legend">
-        <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('presence-online')" alt="" aria-hidden="true" />{{ st('sd_legend_connected') }}</span>
-        <span class="legend-chip" :title="st('sd_legend_stale_help')"><img class="legend-icon" :src="stateIconUrl('presence-disconnected')" alt="" aria-hidden="true" />{{ st('sd_legend_stale') }}</span>
-        <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('operation-working')" alt="" aria-hidden="true" />{{ st('sd_legend_working') }}</span>
-        <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('message-task')" alt="" aria-hidden="true" />{{ st('sd_legend_task') }}</span>
-        <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('message-information')" alt="" aria-hidden="true" />{{ st('sd_legend_info') }}</span>
-        <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('message-response')" alt="" aria-hidden="true" />{{ st('sd_legend_reply') }}</span>
-        <span class="legend-chip" :title="st('sd_legend_edge_fresh_help')"><img class="legend-icon" :src="stateIconUrl('link-current')" alt="" aria-hidden="true" />{{ st('sd_legend_edge_fresh') }}</span>
-        <span class="legend-chip" :title="st('sd_legend_edge_cooling_help')"><img class="legend-icon" :src="stateIconUrl('link-old')" alt="" aria-hidden="true" />{{ st('sd_legend_edge_cooling') }}</span>
-        <span class="legend-chip" :title="st('sd_legend_queued_help')"><img class="legend-icon" :src="stateIconUrl('result-pending')" alt="" aria-hidden="true" />{{ st('sd_legend_queued') }}</span>
-      </div>
-
       <!-- Pinned wall note: durable context stays visible without opening the dock -->
       <button
         v-if="pinnedPost"
@@ -171,17 +150,41 @@
             <span v-for="chip in pulseChips" :key="chip.key" class="pulse-chip" :class="chip.className">{{ chip.label }}</span>
           </template>
         </SquadMap>
-        <MemberLanes
-          :members="session.visibleMembers.value"
-          :activity-map="session.activityMap.value"
-          :connected-set="session.connectedSet.value"
-          :traffic-level="trafficLevel"
-          :is-first-render="session.isFirstRender.value"
-          :admin-actions-available="session.adminActionsAvailable.value"
-          :problem-mode="session.problemMode.value"
-          @disconnect-member="confirmDisconnect"
-        />
+        <div class="cockpit-right">
+          <MemberLanes
+            :members="session.visibleMembers.value"
+            :activity-map="session.activityMap.value"
+            :connected-set="session.connectedSet.value"
+            :traffic-level="trafficLevel"
+            :is-first-render="session.isFirstRender.value"
+            :admin-actions-available="session.adminActionsAvailable.value"
+            :problem-mode="session.problemMode.value"
+            @disconnect-member="confirmDisconnect"
+          />
+          <!-- Legend: always visible, mockup-style, under the lanes -->
+          <div class="signal-legend">
+            <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('presence-online')" alt="" aria-hidden="true" />{{ st('sd_legend_connected') }}</span>
+            <span class="legend-chip" :title="st('sd_legend_stale_help')"><img class="legend-icon" :src="stateIconUrl('presence-disconnected')" alt="" aria-hidden="true" />{{ st('sd_legend_stale') }}</span>
+            <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('operation-working')" alt="" aria-hidden="true" />{{ st('sd_legend_working') }}</span>
+            <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('message-task')" alt="" aria-hidden="true" />{{ st('sd_legend_task') }}</span>
+            <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('message-information')" alt="" aria-hidden="true" />{{ st('sd_legend_info') }}</span>
+            <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('message-response')" alt="" aria-hidden="true" />{{ st('sd_legend_reply') }}</span>
+            <span class="legend-chip" :title="st('sd_legend_edge_fresh_help')"><img class="legend-icon" :src="stateIconUrl('link-current')" alt="" aria-hidden="true" />{{ st('sd_legend_edge_fresh') }}</span>
+            <span class="legend-chip" :title="st('sd_legend_edge_cooling_help')"><img class="legend-icon" :src="stateIconUrl('link-old')" alt="" aria-hidden="true" />{{ st('sd_legend_edge_cooling') }}</span>
+            <span class="legend-chip" :title="st('sd_legend_queued_help')"><img class="legend-icon" :src="stateIconUrl('result-pending')" alt="" aria-hidden="true" />{{ st('sd_legend_queued') }}</span>
+          </div>
+        </div>
       </div>
+
+      <!-- Real-time activity feed: always visible under the cockpit -->
+      <section class="feed-strip">
+        <EventTimeline
+          :events="session.filteredHistory.value"
+          :members="session.members.value"
+          v-model:timeline-filter="session.timelineFilter.value"
+          :effective-motion="effectiveMotion"
+        />
+      </section>
 
       <!-- Dock: collapsible room panels -->
       <nav class="dock" :aria-label="t('room_dock_label')">
@@ -229,14 +232,6 @@
             v-model:agent-filter="session.agentFilter.value"
             v-model:problem-mode="session.problemMode.value"
             :problem-summary="session.problemSummary.value"
-          />
-        </div>
-        <div v-show="activeTab === 'timeline'" class="dock-panel-inner bare">
-          <EventTimeline
-            :events="session.filteredHistory.value"
-            :members="session.members.value"
-            v-model:timeline-filter="session.timelineFilter.value"
-            :effective-motion="effectiveMotion"
           />
         </div>
         <div v-show="activeTab === 'json'" class="dock-panel-inner bare">
@@ -354,7 +349,12 @@ const activitySpark = computed<number[]>(() => {
 
 const trafficLevel = computed(() => session.trafficSnapshot.value.level)
 const effectiveMotion = computed(() => resolveEffectiveMode(trafficLevel.value))
-const legendOpen = ref(false)
+
+// System clock in the room bar (mockup-style).
+const clockLabel = ref(new Date().toLocaleTimeString())
+const clockTimer = setInterval(() => {
+  clockLabel.value = new Date().toLocaleTimeString()
+}, 1000)
 
 const operatorMembers = computed(() =>
   session.members.value
@@ -424,7 +424,7 @@ const pulseChips = computed(() => {
 
 // ── Dock ──
 
-type DockTabId = 'wall' | 'files' | 'operator' | 'team' | 'timeline' | 'json'
+type DockTabId = 'wall' | 'files' | 'operator' | 'team' | 'json'
 
 interface DockTab {
   id: DockTabId
@@ -467,7 +467,6 @@ const dockTabs = computed<DockTab[]>(() => [
   { id: 'files', icon: 'folder', label: t('room_tab_files'), badge: filesCount.value },
   { id: 'operator', icon: 'send', label: t('room_tab_operator') },
   { id: 'team', icon: 'list', label: t('room_tab_team'), badge: session.members.value.length },
-  { id: 'timeline', icon: 'activity', label: t('room_tab_timeline') },
   { id: 'json', icon: 'code', label: t('room_tab_json') },
 ])
 
@@ -507,6 +506,7 @@ watch(inviteOpen, async open => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onInviteKeydown)
+  clearInterval(clockTimer)
 })
 
 async function copyInvite() {
@@ -779,6 +779,16 @@ watchEffect(() => {
 /* Cockpit — fills the remaining room height; each column manages its own overflow */
 .cockpit-grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 0.9fr); flex: 1; min-height: 0; }
 .cockpit-grid > * { min-height: 0; }
+.cockpit-right { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.cockpit-right > :first-child { flex: 1; min-height: 0; }
+
+/* Activity feed strip: always visible, scrolls inside itself */
+.feed-strip { max-height: 240px; overflow-y: auto; flex-shrink: 0; border-radius: 18px; }
+.feed-strip::-webkit-scrollbar { width: 6px; }
+.feed-strip::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 10px; }
+
+/* Room-bar clock */
+.room-chip.clock { font-variant-numeric: tabular-nums; }
 
 /* Dock */
 .dock { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }

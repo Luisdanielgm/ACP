@@ -353,6 +353,7 @@ export const en: Record<string, string> = {
   room_invite_copy: 'Copy again',
   room_invite_close: 'Close',
   room_legend_toggle: 'Signal legend',
+  room_clock_title: 'System time',
   room_live_retry: 'Retry',
   session_room_missing: 'Session not found in this workspace.',
   session_room_closed_title: 'This room is closed',
