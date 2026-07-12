@@ -37,6 +37,22 @@
           </svg>
         </button>
         <svg :viewBox="`0 0 ${graph.width} ${graph.height}`" role="img" :aria-label="t('sd_squad_map_title')">
+          <defs>
+            <marker
+              v-for="k in ['fresh', 'warm', 'cold', 'expired']"
+              :key="'ea-' + k"
+              :id="`edge-arrow-${k}`"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path class="edge-arrow" :class="k" d="M0 0 L10 5 L0 10 z" />
+            </marker>
+          </defs>
+
           <circle
             v-for="(ring, ri) in graph.rings"
             :key="'ring-' + ri"
@@ -46,15 +62,16 @@
             :r="ring"
           />
 
-          <g v-for="edge in graph.edges" :key="edge.id" class="relation" :class="[edge.heat, { held: edge.held }]">
+          <g v-for="edge in graph.edges" :key="edge.id" class="relation" :class="[edge.heat, edge.freshness, { held: edge.held }]">
             <title>{{ edge.title }}</title>
-            <path :d="edge.path" />
+            <path :d="edge.path" :marker-end="`url(#edge-arrow-${edge.markerKey})`" />
+            <image class="edge-icon" :href="edge.iconUrl" :x="edge.labelX - 13" :y="edge.labelY - 13" width="26" height="26" />
             <text
               v-if="edge.showLabel"
               class="relation-label"
               :class="edge.freshness"
               :x="edge.labelX"
-              :y="edge.labelY"
+              :y="edge.labelY - 22"
               text-anchor="middle"
             >{{ edge.label }}</text>
           </g>
@@ -127,11 +144,28 @@
                 <circle r="9.5" />
                 <text y="3.5" text-anchor="middle">{{ node.pendingLabel }}</text>
               </g>
-              <path v-if="node.isChief" class="node-crown" :transform="`translate(0, ${-node.shellR - 10 * node.crownScale}) scale(${node.crownScale})`" d="M-9 4 L-6 -4 L-3 0 L0 -6 L3 0 L6 -4 L9 4 Z" />
+              <image
+                v-if="node.isChief"
+                class="node-crown"
+                :href="crownUrl"
+                :x="-15 * node.crownScale"
+                :y="-node.shellR - 26 * node.crownScale"
+                :width="30 * node.crownScale"
+                :height="24 * node.crownScale"
+              />
               <text class="node-label" :x="node.label.nameX" :y="node.label.nameY" :text-anchor="node.label.anchor">{{ node.labelName }}</text>
               <g class="node-state" :class="node.stateTone" :transform="`translate(${node.label.subX}, ${node.label.subY})`">
                 <rect :x="node.statePillX" y="-11" :width="node.statePillW" height="16" rx="8" />
                 <text x="0" y="1" :text-anchor="node.label.anchor">{{ node.stateLabel }}</text>
+              </g>
+              <g class="node-hb">
+                <image :href="node.hbIconUrl" :x="node.hbIconX" :y="node.hbY - 12" width="15" height="15" />
+                <text :x="node.hbTextX" :y="node.hbY" :text-anchor="node.label.anchor">{{ node.hbLabel }}</text>
+              </g>
+              <g v-if="node.showQueue" class="node-queue">
+                <rect class="node-queue-track" :x="node.queueX" :y="node.queueY" :width="node.queueW" height="5" rx="2.5" />
+                <rect class="node-queue-fill" :x="node.queueX" :y="node.queueY" :width="node.queueFillW" height="5" rx="2.5" />
+                <text class="node-queue-text" :x="node.queueX + node.queueW + 6" :y="node.queueY + 5.5">{{ node.pendingLabel }}</text>
               </g>
             </g>
           </g>
@@ -147,9 +181,11 @@
             <path class="flight-route" :d="flight.path" :style="{ stroke: flight.tone }" :marker-end="`url(#${flight.markerId})`" />
             <circle class="flight-origin" :cx="flight.fromX" :cy="flight.fromY" r="6" :style="{ stroke: flight.tone }" />
             <circle class="flight-impact" :cx="flight.toX" :cy="flight.toY" r="20" />
-            <g v-if="flight.tag" class="flight-tag" :transform="`translate(${flight.tagX}, ${flight.tagY})`">
-              <rect class="node-float-pill" x="-4" y="-14" :width="flight.pillW" height="20" rx="10" />
-              <text class="node-float-text" :x="flight.pillW / 2 - 4" y="0" text-anchor="middle">{{ flight.tag }}</text>
+            <g v-if="flight.tagLines.length" class="flight-tag" :transform="`translate(${flight.tagX}, ${flight.tagY})`">
+              <rect class="node-float-pill" x="-4" y="-14" :width="flight.pillW" :height="flight.pillH" rx="10" />
+              <text class="node-float-text" y="0" text-anchor="middle">
+                <tspan v-for="(line, li) in flight.tagLines" :key="li" :x="flight.pillW / 2 - 4" :dy="li === 0 ? 0 : 13">{{ line }}</tspan>
+              </text>
             </g>
             <g class="mail-glyph">
               <title>{{ flight.title }}</title>
@@ -257,11 +293,11 @@ import {
   normalizedRole, memberPalette, heartbeatState, statusTone, isWebOperator,
   messageActionType, actionChipClass, deliveryMode, deliveryClass, actionTone, floatTagLabel,
   recentMemberActivity, memberActivity, mapRoutePath, sortedMembers,
-  eventClass, hashValue, agentDisplayNames, humanizeAgentName, type TrafficLevel,
+  eventClass, hashValue, agentDisplayNames, humanizeAgentName, timeAgo, type TrafficLevel,
   avatarForMember, presenceIconName, operationIconName, memberOperationalState, memberIssues,
-  linkFreshness, type LinkFreshness,
+  heartbeatTier, heartbeatIconName, linkFreshness, type LinkFreshness,
 } from '../../composables/sessionHelpers'
-import { avatarUrl, stateIconUrl } from '../../assets/acp/acpAssets'
+import { avatarUrl, stateIconUrl, objectUrl } from '../../assets/acp/acpAssets'
 import { translateStatus, translateDisplayName } from '../../composables/dashboardTranslations'
 import type { SessionMember, SessionDetailPayload } from '../../api/sessions'
 
@@ -296,6 +332,20 @@ const { locale, t } = useI18n(messages)
 function clipText(value: string, max = 26): string {
   return value.length > max ? value.slice(0, max - 1) + '…' : value
 }
+
+// Wrap a floating tag onto up to two lines, breaking at a word boundary —
+// longer previews stay readable without one endless pill.
+function wrapTagText(text: string, maxLine = 34): string[] {
+  if (text.length <= maxLine) return [text]
+  let cut = text.lastIndexOf(' ', maxLine)
+  if (cut < maxLine * 0.5) cut = maxLine
+  const first = text.slice(0, cut).trim()
+  let rest = text.slice(cut).trim()
+  if (rest.length > maxLine) rest = rest.slice(0, maxLine - 1) + '…'
+  return rest ? [first, rest] : [first]
+}
+
+const crownUrl = objectUrl('leader-crown', 128)
 
 // ── War-room mode + member quick card ──
 
@@ -509,6 +559,16 @@ interface MapNode {
   stateTone: string
   statePillW: number
   statePillX: number
+  hbIconUrl: string
+  hbLabel: string
+  hbIconX: number
+  hbTextX: number
+  hbY: number
+  showQueue: boolean
+  queueX: number
+  queueY: number
+  queueW: number
+  queueFillW: number
   title: string
   dx: string
   dy: string
@@ -522,6 +582,8 @@ interface MapEdge {
   held: boolean
   title: string
   freshness: LinkFreshness
+  markerKey: string
+  iconUrl: string
   showLabel: boolean
   label: string
   labelX: number
@@ -535,8 +597,9 @@ interface MapFlight {
   tone: string
   classes: string
   title: string
-  tag: string
+  tagLines: string[]
   pillW: number
+  pillH: number
   tagX: number
   tagY: number
   toX: number
@@ -570,7 +633,7 @@ const graph = computed(() => {
 
   // ── Relationships from the actual message history: the map draws
   // CONVERSATIONS, not topology ──
-  interface PairStat { a: string; b: string; lastTs: number; count: number; queuedTo: string }
+  interface PairStat { a: string; b: string; lastTs: number; count: number; queuedTo: string; lastAction: string }
   const pairs = new Map<string, PairStat>()
   const lastActivity = new Map<string, number>()
 
@@ -584,12 +647,13 @@ const graph = computed(() => {
     if (target) lastActivity.set(target, Math.max(lastActivity.get(target) || 0, ts))
     if (!actor || !target || actor === target) continue
     const key = actor < target ? `${actor}|${target}` : `${target}|${actor}`
-    const stat = pairs.get(key) || { a: actor, b: target, lastTs: 0, count: 0, queuedTo: '' }
+    const stat = pairs.get(key) || { a: actor, b: target, lastTs: 0, count: 0, queuedTo: '', lastAction: '' }
     stat.count += 1
     if (ts >= stat.lastTs) {
       stat.lastTs = ts
       stat.a = actor
       stat.b = target
+      stat.lastAction = messageActionType(event) || stat.lastAction
     }
     if (deliveryMode(event) === 'queued') stat.queuedTo = target
     pairs.set(key, stat)
@@ -634,7 +698,9 @@ const graph = computed(() => {
   // The canvas hugs the outermost OCCUPIED orbit — an empty outer band is
   // dead space that shrinks every node on screen.
   const occupiedR = crowd ? tierRadii[maxTier] : 0
-  const outerR = crowd ? occupiedR + memberShellR + 64 : 0
+  // 104 = room for the label stack under a node: name, state pill, heartbeat
+  // line and queue bar.
+  const outerR = crowd ? occupiedR + memberShellR + 104 : 0
   const gutterX = crowd <= 2 ? 280 : 420
   const gutterY = crowd <= 2 ? 130 : 180
   const width = crowd ? Math.round(outerR * 2 + gutterX) : 1040
@@ -663,6 +729,7 @@ const graph = computed(() => {
   // between two orbiting members ARC AWAY from the center so they never cut
   // through the chief sitting in the middle.
   const edges: MapEdge[] = []
+  const shellOf = (name: string) => (name === chiefMember.agent_name ? 38 : 32) * scale
   pairs.forEach((pair, key) => {
     const na = positions.get(pair.a)
     const nb = positions.get(pair.b)
@@ -670,19 +737,33 @@ const graph = computed(() => {
     const age = now - pair.lastTs
     const queuedTarget = pair.queuedTo ? positions.get(pair.queuedTo) : undefined
     const held = Boolean(queuedTarget && Number(queuedTarget.member.pending_count || 0) > 0)
-    if (age > EDGE_WINDOW && !held) return
+    // The chief's spokes never vanish — they age into an "expired" wire (the
+    // reference keeps VENCIDO links visible). Member-member arcs still fade
+    // out past the window to keep the map uncluttered.
+    const involvesChief = pair.a === chiefMember.agent_name || pair.b === chiefMember.agent_name
+    if (age > EDGE_WINDOW && !held && !involvesChief) return
     let heat: MapEdge['heat'] = age <= 45_000 ? 'fresh' : age <= 3 * 60_000 ? 'warm' : 'cold'
     if (held && heat === 'cold') heat = 'warm'
 
-    const involvesChief = pair.a === chiefMember.agent_name || pair.b === chiefMember.agent_name
     const freshness = linkFreshness(Math.round(age / 1000))
+    // Trim the wire to the shell rims: the LAST-direction arrowhead must land
+    // ON the receiver's frame, not vanish under the node circle drawn above.
+    const dxE = nb.x - na.x
+    const dyE = nb.y - na.y
+    const distE = Math.hypot(dxE, dyE) || 1
+    const uxE = dxE / distE
+    const uyE = dyE / distE
+    const ax = na.x + uxE * (shellOf(pair.a) + 4)
+    const ay = na.y + uyE * (shellOf(pair.a) + 4)
+    const bx = nb.x - uxE * (shellOf(pair.b) + 10)
+    const by = nb.y - uyE * (shellOf(pair.b) + 10)
     let path: string
     let labelX: number
     let labelY: number
     if (involvesChief) {
-      path = `M ${na.x.toFixed(1)} ${na.y.toFixed(1)} L ${nb.x.toFixed(1)} ${nb.y.toFixed(1)}`
-      labelX = (na.x + nb.x) / 2
-      labelY = (na.y + nb.y) / 2
+      path = `M ${ax.toFixed(1)} ${ay.toFixed(1)} L ${bx.toFixed(1)} ${by.toFixed(1)}`
+      labelX = (ax + bx) / 2
+      labelY = (ay + by) / 2
     } else {
       const midX = (na.x + nb.x) / 2
       const midY = (na.y + nb.y) / 2
@@ -706,15 +787,25 @@ const graph = computed(() => {
       const bulge = 2 * Math.max(16, 100 - clearance)
       const ctrlX = midX + (px / plen) * bulge
       const ctrlY = midY + (py / plen) * bulge
-      path = `M ${na.x.toFixed(1)} ${na.y.toFixed(1)} Q ${ctrlX.toFixed(1)} ${ctrlY.toFixed(1)} ${nb.x.toFixed(1)} ${nb.y.toFixed(1)}`
+      path = `M ${ax.toFixed(1)} ${ay.toFixed(1)} Q ${ctrlX.toFixed(1)} ${ctrlY.toFixed(1)} ${bx.toFixed(1)} ${by.toFixed(1)}`
       // Quadratic bezier midpoint (t=0.5): 0.25·A + 0.5·ctrl + 0.25·B.
-      labelX = 0.25 * na.x + 0.5 * ctrlX + 0.25 * nb.x
-      labelY = 0.25 * na.y + 0.5 * ctrlY + 0.25 * nb.y
+      labelX = 0.25 * ax + 0.5 * ctrlX + 0.25 * bx
+      labelY = 0.25 * ay + 0.5 * ctrlY + 0.25 * by
     }
+    // Mid-wire orb: the LAST message type on this relationship — the kit's 3D
+    // message orbs, exactly the mockup's floating ℹ/✓/✉ spheres.
+    const lastAction = pair.lastAction
+    const edgeOrb =
+      lastAction === 'TASK' ? 'task-orb'
+      : lastAction === 'REPLY' ? 'response-orb'
+      : lastAction === 'INFO' ? 'information-orb'
+      : 'system-orb'
     // Only the chief's spokes carry a freshness label — mirrors the reference
     // and keeps member-member arcs uncluttered (their heat colour already reads).
     edges.push({
       id: key, path, heat, held, freshness,
+      markerKey: freshness === 'expired' ? 'expired' : heat,
+      iconUrl: objectUrl(edgeOrb, 128),
       showLabel: involvesChief,
       label: t('sd_link_' + freshness),
       labelX, labelY,
@@ -782,14 +873,17 @@ const graph = computed(() => {
     const seed = Number.isNaN(ts) ? ri : Math.abs(ts) % 6
     const action = messageActionType(event)
     const delivery = deliveryMode(event)
-    const preview = clipText(String(event.payload_preview || '').trim(), 30)
+    const preview = clipText(String(event.payload_preview || '').trim(), 64)
     // On a broadcast only the FIRST destination carries the floating tag —
     // six identical pills at once would bury the map.
     const showTag = !isBroadcast || destination === destinations[0]
     const tag = showTag
       ? (preview ? `${floatTagLabel(action, delivery)} ${preview}` : floatTagLabel(action, delivery))
       : ''
-    const pillW = Math.max(42, 14 + tag.length * 5.6)
+    const tagLines = tag ? wrapTagText(tag) : []
+    const longestLine = tagLines.reduce((max, line) => Math.max(max, line.length), 0)
+    const pillW = Math.max(42, 14 + longestLine * 5.6)
+    const pillH = 20 + (tagLines.length - 1) * 13
     // The tag floats ABOVE the receiver, clear of its shell and clamped to the
     // canvas, so it never covers the node it lands on.
     const receiverShell = (destination === chiefMember.agent_name ? 38 : 32) * scale
@@ -800,8 +894,9 @@ const graph = computed(() => {
       tone: actionTone(action),
       classes: `${actionChipClass(action)} ${deliveryClass(delivery)}`,
       title: preview ? `${action || 'MSG'} · ${preview}` : action || 'MSG',
-      tag,
+      tagLines,
       pillW,
+      pillH,
       tagX: Math.max(8, Math.min(to.x - pillW / 2, width - pillW - 8)),
       tagY: Math.max(24, to.y - receiverShell - 26),
       toX: to.x,
@@ -828,8 +923,10 @@ const graph = computed(() => {
     const opState = memberOperationalState(m, activity, memberIssues(m, cs))
     // Motion budget: only nodes that are part of something drift.
     const drifts = !isGhost && (pos.tier <= 1 || activity.isBusy)
-    const coreR = (isChief ? 27 : 22) * scale
     const shellR = (isChief ? 38 : 32) * scale
+    // The portrait FILLS the frame (mockup look): only a 3px rim of shell
+    // shows around it, so the agent reads big instead of floating in padding.
+    const coreR = shellR - 3 * scale
     const pending = Number(m.pending_count || 0)
     const statusLabel = translateStatus(t, m.status) || m.status || '-'
     const dxRaw = pos.x - cx
@@ -844,6 +941,28 @@ const graph = computed(() => {
     const stateLabel = t('sd_' + opState.key)
     const statePillW = Math.round(stateLabel.length * 6.6 + 18)
     const statePillX = lbl.anchor === 'middle' ? -statePillW / 2 : lbl.anchor === 'start' ? -8 : -statePillW + 8
+    // Heartbeat line: pulse-level icon + last-seen age ("hace 10s").
+    const hbLabel = timeAgo(m.last_seen_at || m.joined_at, locale.value)
+    const hbTextW = hbLabel.length * 5.6
+    const hbY = lbl.subY + 21
+    let hbIconX: number
+    let hbTextX: number
+    if (lbl.anchor === 'start') {
+      hbIconX = lbl.subX
+      hbTextX = lbl.subX + 19
+    } else if (lbl.anchor === 'end') {
+      hbTextX = lbl.subX
+      hbIconX = lbl.subX - hbTextW - 19
+    } else {
+      hbTextX = 9
+      hbIconX = -hbTextW / 2 - 10
+    }
+    // Queue bar: honest load — pending messages, only when there are any.
+    const showQueue = pending > 0
+    const queueW = 44
+    const queueX = lbl.anchor === 'start' ? lbl.subX : lbl.anchor === 'end' ? lbl.subX - queueW - 16 : -(queueW + 16) / 2
+    const queueY = hbY + 10
+    const queueFillW = Math.max(4, Math.round(queueW * Math.min(1, pending / 5)))
     const idx = nodeIndex
     nodeIndex += 1
     nodes.push({
@@ -881,6 +1000,16 @@ const graph = computed(() => {
       stateTone: opState.tone,
       statePillW,
       statePillX,
+      hbIconUrl: stateIconUrl(heartbeatIconName(heartbeatTier(m, cs))),
+      hbLabel,
+      hbIconX,
+      hbTextX,
+      hbY,
+      showQueue,
+      queueX,
+      queueY,
+      queueW,
+      queueFillW,
       title: `${m.agent_name || '-'} · ${statusLabel}${pending ? ` · +${pending}` : ''}`,
       dx: `${[0, 1.6, -1.6][idx % 3]}px`,
       dy: `${idx % 2 === 0 ? -2.4 : 2.4}px`,
@@ -1024,6 +1153,21 @@ const graph = computed(() => {
 .node-state.working text { fill:#85B7EB; }
 .node-state.warning rect { fill:rgba(240,153,123,0.12); stroke:rgba(240,153,123,0.3); }
 .node-state.warning text { fill:#F0997B; }
+
+/* Heartbeat line + queue bar under the node */
+.node-hb text { font-size:10.5px; fill:var(--muted); }
+.node-queue-track { fill:rgba(148,163,184,0.16); }
+.node-queue-fill { fill:#EF9F27; }
+.node-queue-text { font-size:9.5px; font-weight:800; fill:#EF9F27; }
+
+/* Edge direction arrows + mid-wire message-type icon */
+.edge-arrow.fresh { fill:rgba(93,202,165,0.8); }
+.edge-arrow.warm { fill:rgba(93,202,165,0.45); }
+.edge-arrow.cold { fill:var(--signal-line); }
+.edge-arrow.expired { fill:rgba(240,153,123,0.5); }
+.edge-icon { opacity:0.95; }
+.relation.cold .edge-icon,
+.relation.expired .edge-icon { opacity:0.5; }
 .radar-ring { fill:none; stroke:var(--signal-line); stroke-width:1; stroke-dasharray:3 7; opacity:0.55; }
 
 /* Node positioning: the outer group carries the orbit position and GLIDES
@@ -1056,7 +1200,7 @@ const graph = computed(() => {
 }
 .node-pending circle { fill:#EF9F27; stroke:var(--node-core); stroke-width:2; }
 .node-pending text { fill:#231a02; font-size:10px; font-weight:800; }
-.node-crown { fill:#EF9F27; stroke:var(--node-core); stroke-width:1; }
+.node-crown { filter:drop-shadow(0 2px 3px rgba(0,0,0,0.45)); }
 
 /* Freshness label on the chief's spokes */
 .relation-label {
@@ -1075,6 +1219,8 @@ const graph = computed(() => {
 .relation.fresh path { stroke:rgba(93, 202, 165, 0.75); stroke-width:2.6; }
 .relation.warm path { stroke:rgba(93, 202, 165, 0.38); stroke-width:1.8; }
 .relation.cold path { stroke:var(--signal-line); stroke-width:1.2; stroke-dasharray:5 7; }
+/* Expired wire: still visible, but clearly dead (mockup's VENCIDO red dash). */
+.relation.expired path { stroke:rgba(240, 153, 123, 0.4); stroke-width:1.4; stroke-dasharray:4 8; }
 .relation.held path { stroke:rgba(239, 159, 39, 0.5); }
 .queue-dot {
   fill:#EF9F27; stroke:var(--node-core); stroke-width:1;

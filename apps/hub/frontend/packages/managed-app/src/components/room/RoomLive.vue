@@ -27,7 +27,7 @@
           :class="trafficLevel"
           :title="st('sd_traffic_recent_events', { count: String(session.trafficSnapshot.value.count) })"
         >
-          <RoomIcon name="activity" :size="14" />
+          <img class="spark-orb" :src="objectUrl('heartbeat-orb', 128)" alt="" aria-hidden="true" />
           <span class="spark-bars" aria-hidden="true">
             <i v-for="(h, i) in activitySpark" :key="i" :style="{ height: (2 + h * 13).toFixed(1) + 'px' }"></i>
           </span>
@@ -169,8 +169,10 @@
             <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('message-task')" alt="" aria-hidden="true" />{{ st('sd_legend_task') }}</span>
             <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('message-information')" alt="" aria-hidden="true" />{{ st('sd_legend_info') }}</span>
             <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('message-response')" alt="" aria-hidden="true" />{{ st('sd_legend_reply') }}</span>
-            <span class="legend-chip" :title="st('sd_legend_edge_fresh_help')"><img class="legend-icon" :src="stateIconUrl('link-current')" alt="" aria-hidden="true" />{{ st('sd_legend_edge_fresh') }}</span>
-            <span class="legend-chip" :title="st('sd_legend_edge_cooling_help')"><img class="legend-icon" :src="stateIconUrl('link-old')" alt="" aria-hidden="true" />{{ st('sd_legend_edge_cooling') }}</span>
+            <span class="legend-chip" :title="st('sd_legend_edge_fresh_help')"><img class="legend-icon" :src="stateIconUrl('link-current')" alt="" aria-hidden="true" />{{ st('sd_link_current') }}</span>
+            <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('link-recent')" alt="" aria-hidden="true" />{{ st('sd_link_recent') }}</span>
+            <span class="legend-chip" :title="st('sd_legend_edge_cooling_help')"><img class="legend-icon" :src="stateIconUrl('link-old')" alt="" aria-hidden="true" />{{ st('sd_link_old') }}</span>
+            <span class="legend-chip"><img class="legend-icon" :src="stateIconUrl('link-expired')" alt="" aria-hidden="true" />{{ st('sd_link_expired') }}</span>
             <span class="legend-chip" :title="st('sd_legend_queued_help')"><img class="legend-icon" :src="stateIconUrl('result-pending')" alt="" aria-hidden="true" />{{ st('sd_legend_queued') }}</span>
           </div>
         </div>
@@ -266,7 +268,7 @@ import {
   memberActivity,
 } from '@acp/public-app/composables/sessionHelpers'
 import { translateDelivery } from '@acp/public-app/composables/dashboardTranslations'
-import { stateIconUrl } from '@acp/public-app/assets/acp/acpAssets'
+import { stateIconUrl, objectUrl } from '@acp/public-app/assets/acp/acpAssets'
 import { sendSessionOperatorMessage, receiveSessionOperatorMessage, type RoomWallPost, type WorkspaceSession } from '../../api/managed'
 import { getApiErrorMessage } from '../../api/client'
 import { useManagedI18n } from '../../i18n'
@@ -631,6 +633,7 @@ watchEffect(() => {
 .room-chip.spark.medium { color: #EF9F27; }
 .room-chip.spark.high { color: #F0997B; }
 .room-chip.spark.critical { color: #AFA9EC; }
+.spark-orb { width: 16px; height: 16px; display: block; }
 .spark-bars { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 15px; }
 .spark-bars i { width: 2px; border-radius: 1px; background: currentColor; opacity: 0.75; min-height: 2px; transition: height 0.4s ease; }
 

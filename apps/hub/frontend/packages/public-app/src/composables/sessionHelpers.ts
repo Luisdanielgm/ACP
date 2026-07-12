@@ -466,10 +466,6 @@ export function linkFreshness(ageSeconds: number | null): LinkFreshness {
   return 'old'
 }
 
-export function linkIconName(freshness: LinkFreshness): string {
-  return `link-${freshness}`
-}
-
 export type HeartbeatTier = 'strong' | 'normal' | 'weak' | 'none'
 
 export function heartbeatTier(member: SessionMember, connectedSet: Set<string> = new Set()): HeartbeatTier {
@@ -508,6 +504,8 @@ export function operationIconName(op: OperationalState, pending = 0): string {
 // Message-type icon from an event.
 export function messageIconNameForEvent(event: SessionEvent): string {
   const ev = String(event.event || '').toUpperCase()
+  const detail = String(event.detail || '').toLowerCase()
+  if (['error', 'failed', 'rejected'].some(n => detail.includes(n))) return 'message-error'
   if (ev === 'HEARTBEAT') return 'message-heartbeat'
   if (String(event.target || '').toLowerCase() === 'all' || String(event.target || '') === '*') return 'message-broadcast'
   const action = messageActionType(event)

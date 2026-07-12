@@ -25,6 +25,7 @@
           class="event-card" :class="eventCardClasses(event)">
           <div class="event-top">
             <div style="display:flex;gap:8px;align-items:center">
+              <img class="event-type-icon" :src="stateIconUrl(messageIconNameForEvent(event))" alt="" aria-hidden="true" />
               <div class="event-name">{{ translateEvent(t, event.event) }}</div>
               <span v-if="messageActionType(event)" class="pill flow-pill" :class="actionChipClass(messageActionType(event))">
                 {{ t('sd_action_' + messageActionType(event)) }}
@@ -32,7 +33,10 @@
               <span class="actor-badge" :class="'role-' + (roleByAgent.get(event.actor || '') || 'member')">{{ event.actor || '-' }}</span>
               <span class="muted" style="font-size:11px">→ {{ event.target || '-' }}</span>
             </div>
-            <div class="pill">{{ timeAgo(event.ts, locale) }}</div>
+            <div class="pill result-pill">
+              <img v-if="resultIconUrl(event)" class="event-result-icon" :src="resultIconUrl(event)" alt="" aria-hidden="true" />
+              {{ timeAgo(event.ts, locale) }}
+            </div>
           </div>
           <div v-if="eventThreadText(event) || eventIssueSummary(event) || deliveryMode(event)" class="event-thread">
             <span class="event-marker" :class="eventMarkerClasses(event)"></span>
@@ -65,8 +69,9 @@ import { messages } from '../../i18n'
 import {
   eventIssues, eventClass, maxIssueLevel, primaryIssueLabel,
   messageActionType, actionChipClass, deliveryMode, deliveryClass,
-  normalizedRole, timeAgo, type Issue,
+  normalizedRole, timeAgo, messageIconNameForEvent, resultIconNameForEvent, type Issue,
 } from '../../composables/sessionHelpers'
+import { stateIconUrl } from '../../assets/acp/acpAssets'
 import { translateEvent, translateDelivery } from '../../composables/dashboardTranslations'
 import type { SessionEvent, SessionMember } from '../../api/sessions'
 import type { TimelineFilter } from '../../composables/useSessionDashboard'
@@ -94,6 +99,16 @@ const roleByAgent = computed(() => {
   }
   return map
 })
+
+// Result icon (delivered/pending/completed/rejected) — only for events that
+// actually carry an outcome; session lifecycle rows have none.
+function resultIconUrl(event: SessionEvent): string {
+  const ev = String(event.event || '').toUpperCase()
+  const hasOutcome =
+    eventClass(event.event) === 'message'
+    || ['RUN_FINISHED', 'RUN_REPLY_SENT', 'WAIT_TIMEOUT'].includes(ev)
+  return hasOutcome ? stateIconUrl(resultIconNameForEvent(event)) : ''
+}
 
 function getEventIssues(event: SessionEvent): Issue[] {
   const membersByName = new Map(props.members.map(m => [m.agent_name, m]))
@@ -197,6 +212,9 @@ watch(() => props.events.length, () => {
 .event-card:hover { border-color:var(--accent); transform:translateY(-3px); box-shadow:var(--shadow-glow); }
 .event-top { display:flex; justify-content:space-between; gap:8px; align-items:center; }
 .event-name { font-weight:600; font-size:12px; letter-spacing:0.04em; color:var(--accent); }
+.event-type-icon { width:17px; height:17px; flex-shrink:0; display:block; }
+.result-pill { display:inline-flex; align-items:center; gap:5px; }
+.event-result-icon { width:14px; height:14px; display:block; }
 .event-thread { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:10px; color:var(--muted); font-size:11px; }
 .event-thread-copy { font-weight:600; color:var(--event-ink, var(--ink)); }
 .event-marker { width:10px; height:10px; border-radius:50%; flex-shrink:0; background:rgba(148,163,184,0.5); box-shadow:0 0 0 4px rgba(148,163,184,0.08); }
