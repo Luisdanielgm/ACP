@@ -1145,7 +1145,7 @@ watchEffect(() => {
   z-index:210;
   display:flex;
   justify-content:flex-end;
-  padding:94px 16px 16px;
+  padding:72px 16px 18px;
   background:rgba(0,0,0,0.5);
   backdrop-filter:blur(4px);
   -webkit-backdrop-filter:blur(4px);
@@ -1158,9 +1158,9 @@ watchEffect(() => {
   grid-template-rows:auto minmax(0, 1fr);
   border: 1px solid var(--line);
   border-radius: 18px;
-  background: var(--panel);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background:color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter:blur(20px) saturate(1.08);
+  -webkit-backdrop-filter:blur(20px) saturate(1.08);
   box-shadow: var(--shadow-elev);
   overflow:hidden;
   outline:none;
