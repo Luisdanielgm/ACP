@@ -13,7 +13,7 @@
         between orbits via a CSS transition, and per-event effects (envelope,
         ripples) play exactly once when their event first appears.
       -->
-      <div v-else class="squad-canvas" @click="onCanvasClick">
+      <div v-else ref="canvasRef" class="squad-canvas" @click="onCanvasClick">
         <!-- In-canvas chrome: live status chips (top-left) and the expand
              toggle (top-right) live ON the map — the map needs no header. -->
         <div class="canvas-status">
@@ -43,23 +43,24 @@
               :key="'ea-' + k"
               :id="`edge-arrow-${k}`"
               viewBox="0 0 10 10"
-              refX="8"
+              refX="7.5"
               refY="5"
-              markerWidth="6"
-              markerHeight="6"
+              markerWidth="8"
+              markerHeight="8"
               orient="auto-start-reverse"
             >
               <path class="edge-arrow" :class="k" d="M0 0 L10 5 L0 10 z" />
             </marker>
           </defs>
 
-          <circle
+          <ellipse
             v-for="(ring, ri) in graph.rings"
             :key="'ring-' + ri"
             class="radar-ring"
             :cx="graph.cx"
             :cy="graph.cy"
-            :r="ring"
+            :rx="ring.rx"
+            :ry="ring.ry"
           />
 
           <g v-for="edge in graph.edges" :key="edge.id" class="relation" :class="[edge.heat, edge.freshness, { held: edge.held }]">
@@ -357,6 +358,26 @@ const crownUrl = objectUrl('leader-crown', 128)
 // ── War-room mode + member quick card ──
 
 const cardRef = ref<HTMLElement | null>(null)
+const canvasRef = ref<HTMLElement | null>(null)
+const canvasSize = ref({ width: 0, height: 0 })
+let canvasResizeObserver: ResizeObserver | null = null
+
+function observeCanvas(element: HTMLElement | null) {
+  canvasResizeObserver?.disconnect()
+  canvasResizeObserver = null
+  if (!element || typeof ResizeObserver === 'undefined') return
+  const updateSize = () => {
+    const rect = element.getBoundingClientRect()
+    if (rect.width > 0 && rect.height > 0) {
+      canvasSize.value = { width: rect.width, height: rect.height }
+    }
+  }
+  canvasResizeObserver = new ResizeObserver(updateSize)
+  canvasResizeObserver.observe(element)
+  updateSize()
+}
+
+watch(canvasRef, observeCanvas, { flush: 'post' })
 const expanded = ref(false)
 const selectedName = ref('')
 const popoverX = ref(0)
@@ -499,6 +520,7 @@ watch([selectedName, expanded], ([name, isExpanded]) => {
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick, true)
   document.removeEventListener('keydown', onKeydown)
+  canvasResizeObserver?.disconnect()
 })
 
 // ── Graph model ──
@@ -514,10 +536,10 @@ interface NodeLabel {
 
 // Labels sit on the OUTER side of each node (relative coordinates: the node
 // group is translated to its position, so labels are offsets from 0,0).
-function labelFor(ux: number, uy: number, shellR: number, isChief: boolean, ringSize: number): NodeLabel {
+function labelFor(ux: number, uy: number, shellR: number, isChief: boolean, ringSize: number, fitWide = false): NodeLabel {
   if (!isChief) {
     const sideThreshold = ringSize > 8 ? 0.25 : 0.55
-    if (Math.abs(ux) > sideThreshold) {
+    if (!fitWide && Math.abs(ux) > sideThreshold) {
       const side = ux > 0 ? 1 : -1
       const lx = side * (shellR + 16)
       return { anchor: side > 0 ? 'start' : 'end', nameX: lx, nameY: -2, subX: lx, subY: 16, clip: 20 }
@@ -707,16 +729,30 @@ const graph = computed(() => {
   // The canvas hugs the outermost OCCUPIED orbit — an empty outer band is
   // dead space that shrinks every node on screen.
   const occupiedR = crowd ? tierRadii[maxTier] : 0
-  // 104 = room for the label stack under a node: name, state pill, heartbeat
-  // line and queue bar.
+  const measuredAspect = canvasSize.value.height > 0
+    ? canvasSize.value.width / canvasSize.value.height
+    : 1.75
+  const fitAspect = Math.max(1.25, Math.min(2.65, measuredAspect))
+  const useAspectLayout = Boolean(props.fitHeight)
   const outerR = crowd ? occupiedR + memberShellR + 104 : 0
-  const gutterX = crowd <= 2 ? 280 : 420
-  const gutterY = crowd <= 2 ? 130 : 180
-  const width = crowd ? Math.round(outerR * 2 + gutterX) : 1040
-  const height = crowd ? Math.round(outerR * 2 + gutterY) : 530
+  const naturalGutterX = crowd <= 2 ? 280 : 420
+  const naturalGutterY = crowd <= 2 ? 130 : 180
+  const height = useAspectLayout
+    ? 560
+    : crowd ? Math.round(outerR * 2 + naturalGutterY) : 530
+  const width = useAspectLayout
+    ? Math.round(height * fitAspect)
+    : crowd ? Math.round(outerR * 2 + naturalGutterX) : 1040
   const cx = width / 2
-  const cy = height / 2
-  const rings = crowd ? tierRadii.slice(0, maxTier + 1) : [90, 150, 210]
+  const cy = useAspectLayout ? height * 0.46 : height / 2
+  const targetStretchX = useAspectLayout ? Math.max(1.1, Math.min(1.55, fitAspect * 0.78)) : 1
+  const targetStretchY = useAspectLayout ? 0.62 : 1
+  const maxOrbitX = Math.max(1, width / 2 - memberShellR - 38)
+  const maxOrbitY = Math.max(1, Math.min(cy - memberShellR - 34, height - cy - memberShellR - 82))
+  const stretchX = crowd ? Math.min(targetStretchX, maxOrbitX / Math.max(1, occupiedR)) : 1
+  const stretchY = crowd ? Math.min(targetStretchY, maxOrbitY / Math.max(1, occupiedR)) : 1
+  const visibleRings = crowd ? tierRadii.slice(0, maxTier + 1) : [90, 150, 210]
+  const rings = visibleRings.map(radius => ({ rx: radius * stretchX, ry: radius * stretchY }))
 
   const positions = new Map<string, { x: number; y: number; tier: number; member: SessionMember }>()
   positions.set(chiefMember.agent_name, { x: cx, y: cy, tier: 0, member: chiefMember })
@@ -726,8 +762,8 @@ const graph = computed(() => {
     const angle = startAngle + (mi * 2 * Math.PI) / orbiting.length
     const tier = tiersByName.get(member.agent_name) ?? 2
     positions.set(member.agent_name, {
-      x: cx + tierRadii[tier] * Math.cos(angle),
-      y: cy + tierRadii[tier] * Math.sin(angle),
+      x: cx + tierRadii[tier] * stretchX * Math.cos(angle),
+      y: cy + tierRadii[tier] * stretchY * Math.sin(angle),
       tier,
       member,
     })
@@ -933,15 +969,15 @@ const graph = computed(() => {
     // Motion budget: only nodes that are part of something drift.
     const drifts = !isGhost && (pos.tier <= 1 || activity.isBusy)
     const shellR = (isChief ? 38 : 32) * scale
-    // The portrait FILLS the frame (mockup look): only a 3px rim of shell
+    // The portrait FILLS the frame: only a slim warm rim remains visible.
     // shows around it, so the agent reads big instead of floating in padding.
-    const coreR = shellR - 3 * scale
+    const coreR = shellR - 2 * scale
     const pending = Number(m.pending_count || 0)
     const statusLabel = translateStatus(t, m.status) || m.status || '-'
     const dxRaw = pos.x - cx
     const dyRaw = pos.y - cy
     const len = Math.max(1, Math.hypot(dxRaw, dyRaw))
-    const lbl = labelFor(dxRaw / len, dyRaw / len, shellR, isChief, others.length)
+    const lbl = labelFor(dxRaw / len, dyRaw / len, shellR, isChief, others.length, useAspectLayout)
     const displayName = translateDisplayName(
       locale.value,
       displayNames.get(m.agent_name) || humanizeAgentName(m.agent_name)
@@ -1144,6 +1180,7 @@ const graph = computed(() => {
    SVG scales down to fit the available box (default preserveAspectRatio meet),
    so the whole room fits one viewport without page scroll. */
 .cockpit-card.fit { display:flex; flex-direction:column; height:100%; min-height:0; }
+.cockpit-card.fit { padding:10px; }
 .cockpit-card.fit .squad-map { flex:1; min-height:0; display:flex; }
 .cockpit-card.fit .squad-canvas { flex:1; min-height:0; }
 .cockpit-card.fit .squad-canvas svg { width:100%; height:100%; }
@@ -1225,11 +1262,11 @@ const graph = computed(() => {
    fade to a thin dashed whisper, held ones stay warm while work is unread.
    New edges ease in instead of popping. */
 .relation path { fill:none; stroke-linecap:round; animation:edge-in 0.5s ease both; transition:stroke 0.6s ease, stroke-width 0.6s ease; }
-.relation.fresh path { stroke:rgba(93, 202, 165, 0.75); stroke-width:2.6; }
-.relation.warm path { stroke:rgba(93, 202, 165, 0.38); stroke-width:1.8; }
-.relation.cold path { stroke:var(--signal-line); stroke-width:1.2; stroke-dasharray:5 7; }
+.relation.fresh path { stroke:rgba(93, 202, 165, 0.82); stroke-width:3.2; }
+.relation.warm path { stroke:rgba(93, 202, 165, 0.48); stroke-width:2.3; }
+.relation.cold path { stroke:var(--signal-line); stroke-width:1.7; stroke-dasharray:5 7; }
 /* Expired wire: still visible, but clearly dead (mockup's VENCIDO red dash). */
-.relation.expired path { stroke:rgba(240, 153, 123, 0.4); stroke-width:1.4; stroke-dasharray:4 8; }
+.relation.expired path { stroke:rgba(240, 153, 123, 0.5); stroke-width:1.9; stroke-dasharray:4 8; }
 .relation.held path { stroke:rgba(239, 159, 39, 0.5); }
 .queue-dot {
   fill:#EF9F27; stroke:var(--node-core); stroke-width:1;

@@ -4,7 +4,7 @@
       <ManagedNav />
     </header>
     <main id="main-content">
-      <section class="room-page">
+      <section class="room-page" :class="{ 'live-room-page': !!session && !isClosed }">
         <div v-if="loading" class="room-skeleton" role="status" :aria-label="t('loading')">
           <SkeletonBlock h="52px" width="100%" />
           <SkeletonBlock h="320px" width="100%" />
@@ -133,6 +133,14 @@ watchEffect(() => {
   flex-direction: column;
   gap: 12px;
 }
+.room-page.live-room-page {
+  height: calc(100dvh - 78px);
+  margin-block: 0;
+  padding-block: 10px;
+  overflow: hidden;
+  min-height: 0;
+}
+.room-page.live-room-page > :deep(*) { min-height: 0; }
 .room-skeleton { display: flex; flex-direction: column; gap: 14px; }
 .closed-notice {
   display: flex;
@@ -174,5 +182,12 @@ watchEffect(() => {
 .empty-title { margin: 0; color: var(--muted); }
 @media (max-width: 768px) {
   .room-page { padding: 0 14px; margin: 16px auto; }
+  .room-page.live-room-page {
+    height: auto;
+    min-height: calc(100dvh - 72px);
+    margin: 12px auto;
+    padding-block: 0;
+    overflow: visible;
+  }
 }
 </style>

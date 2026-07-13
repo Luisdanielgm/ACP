@@ -200,8 +200,11 @@ function laneClasses(member: SessionMember): string[] {
 .lane-stack::-webkit-scrollbar-thumb:hover { background:var(--scroll-thumb-hover); }
 
 .lane {
-  display:flex; align-items:center; gap:12px;
-  padding:11px 12px; border:1px solid var(--line); border-radius:12px;
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) auto;
+  grid-template-rows:auto auto;
+  gap:8px 10px;
+  padding:10px 11px; border:1px solid var(--line); border-radius:12px;
   background:var(--card-bg-strong); position:relative; overflow:hidden;
   transition:border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -210,18 +213,18 @@ function laneClasses(member: SessionMember): string[] {
 .lane.is-stale { opacity:0.72; }
 .lane:hover { border-color:var(--hover-line); }
 
-.lane-avatar { position:relative; width:38px; height:38px; flex-shrink:0; }
-.lane-avatar-face { width:38px; height:38px; border-radius:50%; object-fit:cover; border:2px solid var(--role-accent, var(--accent)); display:block; }
+.lane-avatar { position:relative; width:44px; height:44px; flex-shrink:0; }
+.lane-avatar-face { width:44px; height:44px; border-radius:50%; object-fit:cover; border:2px solid var(--role-accent, var(--accent)); display:block; }
 .lane-avatar-face.ghost { filter:grayscale(1) brightness(0.7); opacity:0.6; }
 .lane-avatar-badge { position:absolute; right:-2px; bottom:-2px; width:15px; height:15px; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.45)); }
 .lane-crown { position:absolute; top:-9px; left:50%; transform:translateX(-50%); font-size:12px; color:#EF9F27; line-height:1; text-shadow:0 1px 2px rgba(0,0,0,0.5); }
 
 /* Identity and cells SHARE the row proportionally (mockup ratio ~40/60):
    the name column can never collapse to zero, the cells shrink gracefully. */
-.lane-id { flex:1 1 42%; min-width:150px; display:flex; align-items:center; gap:10px; }
+.lane-id { grid-column:1; grid-row:1; min-width:0; display:flex; align-items:center; gap:10px; }
 .lane-id-text { min-width:0; flex:1; display:flex; flex-direction:column; gap:4px; }
 .lane-line { display:flex; align-items:center; gap:8px; min-width:0; overflow:hidden; }
-.lane-name { font-size:13px; font-weight:700; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lane-name { min-width:0; flex:1; font-size:13px; font-weight:800; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .lane-role-pill { flex-shrink:0; padding:1px 8px; border-radius:999px; border:1px solid var(--line); background:var(--soft); font-size:9px; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; }
 .lane-role-pill.role-chief { color:#EF9F27; border-color:rgba(239,159,39,0.24); background:rgba(239,159,39,0.09); }
 .lane-role-pill.role-collaborator { color:#1D9E75; border-color:rgba(29,158,117,0.24); background:rgba(29,158,117,0.09); }
@@ -239,18 +242,17 @@ function laneClasses(member: SessionMember): string[] {
 .op-chip.working { color:#85B7EB; background:rgba(133,183,235,0.08); border:1px solid rgba(133,183,235,0.18); }
 .op-chip.warning { color:#F0997B; background:rgba(240,153,123,0.08); border:1px solid rgba(240,153,123,0.18); }
 .op-icon { width:12px; height:12px; display:inline-block; }
-.lane-provider { flex-shrink:0; padding:1px 7px; border-radius:999px; border:1px solid var(--line); background:var(--soft); font-size:8.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:var(--muted); }
+.lane-provider { min-width:0; max-width:38%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:1px 7px; border-radius:999px; border:1px solid var(--line); background:var(--soft); font-size:8.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:var(--muted); opacity:0.72; }
 
 /* Boxed stat cells (mockup style): label on top, value below. The cell strip
    flexes with the row — every cell shrinks instead of overflowing the panel. */
-.lane-cells { flex:1 1 58%; min-width:0; display:flex; gap:8px; align-items:stretch; }
-.lane-cell { flex:1; min-width:0; display:flex; flex-direction:column; gap:3px; justify-content:center; padding:6px 9px; border:1px solid var(--line); border-radius:10px; background:var(--card-bg-soft); }
+.lane-cells { grid-column:1; grid-row:2; min-width:0; display:grid; grid-template-columns:minmax(56px, .72fr) minmax(78px, 1fr) minmax(0, 1.8fr); gap:6px; align-items:stretch; }
+.lane-cell { min-width:0; display:flex; flex-direction:column; gap:3px; justify-content:center; padding:6px 8px; border:1px solid var(--line); border-radius:9px; background:var(--card-bg-soft); }
 .cell-label { font-size:8.5px; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.cell-value { font-size:12px; font-weight:800; color:var(--ink); line-height:1.15; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cell-value { font-size:13px; font-weight:850; font-variant-numeric:tabular-nums; color:var(--ink); line-height:1.15; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .lane-cell.warn .cell-value { color:#EF9F27; }
-.lane-cell.task-cell { flex:1.6; }
-.cell-value.clamp { font-size:10.5px; font-weight:600; color:var(--muted); white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; word-break:break-word; }
-.lane-kick { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; padding:0; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--muted); cursor:pointer; transition:all 0.15s ease; }
+.cell-value.clamp { font-size:10.5px; font-weight:650; color:var(--muted); white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
+.lane-kick { grid-column:2; grid-row:1 / 3; align-self:center; display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; padding:0; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--muted); cursor:pointer; transition:all 0.15s ease; }
 .lane-kick:hover { color:#F0997B; border-color:rgba(240,153,123,0.4); background:rgba(240,153,123,0.08); }
 
 /* Empty state */

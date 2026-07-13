@@ -117,14 +117,14 @@
       <span>{{ st('sd_session_waiting_load') }}</span>
     </div>
 
-    <template v-if="session.payload.value">
+    <div v-if="session.payload.value" class="room-shell">
       <!-- Pinned wall note: durable context stays visible without opening the dock -->
       <button
         v-if="pinnedPost"
         class="pinned-banner"
         type="button"
         :title="t('room_tab_wall')"
-        @click="activeTab = 'wall'"
+        @click="openDock('wall')"
       >
         <RoomIcon name="pin" :size="13" />
         <span class="pinned-banner-body">{{ pinnedPost.body }}</span>
@@ -159,6 +159,8 @@
             :members="session.members.value"
             v-model:timeline-filter="session.timelineFilter.value"
             :effective-motion="effectiveMotion"
+            compact
+            :compact-rows="3"
           />
         </section>
         </div>
@@ -199,6 +201,7 @@
           type="button"
           :class="{ active: activeTab === tab.id }"
           :aria-expanded="activeTab === tab.id"
+          aria-controls="room-dock-dialog"
           @click="toggleTab(tab.id)"
         >
           <RoomIcon :name="tab.icon" :size="15" />
@@ -207,45 +210,66 @@
         </button>
       </nav>
 
-      <section v-show="activeTab" class="dock-panel">
-        <div v-show="activeTab === 'wall'" class="dock-panel-inner">
-          <RoomWallPanel
-            :slug="slug"
-            :session-id="sessionId"
-            @count="wallCount = $event"
-            @pinned="pinnedPost = $event"
-          />
+      <Teleport to="body">
+        <div v-show="activeTab" class="dock-overlay" @click.self="closeDock">
+          <section
+            id="room-dock-dialog"
+            ref="dockDialogRef"
+            class="dock-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="room-dock-title"
+            tabindex="-1"
+            @keydown="onDockKeydown"
+          >
+            <header class="dock-panel-head">
+              <strong id="room-dock-title">{{ activeDockLabel }}</strong>
+              <button class="icon-button" type="button" :aria-label="t('room_invite_close')" @click="closeDock">
+                <RoomIcon name="x" :size="15" />
+              </button>
+            </header>
+            <div class="dock-panel-scroll">
+              <div v-show="activeTab === 'wall'" class="dock-panel-inner">
+                <RoomWallPanel
+                  :slug="slug"
+                  :session-id="sessionId"
+                  @count="wallCount = $event"
+                  @pinned="pinnedPost = $event"
+                />
+              </div>
+              <div v-show="activeTab === 'files'" class="dock-panel-inner">
+                <RoomFilesPanel :slug="slug" :session-id="sessionId" @count="filesCount = $event" />
+              </div>
+              <div v-show="activeTab === 'operator'" class="dock-panel-inner">
+                <RoomOperatorPanel
+                  :slug="slug"
+                  :session-id="sessionId"
+                  :members="operatorMembers"
+                />
+              </div>
+              <div v-show="activeTab === 'team'" class="dock-panel-inner bare">
+                <MemberRoster
+                  :members="session.members.value"
+                  :visible-members="session.visibleMembers.value"
+                  :activity-map="session.activityMap.value"
+                  :connected-set="session.connectedSet.value"
+                  :is-first-render="session.isFirstRender.value"
+                  v-model:agent-filter="session.agentFilter.value"
+                  v-model:problem-mode="session.problemMode.value"
+                  :problem-summary="session.problemSummary.value"
+                />
+              </div>
+              <div v-show="activeTab === 'json'" class="dock-panel-inner bare">
+                <RawJsonPanel
+                  :payload="session.payload.value"
+                  v-model:show-raw-json="session.showRawJson.value"
+                />
+              </div>
+            </div>
+          </section>
         </div>
-        <div v-show="activeTab === 'files'" class="dock-panel-inner">
-          <RoomFilesPanel :slug="slug" :session-id="sessionId" @count="filesCount = $event" />
-        </div>
-        <div v-show="activeTab === 'operator'" class="dock-panel-inner">
-          <RoomOperatorPanel
-            :slug="slug"
-            :session-id="sessionId"
-            :members="operatorMembers"
-          />
-        </div>
-        <div v-show="activeTab === 'team'" class="dock-panel-inner bare">
-          <MemberRoster
-            :members="session.members.value"
-            :visible-members="session.visibleMembers.value"
-            :activity-map="session.activityMap.value"
-            :connected-set="session.connectedSet.value"
-            :is-first-render="session.isFirstRender.value"
-            v-model:agent-filter="session.agentFilter.value"
-            v-model:problem-mode="session.problemMode.value"
-            :problem-summary="session.problemSummary.value"
-          />
-        </div>
-        <div v-show="activeTab === 'json'" class="dock-panel-inner bare">
-          <RawJsonPanel
-            :payload="session.payload.value"
-            v-model:show-raw-json="session.showRawJson.value"
-          />
-        </div>
-      </section>
-    </template>
+      </Teleport>
+    </div>
   </div>
 </template>
 
@@ -440,6 +464,8 @@ interface DockTab {
 // Dock starts collapsed so the live cockpit (map + lanes) fills the viewport
 // without the page scrolling; the user opens a panel on demand.
 const activeTab = ref<DockTabId | null>(null)
+const dockDialogRef = ref<HTMLElement | null>(null)
+const dockReturnFocus = ref<HTMLElement | null>(null)
 const wallCount = ref(0)
 const filesCount = ref(0)
 const pinnedPost = ref<RoomWallPost | null>(null)
@@ -474,10 +500,64 @@ const dockTabs = computed<DockTab[]>(() => [
   { id: 'json', icon: 'code', label: t('room_tab_json') },
 ])
 
+const activeDockLabel = computed(() =>
+  dockTabs.value.find(tab => tab.id === activeTab.value)?.label || ''
+)
+
 function toggleTab(id: DockTabId) {
-  activeTab.value = activeTab.value === id ? null : id
+  if (activeTab.value === id) {
+    closeDock()
+    return
+  }
+  openDock(id)
+}
+
+function openDock(id: DockTabId) {
+  dockReturnFocus.value = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  activeTab.value = id
   if (activeTab.value === 'json') session.showRawJson.value = true
 }
+
+function closeDock() {
+  activeTab.value = null
+}
+
+function onDockKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    closeDock()
+    return
+  }
+  if (event.key !== 'Tab' || !dockDialogRef.value) return
+  const focusable = [...dockDialogRef.value.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )].filter(element => !element.hidden && element.offsetParent !== null)
+  if (!focusable.length) {
+    event.preventDefault()
+    dockDialogRef.value.focus()
+    return
+  }
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last?.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first?.focus()
+  }
+}
+
+watch(activeTab, async (tab, previous) => {
+  if (tab) {
+    await nextTick()
+    dockDialogRef.value?.focus()
+  } else if (previous) {
+    await nextTick()
+    dockReturnFocus.value?.focus()
+    dockReturnFocus.value = null
+  }
+})
 
 // ── Actions ──
 
@@ -577,10 +657,17 @@ watchEffect(() => {
 </script>
 
 <style scoped>
-/* Fill the viewport below the fixed 78px topbar (plus the slimmed room-page
-   margins) so the live cockpit sits in one window; opening a dock panel lets
-   the page scroll. */
-.room { display: flex; flex-direction: column; gap: 10px; min-height: calc(100dvh - 96px); }
+/* SessionRoomView owns the viewport height. Every descendant opts into
+   min-height:0 so the cockpit consumes that contract instead of growing the
+   document. */
+.room { height:100%; min-height:0; position:relative; overflow:hidden; }
+.room-shell {
+  height:100%; min-height:0;
+  display:grid;
+  grid-template-rows:auto minmax(0, 1fr) auto;
+  gap:8px;
+  overflow:hidden;
+}
 
 /* Live bar — teleported into the shell topbar, so no panel chrome of its own */
 .room-bar {
@@ -716,6 +803,12 @@ watchEffect(() => {
 
 /* Error + loading */
 .room-error {
+  position:absolute;
+  z-index:20;
+  top:6px;
+  left:50%;
+  width:min(720px, calc(100% - 24px));
+  transform:translateX(-50%);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -783,40 +876,39 @@ watchEffect(() => {
 .pulse-chip.dequeued { color: #f8fafc; border-color: rgba(248, 250, 252, 0.22); background: rgba(148, 163, 184, 0.12); }
 
 /* Cockpit — fills the remaining room height; each column manages its own overflow */
-.cockpit-grid { display: grid; gap: 12px; grid-template-columns: minmax(0, 1.5fr) minmax(380px, 1fr); flex: 1; min-height: 0; }
+.cockpit-grid { display:grid; gap:10px; grid-template-columns:minmax(0, 1.55fr) minmax(410px, 0.9fr); min-height:0; overflow:hidden; }
 .cockpit-grid > * { min-height: 0; }
 
 /* Left column: live map on top, activity feed under it */
-.cockpit-left { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
-.cockpit-left > :first-child { flex: 1; min-height: 0; }
+.cockpit-left { display:grid; grid-template-rows:minmax(0, 1fr) 148px; gap:10px; min-height:0; overflow:hidden; }
+.cockpit-left > :first-child { min-height:0; }
 
 /* Right column: ONE panel — lanes scroll inside, legend pinned at the bottom */
 .cockpit-right {
   display: flex; flex-direction: column; gap: 10px; min-height: 0;
   border: 1px solid var(--line); border-radius: 18px;
   background: linear-gradient(180deg, var(--card-bg-soft), var(--soft));
-  padding: 14px;
+  padding: 12px;
+  overflow:hidden;
 }
 .cockpit-right > :first-child { flex: 1; min-height: 0; }
 .cockpit-right :deep(.cockpit-card) { border: none; background: none; padding: 0; border-radius: 0; overflow: visible; }
 .cockpit-right :deep(.cockpit-card::before) { display: none; }
 .cockpit-right .signal-legend { border: none; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding: 12px 0 0; flex-shrink: 0; }
 
-/* Activity feed strip: always visible, scrolls inside itself */
-.feed-strip { max-height: 220px; overflow-y: auto; flex-shrink: 0; border-radius: 18px; }
-.feed-strip::-webkit-scrollbar { width: 6px; }
-.feed-strip::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 10px; }
+/* Activity feed strip: fixed-height recent rows, never another scroller. */
+.feed-strip { min-height:0; overflow:hidden; border-radius:14px; }
 
 /* Room-bar clock */
 .room-chip.clock { font-variant-numeric: tabular-nums; }
 
 /* Dock */
-.dock { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.dock { display:flex; gap:6px; align-items:center; min-height:36px; overflow:hidden; }
 .dock-tab {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 9px 15px;
+  padding: 7px 13px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: var(--soft);
@@ -843,14 +935,37 @@ watchEffect(() => {
 }
 .dock-tab.active .dock-badge { border-color: var(--accent-glow); }
 
+.dock-overlay {
+  position:fixed;
+  inset:0;
+  z-index:210;
+  display:flex;
+  justify-content:flex-end;
+  padding:94px 16px 16px;
+  background:rgba(0,0,0,0.5);
+  backdrop-filter:blur(4px);
+  -webkit-backdrop-filter:blur(4px);
+}
 .dock-panel {
+  width:min(760px, 100%);
+  height:100%;
+  min-height:0;
+  display:grid;
+  grid-template-rows:auto minmax(0, 1fr);
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--panel);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   box-shadow: var(--shadow-elev);
+  overflow:hidden;
+  outline:none;
 }
+.dock-panel:focus-visible { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft), var(--shadow-elev); }
+.dock-panel-head { display:flex; align-items:center; gap:12px; padding:12px 14px; border-bottom:1px solid var(--line); }
+.dock-panel-head strong { color:var(--ink); font-size:0.9rem; }
+.dock-panel-head .icon-button { margin-left:auto; }
+.dock-panel-scroll { min-height:0; overflow:auto; overscroll-behavior:contain; }
 .dock-panel-inner { padding: 18px; }
 .dock-panel-inner.bare { padding: 0; }
 .dock-panel-inner.bare :deep(.panel) { border: none; background: transparent; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
@@ -861,8 +976,11 @@ html[data-motion="reduced"] .health-dot.polling { animation-duration: 2.4s !impo
 
 /* Responsive */
 @media (max-width: 1200px) {
-  .cockpit-grid { grid-template-columns: 1fr; flex: none; min-height: auto; }
-  .room { min-height: auto; }
+  .room { height:auto; overflow:visible; }
+  .room-shell { height:auto; overflow:visible; grid-template-rows:auto; }
+  .cockpit-grid { grid-template-columns:1fr; overflow:visible; }
+  .cockpit-left { grid-template-rows:minmax(360px, 58vh) auto; overflow:visible; }
+  .feed-strip { overflow:visible; }
 }
 @media (max-width: 900px) {
   .room-chips { display: none; }
@@ -870,6 +988,8 @@ html[data-motion="reduced"] .health-dot.polling { animation-duration: 2.4s !impo
 @media (max-width: 768px) {
   .dock-tab-label { display: none; }
   .dock-tab { padding: 9px 12px; }
+  .dock { overflow-x:auto; }
+  .dock-overlay { padding:82px 10px 10px; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }

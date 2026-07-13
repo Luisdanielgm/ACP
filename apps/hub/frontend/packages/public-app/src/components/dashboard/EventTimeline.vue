@@ -1,30 +1,30 @@
 <template>
-  <section class="panel">
+  <section class="panel" :class="{ 'compact-panel': compact }">
     <div class="panel-head">
       <div>
         <div class="panel-title">{{ t('sd_timeline_title') }}</div>
-        <div class="muted">{{ t('sd_timeline_sub') }}</div>
+        <div v-if="!compact" class="muted">{{ t('sd_timeline_sub') }}</div>
       </div>
       <div class="filter-tools">
         <div class="filter-row">
           <UiButton v-for="f in timelineFilters" :key="f" type="button" variant="filter-chip" :active="timelineFilter === f" @click="$emit('update:timelineFilter', f)">
             {{ t('sd_timeline_filter_' + f) }}
           </UiButton>
-          <UiButton type="button" variant="filter-chip" :active="timelineDensity === 'compact'" @click="timelineDensity = timelineDensity === 'compact' ? 'detailed' : 'compact'">
+          <UiButton v-if="!compact" type="button" variant="filter-chip" :active="timelineDensity === 'compact'" @click="timelineDensity = timelineDensity === 'compact' ? 'detailed' : 'compact'">
             {{ timelineDensity === 'compact' ? t('sd_timeline_density_compact') : t('sd_timeline_density_detailed') }}
           </UiButton>
         </div>
       </div>
     </div>
     <div class="panel-body">
-      <div ref="timelineEl" :class="['timeline', timelineDensity === 'compact' ? 'compact' : '']" @scroll="handleTimelineScroll">
+      <div ref="timelineEl" :class="['timeline', (compact || timelineDensity === 'compact') ? 'compact' : '']" @scroll="handleTimelineScroll">
         <div v-if="!events.length" class="empty-state">
           <span>{{ timelineFilter === 'all' ? t('sd_no_session_events') : t('sd_no_filtered_events') }}</span>
         </div>
-        <div v-for="(event, i) in events" :key="i"
+        <div v-for="(event, i) in visibleEvents" :key="`${event.ts || ''}:${event.event || ''}:${i}`"
           class="event-card" :class="eventCardClasses(event)">
           <div class="event-top">
-            <div style="display:flex;gap:8px;align-items:center">
+            <div class="event-primary">
               <img class="event-type-icon" :src="stateIconUrl(messageIconNameForEvent(event))" alt="" aria-hidden="true" />
               <div class="event-name">{{ translateEvent(t, event.event) }}</div>
               <span v-if="messageActionType(event)" class="pill flow-pill" :class="actionChipClass(messageActionType(event))">
@@ -38,9 +38,8 @@
               {{ timeAgo(event.ts, locale) }}
             </div>
           </div>
-          <div v-if="eventThreadText(event) || eventIssueSummary(event) || deliveryMode(event)" class="event-thread">
+          <div v-if="eventIssueSummary(event) || deliveryMode(event)" class="event-thread">
             <span class="event-marker" :class="eventMarkerClasses(event)"></span>
-            <span v-if="eventThreadText(event)" class="event-thread-copy">{{ eventThreadText(event) }}</span>
             <span v-if="deliveryMode(event)" class="pill flow-pill delivery" :class="deliveryClass(deliveryMode(event))">
               {{ translateDelivery(t, deliveryMode(event)) }}
             </span>
@@ -76,12 +75,17 @@ import { translateEvent, translateDelivery } from '../../composables/dashboardTr
 import type { SessionEvent, SessionMember } from '../../api/sessions'
 import type { TimelineFilter } from '../../composables/useSessionDashboard'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   events: SessionEvent[]
   members: SessionMember[]
   timelineFilter: TimelineFilter
   effectiveMotion: MotionMode
-}>()
+  compact?: boolean
+  compactRows?: number
+}>(), {
+  compact: false,
+  compactRows: 3,
+})
 
 defineEmits<{
   'update:timelineFilter': [value: TimelineFilter]
@@ -90,7 +94,10 @@ defineEmits<{
 const { locale, t } = useI18n(messages)
 
 const timelineFilters = ['all', 'session', 'message', 'wait', 'status'] as const
-const timelineDensity = ref<'detailed' | 'compact'>('detailed')
+const timelineDensity = ref<'detailed' | 'compact'>(props.compact ? 'compact' : 'detailed')
+const visibleEvents = computed(() =>
+  props.compact ? props.events.slice(-Math.max(1, props.compactRows)) : props.events
+)
 
 const roleByAgent = computed(() => {
   const map = new Map<string, string>()
@@ -124,15 +131,6 @@ function eventCardClasses(event: SessionEvent): string[] {
   const level = maxIssueLevel(issues)
   if (level) classes.push(`severity-${level}`)
   return classes
-}
-
-function eventThreadText(event: SessionEvent): string {
-  const actor = event.actor || ''
-  const target = event.target || ''
-  if (actor && target) return `${actor} → ${target}`
-  if (actor) return actor
-  if (target) return target
-  return ''
 }
 
 function eventIssueSummary(event: SessionEvent): { label: string; level: string } | null {
@@ -211,6 +209,7 @@ watch(() => props.events.length, () => {
 .event-card.severity-high { border-color:rgba(240,153,123,0.24); box-shadow:0 0 0 1px rgba(240,153,123,0.1) inset, 0 12px 28px rgba(240,153,123,0.08); }
 .event-card:hover { border-color:var(--accent); transform:translateY(-3px); box-shadow:var(--shadow-glow); }
 .event-top { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+.event-primary { display:flex; gap:8px; align-items:center; min-width:0; }
 .event-name { font-weight:600; font-size:12px; letter-spacing:0.04em; color:var(--accent); }
 .event-type-icon { width:17px; height:17px; flex-shrink:0; display:block; }
 .result-pill { display:inline-flex; align-items:center; gap:5px; }
@@ -241,6 +240,31 @@ watch(() => props.events.length, () => {
 .issue-echo.low { color:#AFA9EC; border-color:rgba(175,169,236,0.18); background:rgba(175,169,236,0.08); }
 .issue-echo.medium { color:#EF9F27; border-color:rgba(239,159,39,0.18); background:rgba(239,159,39,0.08); }
 .issue-echo.high { color:#F0997B; border-color:rgba(240,153,123,0.18); background:rgba(240,153,123,0.08); }
+
+/* Embedded room presentation: a fixed-height, table-like activity strip.
+   It intentionally renders only the newest rows instead of creating a second
+   dashboard scroller. The full timeline keeps its existing detailed mode. */
+.compact-panel { height:100%; min-height:0; display:flex; flex-direction:column; border-radius:14px; overflow:hidden; }
+.compact-panel:hover { transform:none; }
+.compact-panel .panel-head { flex-shrink:0; flex-wrap:nowrap; gap:8px; padding:6px 10px; }
+.compact-panel .panel-title { font-size:9px; white-space:nowrap; }
+.compact-panel .filter-tools { min-width:0; overflow:hidden; }
+.compact-panel .filter-row { gap:4px; flex-wrap:nowrap; }
+.compact-panel .filter-row :deep(button) { min-height:24px; padding:3px 8px; font-size:9px; white-space:nowrap; }
+.compact-panel .panel-body { flex:1; min-height:0; padding:5px 8px; overflow:hidden; }
+.compact-panel .timeline { height:100%; max-height:none; display:flex; flex-direction:column; justify-content:flex-end; gap:3px; overflow:hidden; padding:0; }
+.compact-panel .event-card { min-height:0; padding:4px 7px 4px 9px; border-radius:7px; }
+.compact-panel .event-card:hover { transform:none; }
+.compact-panel .event-primary { gap:5px; flex:1; overflow:hidden; }
+.compact-panel .event-type-icon { width:14px; height:14px; }
+.compact-panel .event-name { flex-shrink:0; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; }
+.compact-panel .actor-badge { min-width:0; max-width:170px; padding:1px 6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:9px; }
+.compact-panel .event-primary > .muted { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.compact-panel .pill { padding:2px 7px; font-size:8.5px; white-space:nowrap; }
+.compact-panel .event-thread,
+.compact-panel .issue-row,
+.compact-panel .event-detail,
+.compact-panel .task { display:none; }
 
 /* Issues */
 .issue-row { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
