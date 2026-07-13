@@ -150,6 +150,51 @@
           <template #status>
             <span v-for="chip in pulseChips" :key="chip.key" class="pulse-chip" :class="chip.className">{{ chip.label }}</span>
           </template>
+          <template #tools>
+            <div ref="roomToolsRef" class="room-tools">
+              <button
+                ref="roomToolsTriggerRef"
+                class="map-tool room-tools-trigger"
+                type="button"
+                :aria-label="t('room_dock_label')"
+                :title="t('room_dock_label')"
+                aria-haspopup="dialog"
+                aria-controls="room-tools-palette"
+                :aria-expanded="roomToolsOpen"
+                @click.stop="toggleRoomTools"
+              >
+                <span class="room-tools-glyph" aria-hidden="true">
+                  <i v-for="index in 6" :key="index"></i>
+                </span>
+              </button>
+            </div>
+            <Teleport to="body">
+              <div
+                v-if="roomToolsOpen"
+                id="room-tools-palette"
+                ref="roomToolsPaletteRef"
+                class="room-tools-palette"
+                role="dialog"
+                tabindex="-1"
+                :aria-label="t('room_dock_label')"
+                :style="roomToolsPaletteStyle"
+                @click.stop
+                @keydown="onRoomToolsPaletteKeydown"
+              >
+                <button
+                  v-for="tab in dockTabs"
+                  :key="tab.id"
+                  class="room-tool-command"
+                  type="button"
+                  @click="openDockFromTools(tab.id)"
+                >
+                  <RoomIcon :name="tab.icon" :size="16" />
+                  <span>{{ tab.label }}</span>
+                  <span v-if="tab.badge !== undefined" class="dock-badge">{{ tab.badge }}</span>
+                </button>
+              </div>
+            </Teleport>
+          </template>
         </SquadMap>
         <!-- Real-time activity feed: sessions, messages, waits and detailed
              states, right under the live map -->
@@ -192,24 +237,6 @@
           </div>
         </div>
       </div>
-
-      <!-- Dock: collapsible room panels -->
-      <nav class="dock" :aria-label="t('room_dock_label')">
-        <button
-          v-for="tab in dockTabs"
-          :key="tab.id"
-          class="dock-tab"
-          type="button"
-          :class="{ active: activeTab === tab.id }"
-          :aria-expanded="activeTab === tab.id"
-          aria-controls="room-dock-dialog"
-          @click="toggleTab(tab.id)"
-        >
-          <RoomIcon :name="tab.icon" :size="15" />
-          <span class="dock-tab-label">{{ tab.label }}</span>
-          <span v-if="tab.badge !== undefined" class="dock-badge">{{ tab.badge }}</span>
-        </button>
-      </nav>
 
       <Teleport to="body">
         <div v-show="activeTab" class="dock-overlay" @click.self="closeDock">
@@ -283,7 +310,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch, watchEffect } from 'vue'
+import { computed, nextTick, onUnmounted, ref, watch, watchEffect, type CSSProperties } from 'vue'
 import { useI18n, useMotion } from '@acp/shared'
 import {
   SquadMap,
@@ -475,6 +502,11 @@ interface DockTab {
 const activeTab = ref<DockTabId | null>(null)
 const dockDialogRef = ref<HTMLElement | null>(null)
 const dockReturnFocus = ref<HTMLElement | null>(null)
+const roomToolsRef = ref<HTMLElement | null>(null)
+const roomToolsTriggerRef = ref<HTMLButtonElement | null>(null)
+const roomToolsPaletteRef = ref<HTMLElement | null>(null)
+const roomToolsOpen = ref(false)
+const roomToolsPaletteStyle = ref<CSSProperties>({ top: '0px', left: '0px', visibility: 'hidden' })
 const wallCount = ref(0)
 const filesCount = ref(0)
 const pinnedPost = ref<RoomWallPost | null>(null)
@@ -514,16 +546,31 @@ const activeDockLabel = computed(() =>
   dockTabs.value.find(tab => tab.id === activeTab.value)?.label || ''
 )
 
-function toggleTab(id: DockTabId) {
-  if (activeTab.value === id) {
-    closeDock()
+function toggleRoomTools() {
+  if (roomToolsOpen.value) {
+    closeRoomTools()
     return
   }
-  openDock(id)
+  roomToolsPaletteStyle.value = { top: '0px', left: '0px', visibility: 'hidden' }
+  roomToolsOpen.value = true
 }
 
-function openDock(id: DockTabId) {
-  dockReturnFocus.value = document.activeElement instanceof HTMLElement ? document.activeElement : null
+function closeRoomTools(restoreFocus = false) {
+  if (!roomToolsOpen.value) return
+  roomToolsOpen.value = false
+  if (restoreFocus) {
+    nextTick(() => roomToolsTriggerRef.value?.focus())
+  }
+}
+
+function openDockFromTools(id: DockTabId) {
+  openDock(id, roomToolsTriggerRef.value)
+}
+
+function openDock(id: DockTabId, returnFocus?: HTMLElement | null) {
+  roomToolsOpen.value = false
+  dockReturnFocus.value = returnFocus
+    || (document.activeElement instanceof HTMLElement ? document.activeElement : null)
   activeTab.value = id
   if (activeTab.value === 'json') session.showRawJson.value = true
 }
@@ -579,6 +626,99 @@ watch(activeTab, async (tab, previous) => {
   }
 })
 
+function onRoomToolsPointerDown(event: PointerEvent) {
+  const target = event.target as Node
+  if (roomToolsRef.value?.contains(target) || roomToolsPaletteRef.value?.contains(target)) return
+  closeRoomTools()
+}
+
+function onRoomToolsKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return
+  event.preventDefault()
+  closeRoomTools(true)
+}
+
+function roomToolsFocusable(): HTMLButtonElement[] {
+  if (!roomToolsPaletteRef.value) return []
+  return [...roomToolsPaletteRef.value.querySelectorAll<HTMLButtonElement>(
+    'button.room-tool-command:not([disabled])',
+  )]
+}
+
+function onRoomToolsPaletteKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Tab' || !roomToolsPaletteRef.value) return
+  const focusable = roomToolsFocusable()
+  if (!focusable.length) {
+    event.preventDefault()
+    roomToolsPaletteRef.value.focus()
+    return
+  }
+
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  if (document.activeElement === roomToolsPaletteRef.value || !roomToolsPaletteRef.value.contains(document.activeElement)) {
+    event.preventDefault()
+    ;(event.shiftKey ? last : first)?.focus()
+  } else if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last?.focus()
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first?.focus()
+  }
+}
+
+function positionRoomToolsPalette() {
+  const trigger = roomToolsTriggerRef.value
+  const palette = roomToolsPaletteRef.value
+  if (!trigger || !palette) return
+
+  const viewportPadding = 12
+  const paletteGap = 8
+  const triggerRect = trigger.getBoundingClientRect()
+  const paletteWidth = palette.offsetWidth
+  const paletteHeight = palette.offsetHeight
+  const maxLeft = Math.max(viewportPadding, window.innerWidth - paletteWidth - viewportPadding)
+  const left = Math.min(
+    Math.max(viewportPadding, triggerRect.right - paletteWidth),
+    maxLeft,
+  )
+  const belowTop = triggerRect.bottom + paletteGap
+  const aboveTop = triggerRect.top - paletteGap - paletteHeight
+  const maxTop = Math.max(viewportPadding, window.innerHeight - paletteHeight - viewportPadding)
+  const top = belowTop + paletteHeight <= window.innerHeight - viewportPadding
+    ? belowTop
+    : aboveTop >= viewportPadding
+      ? aboveTop
+      : Math.min(Math.max(viewportPadding, belowTop), maxTop)
+
+  roomToolsPaletteStyle.value = {
+    top: `${Math.round(top)}px`,
+    left: `${Math.round(left)}px`,
+    visibility: 'visible',
+  }
+}
+
+watch(roomToolsOpen, async open => {
+  if (open) {
+    document.addEventListener('pointerdown', onRoomToolsPointerDown)
+    document.addEventListener('keydown', onRoomToolsKeydown)
+    window.addEventListener('resize', positionRoomToolsPalette)
+    window.addEventListener('scroll', positionRoomToolsPalette, true)
+    await nextTick()
+    positionRoomToolsPalette()
+    await nextTick()
+    const firstCommand = roomToolsFocusable()[0]
+    if (firstCommand) firstCommand.focus()
+    else roomToolsPaletteRef.value?.focus()
+  } else {
+    document.removeEventListener('pointerdown', onRoomToolsPointerDown)
+    document.removeEventListener('keydown', onRoomToolsKeydown)
+    window.removeEventListener('resize', positionRoomToolsPalette)
+    window.removeEventListener('scroll', positionRoomToolsPalette, true)
+  }
+})
+
 // ── Actions ──
 
 async function copyValue(value: string, label: string) {
@@ -610,6 +750,10 @@ watch(inviteOpen, async open => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onInviteKeydown)
+  document.removeEventListener('pointerdown', onRoomToolsPointerDown)
+  document.removeEventListener('keydown', onRoomToolsKeydown)
+  window.removeEventListener('resize', positionRoomToolsPalette)
+  window.removeEventListener('scroll', positionRoomToolsPalette, true)
   clearInterval(clockTimer)
 })
 
@@ -684,7 +828,7 @@ watchEffect(() => {
 .room-shell {
   height:100%; min-height:0;
   display:grid;
-  grid-template-rows:auto minmax(0, 1fr) auto;
+  grid-template-rows:auto minmax(0, 1fr);
   gap:8px;
   overflow:hidden;
 }
@@ -922,24 +1066,66 @@ watchEffect(() => {
 /* Room-bar clock */
 .room-chip.clock { font-variant-numeric: tabular-nums; }
 
-/* Dock */
-.dock { display:flex; gap:6px; align-items:center; min-height:36px; overflow:hidden; }
-.dock-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 13px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--soft);
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.15s ease;
+/* Room tools: a compact in-map command palette replaces the height-consuming dock. */
+.room-tools { position:relative; }
+.room-tools-trigger {
+  position:relative;
+  display:inline-grid;
+  place-items:center;
+  width:30px;
+  height:30px;
+  padding:0;
+  border:1px solid rgba(239,159,39,0.32);
+  border-radius:50%;
+  background:radial-gradient(circle at 35% 30%, rgba(239,159,39,0.22), rgba(239,159,39,0.06) 55%, var(--panel));
+  color:#EF9F27;
+  box-shadow:0 0 0 1px rgba(239,159,39,0.05), 0 0 16px rgba(239,159,39,0.1);
+  backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
+  cursor:pointer;
+  transition:all 0.15s ease;
 }
-.dock-tab:hover { color: var(--ink); border-color: var(--hover-line); }
-.dock-tab.active { color: var(--accent); border-color: var(--accent-glow); background: var(--accent-soft); }
+.room-tools-trigger:hover,
+.room-tools-trigger[aria-expanded="true"] { border-color:rgba(239,159,39,0.62); color:#F7B955; background:rgba(239,159,39,0.14); }
+.room-tools-trigger:focus-visible,
+.room-tool-command:focus-visible { outline:2px solid #EF9F27; outline-offset:2px; }
+.room-tools-glyph { display:grid; grid-template-columns:repeat(3, 3px); gap:3px; }
+.room-tools-glyph i { width:3px; height:3px; border-radius:50%; background:currentColor; box-shadow:0 0 5px currentColor; }
+.room-tools-palette {
+  position:fixed;
+  z-index:205;
+  width:min(252px, calc(100vw - 32px));
+  display:grid;
+  grid-template-columns:repeat(2, minmax(0, 1fr));
+  gap:6px;
+  padding:8px;
+  border:1px solid rgba(239,159,39,0.26);
+  border-radius:14px;
+  background:var(--panel);
+  box-shadow:0 18px 50px rgba(0,0,0,0.45), 0 0 24px rgba(239,159,39,0.07);
+  backdrop-filter:blur(16px);
+  -webkit-backdrop-filter:blur(16px);
+}
+.room-tool-command {
+  min-width:0;
+  min-height:42px;
+  display:grid;
+  grid-template-columns:18px minmax(0, 1fr) auto;
+  align-items:center;
+  gap:7px;
+  padding:8px 9px;
+  border:1px solid var(--line);
+  border-radius:10px;
+  background:var(--card-bg-soft);
+  color:var(--muted);
+  font-size:0.75rem;
+  font-weight:750;
+  text-align:left;
+  cursor:pointer;
+  transition:all 0.15s ease;
+}
+.room-tool-command:hover { color:var(--ink); border-color:rgba(239,159,39,0.36); background:rgba(239,159,39,0.08); }
+.room-tool-command > span:not(.dock-badge) { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dock-badge {
   display: inline-flex;
   align-items: center;
@@ -953,8 +1139,6 @@ watchEffect(() => {
   font-size: 0.68rem;
   font-weight: 800;
 }
-.dock-tab.active .dock-badge { border-color: var(--accent-glow); }
-
 .dock-overlay {
   position:fixed;
   inset:0;
@@ -1006,9 +1190,6 @@ html[data-motion="reduced"] .health-dot.polling { animation-duration: 2.4s !impo
   .room-chips { display: none; }
 }
 @media (max-width: 768px) {
-  .dock-tab-label { display: none; }
-  .dock-tab { padding: 9px 12px; }
-  .dock { overflow-x:auto; }
   .dock-overlay { padding:82px 10px 10px; }
 }
 @media (prefers-reduced-motion: reduce) {

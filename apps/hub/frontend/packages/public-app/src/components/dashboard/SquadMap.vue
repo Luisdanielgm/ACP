@@ -19,23 +19,26 @@
         <div class="canvas-status">
           <slot name="status" />
         </div>
-        <button
-          class="map-tool canvas-expand"
-          type="button"
-          :aria-label="t(expanded ? 'sd_map_collapse' : 'sd_map_expand')"
-          :title="t(expanded ? 'sd_map_collapse' : 'sd_map_expand')"
-          @click.stop="expanded = !expanded"
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <template v-if="expanded">
-              <path d="M18 6L6 18" /><path d="M6 6l12 12" />
-            </template>
-            <template v-else>
-              <path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M16 3h3a2 2 0 0 1 2 2v3" />
-              <path d="M16 21h3a2 2 0 0 0 2-2v-3" /><path d="M8 21H5a2 2 0 0 1-2-2v-3" />
-            </template>
-          </svg>
-        </button>
+        <div class="canvas-tools">
+          <slot name="tools" />
+          <button
+            class="map-tool canvas-expand"
+            type="button"
+            :aria-label="t(expanded ? 'sd_map_collapse' : 'sd_map_expand')"
+            :title="t(expanded ? 'sd_map_collapse' : 'sd_map_expand')"
+            @click.stop="expanded = !expanded"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <template v-if="expanded">
+                <path d="M18 6L6 18" /><path d="M6 6l12 12" />
+              </template>
+              <template v-else>
+                <path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M16 3h3a2 2 0 0 1 2 2v3" />
+                <path d="M16 21h3a2 2 0 0 0 2-2v-3" /><path d="M8 21H5a2 2 0 0 1-2-2v-3" />
+              </template>
+            </svg>
+          </button>
+        </div>
         <svg :viewBox="`0 0 ${graph.width} ${graph.height}`" role="img" :aria-label="t('sd_squad_map_title')">
           <defs>
             <marker
@@ -1077,7 +1080,8 @@ const graph = computed(() => {
 /* In-canvas chrome */
 .canvas-status { position:absolute; top:12px; left:12px; z-index:3; display:flex; gap:8px; flex-wrap:wrap; max-width:calc(100% - 110px); pointer-events:none; }
 .canvas-status > :deep(*) { pointer-events:auto; }
-.canvas-expand { position:absolute; top:12px; right:12px; z-index:3; background:var(--panel); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+.canvas-tools { position:absolute; top:12px; right:12px; z-index:4; display:flex; align-items:flex-start; gap:6px; }
+.canvas-expand { background:var(--panel); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
 
 /* War-room mode */
 .cockpit-card.expanded {
