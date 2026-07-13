@@ -1,10 +1,7 @@
 <template>
   <div class="cockpit-card" :data-load="trafficLevel">
     <div class="cockpit-head">
-      <div>
-        <div class="cockpit-title">{{ t('sd_member_lanes_title') }}</div>
-        <div class="cockpit-sub">{{ t('sd_member_lanes_sub') }}</div>
-      </div>
+      <div class="cockpit-title">{{ t('sd_member_lanes_title') }}</div>
     </div>
     <div v-if="!members.length" class="empty-state">
       <span>{{ problemMode ? t('sd_no_problem_members') : t('sd_no_filtered_events') }}</span>
@@ -19,29 +16,24 @@
         :style="{ '--role-accent': avatarAccent(member) }"
         :title="laneTooltip(member)"
       >
+        <span class="lane-avatar">
+          <img class="lane-avatar-face" :class="{ ghost: isStale(member) }" :src="avatarSrc(member)" :alt="member.agent_name" />
+          <img class="lane-avatar-badge" :src="presenceSrc(member)" alt="" aria-hidden="true" />
+          <span v-if="normalizedRole(member.role) === 'chief'" class="lane-crown" aria-hidden="true">♛</span>
+        </span>
         <div class="lane-id">
-          <span class="lane-avatar">
-            <img class="lane-avatar-face" :class="{ ghost: isStale(member) }" :src="avatarSrc(member)" :alt="member.agent_name" />
-            <img class="lane-avatar-badge" :src="presenceSrc(member)" alt="" aria-hidden="true" />
-            <span v-if="normalizedRole(member.role) === 'chief'" class="lane-crown" aria-hidden="true">♛</span>
-          </span>
-          <div class="lane-id-text">
-            <div class="lane-line">
-              <span class="lane-name" :title="member.agent_name">{{ displayName(member) }}</span>
-              <span class="lane-role-pill" :class="'role-' + normalizedRole(member.role)">{{ translateRole(t, member.role) }}</span>
-              <span
-                v-if="topIssue(member)"
-                class="lane-issue"
-                :class="topIssue(member)!.level"
-                :title="t('sd_' + topIssue(member)!.label)"
-              ></span>
-            </div>
-            <div class="lane-line2">
-              <span class="op-chip" :class="getOpState(member).tone">
-                <img class="op-icon" :src="operationSrc(member)" alt="" aria-hidden="true" />{{ t('sd_' + getOpState(member).key) }}
-              </span>
-              <span v-if="member.provider && member.provider !== '-'" class="lane-provider">{{ member.provider }}</span>
-            </div>
+          <div class="lane-line">
+            <span class="lane-name" :title="member.agent_name">{{ displayName(member) }}</span>
+            <span class="op-chip" :class="getOpState(member).tone">
+              <img class="op-icon" :src="operationSrc(member)" alt="" aria-hidden="true" />{{ t('sd_' + getOpState(member).key) }}
+            </span>
+            <span class="lane-role-pill" :class="'role-' + normalizedRole(member.role)">{{ translateRole(t, member.role) }}</span>
+            <span
+              v-if="topIssue(member)"
+              class="lane-issue"
+              :class="topIssue(member)!.level"
+              :title="t('sd_' + topIssue(member)!.label)"
+            ></span>
           </div>
         </div>
         <div class="lane-cells">
@@ -188,9 +180,8 @@ function laneClasses(member: SessionMember): string[] {
 .cockpit-card[data-load="medium"] { border-color:rgba(239,159,39,0.24); }
 .cockpit-card[data-load="high"] { border-color:rgba(240,153,123,0.28); }
 .cockpit-card[data-load="critical"] { border-color:rgba(175,169,236,0.3); }
-.cockpit-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:12px; flex-shrink:0; }
+.cockpit-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:8px; flex-shrink:0; }
 .cockpit-title { font-size:14px; font-weight:700; letter-spacing:-0.02em; }
-.cockpit-sub { font-size:11px; color:var(--muted); line-height:1.5; margin-top:2px; }
 
 /* Compact lane rows */
 .lane-stack { display:flex; flex-direction:column; gap:8px; overflow-y:auto; min-height:0; padding-right:4px; }
@@ -201,10 +192,10 @@ function laneClasses(member: SessionMember): string[] {
 
 .lane {
   display:grid;
-  grid-template-columns:minmax(0, 1fr) auto;
-  grid-template-rows:auto auto;
-  gap:8px 10px;
-  padding:10px 11px; border:1px solid var(--line); border-radius:12px;
+  grid-template-columns:60px minmax(0, 1fr) auto;
+  grid-template-rows:minmax(24px, auto) auto;
+  gap:6px 10px;
+  padding:8px 10px; border:1px solid var(--line); border-radius:12px;
   background:var(--card-bg-strong); position:relative; overflow:hidden;
   transition:border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -213,19 +204,18 @@ function laneClasses(member: SessionMember): string[] {
 .lane.is-stale { opacity:0.72; }
 .lane:hover { border-color:var(--hover-line); }
 
-.lane-avatar { position:relative; width:44px; height:44px; flex-shrink:0; }
-.lane-avatar-face { width:44px; height:44px; border-radius:50%; object-fit:cover; border:2px solid var(--role-accent, var(--accent)); display:block; }
+.lane-avatar { grid-column:1; grid-row:1 / 3; align-self:center; position:relative; width:60px; height:60px; flex-shrink:0; }
+.lane-avatar-face { width:60px; height:60px; border-radius:50%; object-fit:cover; border:2px solid var(--role-accent, var(--accent)); display:block; }
 .lane-avatar-face.ghost { filter:grayscale(1) brightness(0.7); opacity:0.6; }
-.lane-avatar-badge { position:absolute; right:-2px; bottom:-2px; width:15px; height:15px; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.45)); }
-.lane-crown { position:absolute; top:-9px; left:50%; transform:translateX(-50%); font-size:12px; color:#EF9F27; line-height:1; text-shadow:0 1px 2px rgba(0,0,0,0.5); }
+.lane-avatar-badge { position:absolute; right:-2px; bottom:-2px; width:17px; height:17px; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.45)); }
+.lane-crown { position:absolute; top:-10px; left:50%; transform:translateX(-50%); font-size:14px; color:#EF9F27; line-height:1; text-shadow:0 1px 2px rgba(0,0,0,0.5); }
 
 /* Identity and cells SHARE the row proportionally (mockup ratio ~40/60):
    the name column can never collapse to zero, the cells shrink gracefully. */
-.lane-id { grid-column:1; grid-row:1; min-width:0; display:flex; align-items:center; gap:10px; }
-.lane-id-text { min-width:0; flex:1; display:flex; flex-direction:column; gap:4px; }
-.lane-line { display:flex; align-items:center; gap:8px; min-width:0; overflow:hidden; }
+.lane-id { grid-column:2; grid-row:1; min-width:0; display:flex; align-items:center; }
+.lane-line { width:100%; display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden; }
 .lane-name { min-width:0; flex:1; font-size:13px; font-weight:800; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.lane-role-pill { flex-shrink:0; padding:1px 8px; border-radius:999px; border:1px solid var(--line); background:var(--soft); font-size:9px; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; }
+.lane-role-pill { flex-shrink:0; padding:1px 6px; border-radius:999px; border:1px solid var(--line); background:var(--soft); font-size:8px; font-weight:800; letter-spacing:0.035em; text-transform:uppercase; white-space:nowrap; }
 .lane-role-pill.role-chief { color:#EF9F27; border-color:rgba(239,159,39,0.24); background:rgba(239,159,39,0.09); }
 .lane-role-pill.role-collaborator { color:#1D9E75; border-color:rgba(29,158,117,0.24); background:rgba(29,158,117,0.09); }
 .lane-role-pill.role-member { color:#85B7EB; border-color:rgba(133,183,235,0.24); background:rgba(133,183,235,0.09); }
@@ -234,25 +224,23 @@ function laneClasses(member: SessionMember): string[] {
 .lane-issue.medium { background:#EF9F27; }
 .lane-issue.low { background:#AFA9EC; }
 
-.lane-line2 { display:flex; align-items:center; gap:8px; min-width:0; overflow:hidden; }
-.op-chip { display:inline-flex; align-items:center; gap:4px; flex-shrink:0; padding:2px 8px; border-radius:999px; font-size:9px; font-weight:800; letter-spacing:0.04em; text-transform:uppercase; }
+.op-chip { display:inline-flex; align-items:center; gap:3px; flex-shrink:0; padding:2px 6px; border-radius:999px; font-size:8.5px; font-weight:800; letter-spacing:0.03em; text-transform:uppercase; white-space:nowrap; }
 .op-chip.idle { color:#a1a1aa; background:rgba(161,161,170,0.08); border:1px solid rgba(161,161,170,0.18); }
 .op-chip.listening { color:#5DCAA5; background:rgba(93,202,165,0.08); border:1px solid rgba(93,202,165,0.18); }
 .op-chip.alert { color:#EF9F27; background:rgba(239,159,39,0.08); border:1px solid rgba(239,159,39,0.18); }
 .op-chip.working { color:#85B7EB; background:rgba(133,183,235,0.08); border:1px solid rgba(133,183,235,0.18); }
 .op-chip.warning { color:#F0997B; background:rgba(240,153,123,0.08); border:1px solid rgba(240,153,123,0.18); }
-.op-icon { width:12px; height:12px; display:inline-block; }
-.lane-provider { min-width:0; max-width:38%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:1px 7px; border-radius:999px; border:1px solid var(--line); background:var(--soft); font-size:8.5px; font-weight:700; letter-spacing:0.04em; text-transform:uppercase; color:var(--muted); opacity:0.72; }
+.op-icon { width:11px; height:11px; display:inline-block; }
 
 /* Boxed stat cells (mockup style): label on top, value below. The cell strip
    flexes with the row — every cell shrinks instead of overflowing the panel. */
-.lane-cells { grid-column:1; grid-row:2; min-width:0; display:grid; grid-template-columns:minmax(56px, .72fr) minmax(78px, 1fr) minmax(0, 1.8fr); gap:6px; align-items:stretch; }
-.lane-cell { min-width:0; display:flex; flex-direction:column; gap:3px; justify-content:center; padding:6px 8px; border:1px solid var(--line); border-radius:9px; background:var(--card-bg-soft); }
-.cell-label { font-size:8.5px; font-weight:700; letter-spacing:0.05em; text-transform:uppercase; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lane-cells { grid-column:2; grid-row:2; min-width:0; display:grid; grid-template-columns:minmax(58px, .68fr) minmax(88px, .95fr) minmax(0, 1.8fr); gap:5px; align-items:stretch; }
+.lane-cell { min-width:0; display:flex; flex-direction:column; gap:2px; justify-content:center; padding:5px 7px; border:1px solid var(--line); border-radius:9px; background:var(--card-bg-soft); }
+.cell-label { font-size:7.5px; font-weight:750; letter-spacing:0.035em; text-transform:uppercase; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .cell-value { font-size:13px; font-weight:850; font-variant-numeric:tabular-nums; color:var(--ink); line-height:1.15; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .lane-cell.warn .cell-value { color:#EF9F27; }
 .cell-value.clamp { font-size:10.5px; font-weight:650; color:var(--muted); white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
-.lane-kick { grid-column:2; grid-row:1 / 3; align-self:center; display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; padding:0; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--muted); cursor:pointer; transition:all 0.15s ease; }
+.lane-kick { grid-column:3; grid-row:1 / 3; align-self:center; display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; padding:0; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--muted); cursor:pointer; transition:all 0.15s ease; }
 .lane-kick:hover { color:#F0997B; border-color:rgba(240,153,123,0.4); background:rgba(240,153,123,0.08); }
 
 /* Empty state */
@@ -266,6 +254,10 @@ function laneClasses(member: SessionMember): string[] {
 /* Responsive */
 @media (max-width:768px) {
   .cockpit-card { padding:12px; border-radius:14px; }
+  .lane { grid-template-columns:48px minmax(0, 1fr) auto; }
+  .lane-avatar, .lane-avatar-face { width:48px; height:48px; }
+  .lane-role-pill { display:none; }
+  .lane-cells { grid-template-columns:minmax(58px, .8fr) minmax(88px, 1.2fr); }
   .lane-cell.task-cell { display:none; }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -161,6 +161,7 @@
             :effective-motion="effectiveMotion"
             compact
             :compact-rows="3"
+            @expand="openDock('timeline')"
           />
         </section>
         </div>
@@ -257,6 +258,14 @@
                   v-model:agent-filter="session.agentFilter.value"
                   v-model:problem-mode="session.problemMode.value"
                   :problem-summary="session.problemSummary.value"
+                />
+              </div>
+              <div v-show="activeTab === 'timeline'" class="dock-panel-inner bare timeline-drawer">
+                <EventTimeline
+                  :events="session.filteredHistory.value"
+                  :members="session.members.value"
+                  v-model:timeline-filter="session.timelineFilter.value"
+                  :effective-motion="effectiveMotion"
                 />
               </div>
               <div v-show="activeTab === 'json'" class="dock-panel-inner bare">
@@ -452,7 +461,7 @@ const pulseChips = computed(() => {
 
 // ── Dock ──
 
-type DockTabId = 'wall' | 'files' | 'operator' | 'team' | 'json'
+type DockTabId = 'wall' | 'files' | 'operator' | 'team' | 'timeline' | 'json'
 
 interface DockTab {
   id: DockTabId
@@ -497,6 +506,7 @@ const dockTabs = computed<DockTab[]>(() => [
   { id: 'files', icon: 'folder', label: t('room_tab_files'), badge: filesCount.value },
   { id: 'operator', icon: 'send', label: t('room_tab_operator') },
   { id: 'team', icon: 'list', label: t('room_tab_team'), badge: session.members.value.length },
+  { id: 'timeline', icon: 'activity', label: t('room_tab_timeline') },
   { id: 'json', icon: 'code', label: t('room_tab_json') },
 ])
 
@@ -522,6 +532,13 @@ function closeDock() {
   activeTab.value = null
 }
 
+function dockFocusable(): HTMLElement[] {
+  if (!dockDialogRef.value) return []
+  return [...dockDialogRef.value.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )].filter(element => !element.hidden && element.offsetParent !== null)
+}
+
 function onDockKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     event.preventDefault()
@@ -529,9 +546,7 @@ function onDockKeydown(event: KeyboardEvent) {
     return
   }
   if (event.key !== 'Tab' || !dockDialogRef.value) return
-  const focusable = [...dockDialogRef.value.querySelectorAll<HTMLElement>(
-    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-  )].filter(element => !element.hidden && element.offsetParent !== null)
+  const focusable = dockFocusable()
   if (!focusable.length) {
     event.preventDefault()
     dockDialogRef.value.focus()
@@ -539,7 +554,10 @@ function onDockKeydown(event: KeyboardEvent) {
   }
   const first = focusable[0]
   const last = focusable[focusable.length - 1]
-  if (event.shiftKey && document.activeElement === first) {
+  if (document.activeElement === dockDialogRef.value || !dockDialogRef.value.contains(document.activeElement)) {
+    event.preventDefault()
+    ;(event.shiftKey ? last : first)?.focus()
+  } else if (event.shiftKey && document.activeElement === first) {
     event.preventDefault()
     last?.focus()
   } else if (!event.shiftKey && document.activeElement === last) {
@@ -551,7 +569,9 @@ function onDockKeydown(event: KeyboardEvent) {
 watch(activeTab, async (tab, previous) => {
   if (tab) {
     await nextTick()
-    dockDialogRef.value?.focus()
+    const firstControl = dockFocusable()[0]
+    if (firstControl) firstControl.focus()
+    else dockDialogRef.value?.focus()
   } else if (previous) {
     await nextTick()
     dockReturnFocus.value?.focus()

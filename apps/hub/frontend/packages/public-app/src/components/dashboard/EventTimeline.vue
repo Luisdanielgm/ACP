@@ -13,6 +13,9 @@
           <UiButton v-if="!compact" type="button" variant="filter-chip" :active="timelineDensity === 'compact'" @click="timelineDensity = timelineDensity === 'compact' ? 'detailed' : 'compact'">
             {{ timelineDensity === 'compact' ? t('sd_timeline_density_compact') : t('sd_timeline_density_detailed') }}
           </UiButton>
+          <UiButton v-if="compact" type="button" variant="filter-chip" class="timeline-expand" @click="$emit('expand')">
+            {{ t('sd_timeline_expand') }}
+          </UiButton>
         </div>
       </div>
     </div>
@@ -30,8 +33,9 @@
               <span v-if="messageActionType(event)" class="pill flow-pill" :class="actionChipClass(messageActionType(event))">
                 {{ t('sd_action_' + messageActionType(event)) }}
               </span>
-              <span class="actor-badge" :class="'role-' + (roleByAgent.get(event.actor || '') || 'member')">{{ event.actor || '-' }}</span>
-              <span class="muted" style="font-size:11px">→ {{ event.target || '-' }}</span>
+              <span v-if="event.actor" class="actor-badge" :class="'role-' + (roleByAgent.get(event.actor) || 'member')">{{ event.actor }}</span>
+              <span v-if="event.actor && event.target" class="muted event-arrow" aria-hidden="true">→</span>
+              <span v-if="event.target" class="muted event-target">{{ event.target }}</span>
             </div>
             <div class="pill result-pill">
               <img v-if="resultIconUrl(event)" class="event-result-icon" :src="resultIconUrl(event)" alt="" aria-hidden="true" />
@@ -89,6 +93,7 @@ const props = withDefaults(defineProps<{
 
 defineEmits<{
   'update:timelineFilter': [value: TimelineFilter]
+  expand: []
 }>()
 
 const { locale, t } = useI18n(messages)
@@ -210,6 +215,8 @@ watch(() => props.events.length, () => {
 .event-card:hover { border-color:var(--accent); transform:translateY(-3px); box-shadow:var(--shadow-glow); }
 .event-top { display:flex; justify-content:space-between; gap:8px; align-items:center; }
 .event-primary { display:flex; gap:8px; align-items:center; min-width:0; }
+.event-arrow, .event-target { font-size:11px; }
+.event-target { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .event-name { font-weight:600; font-size:12px; letter-spacing:0.04em; color:var(--accent); }
 .event-type-icon { width:17px; height:17px; flex-shrink:0; display:block; }
 .result-pill { display:inline-flex; align-items:center; gap:5px; }
@@ -251,6 +258,7 @@ watch(() => props.events.length, () => {
 .compact-panel .filter-tools { min-width:0; overflow:hidden; }
 .compact-panel .filter-row { gap:4px; flex-wrap:nowrap; }
 .compact-panel .filter-row :deep(button) { min-height:24px; padding:3px 8px; font-size:9px; white-space:nowrap; }
+.compact-panel .timeline-expand { color:var(--accent); border-color:var(--accent-glow); }
 .compact-panel .panel-body { flex:1; min-height:0; padding:5px 8px; overflow:hidden; }
 .compact-panel .timeline { height:100%; max-height:none; display:flex; flex-direction:column; justify-content:flex-end; gap:3px; overflow:hidden; padding:0; }
 .compact-panel .event-card { min-height:0; padding:4px 7px 4px 9px; border-radius:7px; }
@@ -260,6 +268,7 @@ watch(() => props.events.length, () => {
 .compact-panel .event-name { flex-shrink:0; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; }
 .compact-panel .actor-badge { min-width:0; max-width:170px; padding:1px 6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:9px; }
 .compact-panel .event-primary > .muted { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.compact-panel .event-arrow { flex-shrink:0; }
 .compact-panel .pill { padding:2px 7px; font-size:8.5px; white-space:nowrap; }
 .compact-panel .event-thread,
 .compact-panel .issue-row,
