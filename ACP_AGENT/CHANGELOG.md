@@ -1,5 +1,12 @@
 # ACP_AGENT Changelog
 
+## 0.3.14 - 2026-07-15
+
+- EN: New runners require an explicit trusted-sender allowlist, pin local provider/workspace by default, and can pin the reply target so TASK payloads cannot redirect execution or responses.
+- ES: Los runners nuevos requieren una allowlist explicita de remitentes confiables, fijan provider/workspace locales por defecto y pueden fijar el destinatario de respuesta para que un TASK no redirija ejecucion ni respuestas.
+- EN: Runner configs without an explicit security version fail closed; only pre-0.3.14 configs with persisted runner metadata may opt into versioned compatibility with `--legacy-runner-policy`. Managed onboarding trusts the selected room owner independently from the optional READY notification recipient.
+- ES: Las configuraciones runner sin version de seguridad explicita fallan de forma cerrada; solo las anteriores a 0.3.14 con metadata runner persistida pueden optar por compatibilidad versionada mediante `--legacy-runner-policy`. El onboarding managed confia en el owner de la sala independientemente del destinatario opcional de la notificacion READY.
+
 ## 0.3.13 - 2026-07-12
 
 - EN: Added workspace-admin room message reset through `room-reset`, preserving the room, members, operator, wall, and files while clearing pending deliveries and coordination message history.

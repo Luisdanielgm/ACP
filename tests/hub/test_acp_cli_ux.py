@@ -75,6 +75,10 @@ def test_runner_start_accepts_pure_flags_and_creates_config(tmp_path: Path, monk
             wait_timeout_seconds=120.0,
             task_timeout_seconds=1800.0,
             retry_delay_seconds=2.0,
+            runner_allowed_senders=["chief"],
+            runner_reply_to="chief",
+            pin_provider=True,
+            pin_workspace=True,
         ),
         command_name="runner start",
     )
@@ -86,6 +90,10 @@ def test_runner_start_accepts_pure_flags_and_creates_config(tmp_path: Path, monk
     assert saved["hub_http"] == "https://hub.example"
     assert saved["delivery_mode"] == "runner"
     assert saved["runner_provider"] == "claude_local"
+    assert saved["runner_allowed_senders"] == ["chief"]
+    assert saved["runner_pin_provider"] is True
+    assert saved["runner_pin_workspace"] is True
+    assert saved["runner_reply_to"] == "chief"
     assert saved["session_id"] == "session-1"
     assert saved["member_token"] == "member-1"
 
@@ -576,7 +584,7 @@ def test_onboard_worker_joins_project_session_announces_ready_and_prepares_runne
             provider="claude_local",
             wait_for_session=0.0,
             prefer_latest=False,
-            to=None,
+            to="ready-observer",
             skip_ready=False,
             start_runner=False,
             wait_timeout_seconds=120.0,
@@ -592,12 +600,14 @@ def test_onboard_worker_joins_project_session_announces_ready_and_prepares_runne
     assert saved["managed_agent_token"] == "acpagt_secret"
     assert saved["delivery_mode"] == "runner"
     assert saved["runner_provider"] == "claude_local"
+    assert saved["runner_allowed_senders"] == ["chief-agent"]
+    assert saved["runner_reply_to"] == "chief-agent"
     assert payload["status"] == "onboarded"
     assert payload["ready_sent"] is True
-    assert payload["ready_to"] == "chief-agent"
+    assert payload["ready_to"] == "ready-observer"
     assert payload["runner_command"][-2:] == ["--config", str(config_path.resolve())]
     ready_call = next(item for item in captured_posts if item["route"] == "/sessions/send")
-    assert ready_call["payload"]["to"] == "chief-agent"
+    assert ready_call["payload"]["to"] == "ready-observer"
     assert ready_call["payload"]["action"] == "INFO"
     assert ready_call["payload"]["payload"]["type"] == "READY"
     assert ready_call["payload"]["payload"]["delivery_mode"] == "runner"

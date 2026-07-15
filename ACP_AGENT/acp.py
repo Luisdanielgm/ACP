@@ -817,6 +817,11 @@ def build_parser() -> argparse.ArgumentParser:
     runner_start_parser.add_argument("--token", default=None, help="Optional ACP token")
     runner_start_parser.add_argument("--provider", default=None, choices=("codex_local", "claude_local"), help="Local provider to spawn")
     runner_start_parser.add_argument("--workspace", default=None, help="Workspace path for the provider process")
+    runner_start_parser.add_argument("--allow-sender", dest="runner_allowed_senders", action="append", default=None, help="Trusted TASK sender; repeat for multiple senders")
+    runner_start_parser.add_argument("--reply-to", dest="runner_reply_to", default=None, help="Locally pinned recipient for runner replies")
+    runner_start_parser.add_argument("--pin-provider", action=argparse.BooleanOptionalAction, default=None, help="Ignore provider overrides in TASK payloads (default for new runners)")
+    runner_start_parser.add_argument("--pin-workspace", action=argparse.BooleanOptionalAction, default=None, help="Ignore workspace overrides in TASK payloads (default for new runners)")
+    runner_start_parser.add_argument("--legacy-runner-policy", action="store_true", help="Explicit compatibility mode for runner configs created before ACP_AGENT 0.3.14")
     runner_start_parser.add_argument("--capabilities", default=None, help="Comma-separated capability tags to advertise for this runner")
     runner_start_parser.add_argument("--session-id", default=None, help="Restore an existing session id")
     runner_start_parser.add_argument("--member-token", default=None, help="Restore an existing member token")
@@ -835,6 +840,11 @@ def build_parser() -> argparse.ArgumentParser:
     runner_once_parser.add_argument("--token", default=None, help="Optional ACP token")
     runner_once_parser.add_argument("--provider", default=None, choices=("codex_local", "claude_local"), help="Local provider to spawn")
     runner_once_parser.add_argument("--workspace", default=None, help="Workspace path for the provider process")
+    runner_once_parser.add_argument("--allow-sender", dest="runner_allowed_senders", action="append", default=None, help="Trusted TASK sender; repeat for multiple senders")
+    runner_once_parser.add_argument("--reply-to", dest="runner_reply_to", default=None, help="Locally pinned recipient for runner replies")
+    runner_once_parser.add_argument("--pin-provider", action=argparse.BooleanOptionalAction, default=None, help="Ignore provider overrides in TASK payloads (default for new runners)")
+    runner_once_parser.add_argument("--pin-workspace", action=argparse.BooleanOptionalAction, default=None, help="Ignore workspace overrides in TASK payloads (default for new runners)")
+    runner_once_parser.add_argument("--legacy-runner-policy", action="store_true", help="Explicit compatibility mode for runner configs created before ACP_AGENT 0.3.14")
     runner_once_parser.add_argument("--capabilities", default=None, help="Comma-separated capability tags to advertise for this runner")
     runner_once_parser.add_argument("--session-id", default=None, help="Restore an existing session id")
     runner_once_parser.add_argument("--member-token", default=None, help="Restore an existing member token")
@@ -2567,7 +2577,8 @@ def onboard_from_args(args: argparse.Namespace) -> dict[str, Any]:
 
     ready_sent = False
     ready_result: dict[str, Any] | None = None
-    ready_recipient = getattr(args, "to", None) or selected_session.get("owner_agent_name")
+    trusted_owner = selected_session.get("owner_agent_name")
+    ready_recipient = getattr(args, "to", None) or trusted_owner
     if (
         not bool(getattr(args, "skip_ready", False))
         and isinstance(ready_recipient, str)
@@ -2612,6 +2623,14 @@ def onboard_from_args(args: argparse.Namespace) -> dict[str, Any]:
         wait_timeout_seconds=getattr(args, "wait_timeout_seconds", 120.0),
         task_timeout_seconds=getattr(args, "task_timeout_seconds", 1800.0),
         retry_delay_seconds=getattr(args, "retry_delay_seconds", 2.0),
+        runner_allowed_senders=[trusted_owner.strip()]
+        if isinstance(trusted_owner, str) and trusted_owner.strip()
+        else None,
+        runner_reply_to=trusted_owner.strip()
+        if isinstance(trusted_owner, str) and trusted_owner.strip()
+        else None,
+        pin_provider=True,
+        pin_workspace=True,
     )
     profile = bootstrap_runner_session(runner_args, command_name="onboard")
     operational_settings = profile["settings"]
@@ -4246,6 +4265,19 @@ def dispatch_send(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _runner_allowed_senders(value: Any) -> list[str]:
+    raw_items = value if isinstance(value, list) else [value]
+    senders: list[str] = []
+    for item in raw_items:
+        if not isinstance(item, str):
+            continue
+        for candidate in item.split(","):
+            normalized = candidate.strip()
+            if normalized and normalized not in senders:
+                senders.append(normalized)
+    return senders
+
+
 def resolve_runner_profile(args: argparse.Namespace) -> dict[str, Any]:
     settings = resolve_hub_agent_settings(args)
     config = dict(settings.config)
@@ -4287,6 +4319,44 @@ def resolve_runner_profile(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("runner auto busy heartbeat minutes must be >= 0.")
     if auto_busy_interval <= 0:
         raise ValueError("runner auto busy heartbeat interval seconds must be > 0.")
+    configured_senders = get_config_value(config, "runner_allowed_senders")
+    argument_senders = getattr(args, "runner_allowed_senders", None)
+    allowed_senders = _runner_allowed_senders(
+        argument_senders if argument_senders is not None else configured_senders
+    )
+    configured_security_version = config.get("runner_security_version")
+    if configured_security_version not in (None, 0, 1) or isinstance(configured_security_version, bool):
+        raise ValueError("runner_security_version must be 0 (legacy) or 1 (secure).")
+    legacy_policy_requested = bool(getattr(args, "legacy_runner_policy", False))
+    if configured_security_version == 1 and legacy_policy_requested:
+        raise ValueError("a secure runner config cannot be downgraded to legacy policy.")
+    legacy_workspace = config.get("runner_workspace")
+    legacy_config_evidence = config.get("delivery_mode") == "runner" and config.get("runner_provider") in {
+        "codex_local", "claude_local"
+    } and isinstance(legacy_workspace, str) and bool(legacy_workspace.strip())
+    if legacy_policy_requested and configured_security_version is None and not legacy_config_evidence:
+        raise ValueError("--legacy-runner-policy is only available for pre-0.3.14 runner configs.")
+    if argument_senders is not None:
+        security_version = 1
+    elif configured_security_version is not None:
+        security_version = configured_security_version
+    elif legacy_policy_requested:
+        security_version = 0
+    else:
+        security_version = 1
+    security_mode = "legacy" if security_version == 0 else "secure"
+    if security_mode == "secure" and not allowed_senders:
+        raise ValueError("new runner requires at least one explicit trusted sender via --allow-sender.")
+    raw_pin_provider = getattr(args, "pin_provider", None)
+    if raw_pin_provider is None:
+        raw_pin_provider = config.get("runner_pin_provider")
+    pin_provider = bool(raw_pin_provider) if raw_pin_provider is not None else security_mode == "secure"
+    raw_pin_workspace = getattr(args, "pin_workspace", None)
+    if raw_pin_workspace is None:
+        raw_pin_workspace = config.get("runner_pin_workspace")
+    pin_workspace = bool(raw_pin_workspace) if raw_pin_workspace is not None else security_mode == "secure"
+    reply_to_value = getattr(args, "runner_reply_to", None) or get_config_value(config, "runner_reply_to")
+    reply_to = reply_to_value.strip() if isinstance(reply_to_value, str) and reply_to_value.strip() else None
     state_path = resolve_config_path(settings.base_dir, get_config_value(config, "runner_state_path"))
     if state_path is None:
         state_path = (settings.base_dir / ".acp_runner_state.json").resolve()
@@ -4300,6 +4370,12 @@ def resolve_runner_profile(args: argparse.Namespace) -> dict[str, Any]:
         "retry_delay_seconds": max(retry_delay_seconds, 0.1),
         "auto_busy_heartbeat_minutes": auto_busy_minutes,
         "auto_busy_heartbeat_interval_seconds": auto_busy_interval,
+        "security_mode": security_mode,
+        "security_version": security_version,
+        "allowed_senders": allowed_senders,
+        "pin_provider": pin_provider,
+        "pin_workspace": pin_workspace,
+        "reply_to": reply_to,
         "state_path": state_path,
     }
 
@@ -4334,6 +4410,13 @@ def bootstrap_runner_session(args: argparse.Namespace, *, command_name: str) -> 
     updated["runner_task_timeout_seconds"] = profile["task_timeout_seconds"]
     updated["runner_auto_busy_heartbeat_minutes"] = profile["auto_busy_heartbeat_minutes"]
     updated["runner_auto_busy_heartbeat_interval_seconds"] = profile["auto_busy_heartbeat_interval_seconds"]
+    updated["runner_security_version"] = profile["security_version"]
+    if profile["security_mode"] == "secure":
+        updated["runner_allowed_senders"] = profile["allowed_senders"]
+        updated["runner_pin_provider"] = profile["pin_provider"]
+        updated["runner_pin_workspace"] = profile["pin_workspace"]
+        if profile["reply_to"] is not None:
+            updated["runner_reply_to"] = profile["reply_to"]
     updated.setdefault("runner_state_path", str(profile["state_path"]))
 
     if getattr(args, "join_code", None):
@@ -4453,6 +4536,24 @@ def runner_wait_once(*, settings: HubAgentSettings, profile: dict[str, Any], tim
     return accept_and_ack_session_delivery(settings=settings, response=response)
 
 
+def publish_runner_idle(*, settings: HubAgentSettings, profile: dict[str, Any], text: str) -> dict[str, Any]:
+    if settings.session_id is None or settings.member_token is None:
+        raise ValueError("session_id and member_token are required in config. Create or join a session first.")
+    return post_json(
+        hub_http=settings.hub_http,
+        route="/sessions/status",
+        payload={
+            "session_id": settings.session_id,
+            "agent_name": settings.agent_name,
+            "member_token": settings.member_token,
+            "status": "idle",
+            "status_text": text,
+            **_runner_member_payload(profile=profile),
+        },
+        token=settings.token,
+    )
+
+
 def _is_wait_already_active_error(message: str) -> bool:
     return "WAIT_ALREADY_ACTIVE" in message or "active wait" in message
 
@@ -4558,11 +4659,34 @@ def process_runner_message(*, settings: HubAgentSettings, profile: dict[str, Any
         publish_runner_waiting(settings=settings, profile=profile)
         return payload
 
+    sender = message.get("from") if isinstance(message.get("from"), str) else None
+    allowed_senders = profile.get("allowed_senders")
+    if profile.get("security_mode") == "secure" and (
+        sender is None or not isinstance(allowed_senders, list) or sender not in allowed_senders
+    ):
+        payload = {
+            "status": "runner_skipped",
+            "reason": "untrusted_sender",
+            "sender": sender,
+        }
+        emit_json_line(payload)
+        publish_runner_idle(settings=settings, profile=profile, text="rejected TASK from untrusted sender")
+        publish_runner_waiting(settings=settings, profile=profile, text="ignored TASK from untrusted sender")
+        return payload
+
     task = extract_task_spec(
         message=message,
         default_provider=profile["provider"],
         default_workspace=profile["workspace_path"],
     )
+    if profile.get("pin_provider"):
+        task["provider"] = profile["provider"]
+    if profile.get("pin_workspace"):
+        task["workspace_path"] = profile["workspace_path"]
+    if isinstance(profile.get("reply_to"), str) and profile["reply_to"].strip():
+        task["reply_to"] = profile["reply_to"].strip()
+    elif profile.get("security_mode") == "secure":
+        task["reply_to"] = sender
     provider = task["provider"]
     workspace_path = task["workspace_path"]
     run_id = str(uuid4())

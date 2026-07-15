@@ -62,13 +62,21 @@ manual foreground listen loop.
 
 | Role | Command | Use when |
 | --- | --- | --- |
-| Always-on worker | `runner start --config ACP_AGENT/agents/<worker>.json --provider <provider> --workspace <path>` | A provider should wake only when TASK arrives. |
+| Always-on worker | `runner start --config ACP_AGENT/agents/<worker>.json --provider <provider> --workspace <path> --allow-sender <chief> --reply-to <chief>` | A provider should wake only for trusted TASK senders. |
 | Always-on chief | `chief start --config ACP_AGENT/agents/<chief>.json --backlog-dir coord/backlog --provider <provider> --workspace <path>` | A deterministic chief should dispatch file-backed tasks. |
 | One chief tick | `chief once --config ACP_AGENT/agents/<chief>.json --backlog-dir coord/backlog` | CI/debug/manual dispatch. |
 
 Chief tasks are JSON files in `pending/`. Prefer structured fields:
 `task_id`, `instructions`, `required_capabilities`, `acceptance_criteria`,
 `verify_command`, `verify_timeout_seconds`, `max_attempts`.
+
+New runners require at least one explicit `--allow-sender`. Their locally
+selected provider and workspace are pinned by default, and `--reply-to` pins
+the response target, so TASK JSON cannot redirect execution or replies. Repeat
+`--allow-sender` for each trusted coordinator. Existing runner configs without
+the security marker fail closed; only pre-0.3.14 configs with persisted runner
+metadata can opt into temporary compatibility with `--legacy-runner-policy`,
+which persists version `0`, until they migrate to the sender allowlist.
 
 ## 5. Payload safety
 

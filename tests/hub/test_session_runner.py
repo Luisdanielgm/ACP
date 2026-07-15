@@ -213,6 +213,7 @@ def test_runner_once_processes_task_and_persists_local_state(tmp_path: Path, mon
                 "member_token": "member-1",
                 "runner_provider": "codex_local",
                 "runner_workspace": str(tmp_path / "workspace"),
+                "runner_security_version": 0,
             }
         ),
         encoding="utf-8",
