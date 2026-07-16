@@ -455,6 +455,56 @@ export function avatarForMember(member: SessionMember): string {
   return pool[hashValue(name) % pool.length]
 }
 
+// The domain a member's REAL name matches (same classification the avatar
+// uses), surfaced as a visible role label — mockup's "FINANZAS / OPERACIONES".
+// Chief and the human operator read through their own identity instead.
+export function domainForMember(member: SessionMember): string | null {
+  if (normalizedRole(member.role) === 'chief') return null
+  if (isWebOperator(member.agent_name)) return null
+  const name = String(member.agent_name || '')
+  for (const [pattern, id] of DOMAIN_AVATAR_MATCHERS) {
+    if (pattern.test(name)) return id
+  }
+  return null
+}
+
+// Compact stroke glyphs (24x24, feather-style) grouped into families so every
+// domain gets an icon without 18 bespoke drawings. UI iconography only — the
+// domain itself always comes from the member's real name.
+const DOMAIN_GLYPHS: Record<string, string> = {
+  shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
+  gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z',
+  people: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75',
+  headset: 'M3 18v-6a9 9 0 0 1 18 0v6 M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z',
+  chart: 'M18 20V10 M12 20V4 M6 20v-6',
+  pen: 'M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z',
+}
+
+const DOMAIN_GLYPH_FAMILY: Record<string, string> = {
+  finance: 'shield',
+  cybersecurity: 'shield',
+  'legal-compliance': 'shield',
+  'quality-assurance': 'shield',
+  operations: 'gear',
+  'devops-engineer': 'gear',
+  'backend-developer': 'gear',
+  logistics: 'gear',
+  'human-resources': 'people',
+  'customer-success': 'people',
+  sales: 'people',
+  marketing: 'people',
+  'product-manager': 'people',
+  support: 'headset',
+  'data-analyst': 'chart',
+  'research-knowledge': 'chart',
+  'ux-ui-designer': 'pen',
+  'frontend-developer': 'pen',
+}
+
+export function domainGlyphPath(domainId: string): string {
+  return DOMAIN_GLYPHS[DOMAIN_GLYPH_FAMILY[domainId] || ''] || ''
+}
+
 export type LinkFreshness = 'current' | 'recent' | 'old' | 'expired'
 
 // Relationship recency thresholds mirror the reference legend:

@@ -85,6 +85,14 @@
               :y="edge.labelY - graph.orbSize / 2 - 9"
               text-anchor="middle"
             >{{ edge.label }}</text>
+            <text
+              v-if="edge.actionLabel"
+              class="relation-action"
+              :x="edge.labelX"
+              :y="edge.labelY + graph.orbSize / 2 + 13"
+              text-anchor="middle"
+              :style="{ fill: edge.actionColor }"
+            >{{ edge.actionLabel }}</text>
           </g>
 
           <circle
@@ -164,6 +172,11 @@
                 :width="30 * node.crownScale"
                 :height="24 * node.crownScale"
               />
+              <!-- Domain role line (from the member's real name): glyph + label -->
+              <g v-if="node.domainLabel" class="node-domain" :style="{ '--dom-accent': node.accent }">
+                <path :d="node.domainGlyph" :transform="`translate(${node.domIconX}, ${node.domY - 9}) scale(0.46)`" />
+                <text :x="node.domTextX" :y="node.domY" :text-anchor="node.label.anchor">{{ node.domainLabel }}</text>
+              </g>
               <text class="node-label" :x="node.label.nameX" :y="node.label.nameY" :text-anchor="node.label.anchor">{{ node.labelName }}</text>
               <g class="node-state" :class="node.stateTone" :transform="`translate(${node.label.subX}, ${node.label.subY})`">
                 <rect :x="node.statePillX" y="-11" :width="node.statePillW" height="16" rx="8" />
@@ -303,6 +316,7 @@ import { messages } from '../../i18n'
 import {
   normalizedRole, memberPalette, heartbeatState, statusTone, isWebOperator,
   messageActionType, actionChipClass, deliveryMode, deliveryClass, actionTone, floatTagLabel,
+  domainForMember, domainGlyphPath,
   recentMemberActivity, memberActivity, mapRoutePath, sortedMembers,
   eventClass, hashValue, agentDisplayNames, humanizeAgentName, timeAgo, type TrafficLevel,
   avatarForMember, presenceIconName, operationIconName, memberOperationalState, memberIssues,
@@ -591,6 +605,11 @@ interface MapNode {
   stateTone: string
   statePillW: number
   statePillX: number
+  domainLabel: string
+  domainGlyph: string
+  domIconX: number
+  domTextX: number
+  domY: number
   hbIconUrl: string
   hbLabel: string
   hbIconX: number
@@ -618,6 +637,8 @@ interface MapEdge {
   iconUrl: string
   showLabel: boolean
   label: string
+  actionLabel: string
+  actionColor: string
   labelX: number
   labelY: number
 }
@@ -856,6 +877,10 @@ const graph = computed(() => {
       iconUrl: objectUrl(edgeOrb, 128),
       showLabel: involvesChief,
       label: t('sd_link_' + freshness),
+      // What travelled last on this wire, spelled out under the orb so the
+      // send/return direction reads at a glance (mockup's "TAREA / ORDEN").
+      actionLabel: involvesChief && lastAction ? t('sd_action_' + lastAction) : '',
+      actionColor: actionTone(lastAction),
       labelX, labelY,
       title: `${pair.a} ⇄ ${pair.b} · ${pair.count}`,
     })
@@ -989,6 +1014,25 @@ const graph = computed(() => {
     const stateLabel = t('sd_' + opState.key)
     const statePillW = Math.round(stateLabel.length * 6.6 + 18)
     const statePillX = lbl.anchor === 'middle' ? -statePillW / 2 : lbl.anchor === 'start' ? -8 : -statePillW + 8
+    // Domain role line above the name (mockup's "FINANZAS / OPERACIONES"):
+    // surfaced from the member's real name, same classification as the avatar.
+    const domainId = domainForMember(m)
+    const domainLabel = domainId ? t('sd_domain_' + domainId) : ''
+    const domainGlyph = domainId ? domainGlyphPath(domainId) : ''
+    const domTextW = domainLabel.length * 6
+    const domY = lbl.nameY - 15
+    let domIconX: number
+    let domTextX: number
+    if (lbl.anchor === 'start') {
+      domIconX = lbl.nameX
+      domTextX = lbl.nameX + 15
+    } else if (lbl.anchor === 'end') {
+      domTextX = lbl.nameX
+      domIconX = lbl.nameX + 4
+    } else {
+      domTextX = 7
+      domIconX = -domTextW / 2 - 9
+    }
     // Heartbeat line: pulse-level icon + last-seen age ("hace 10s").
     const hbLabel = timeAgo(m.last_seen_at || m.joined_at, locale.value)
     const hbTextW = hbLabel.length * 5.6
@@ -1048,6 +1092,11 @@ const graph = computed(() => {
       stateTone: opState.tone,
       statePillW,
       statePillX,
+      domainLabel,
+      domainGlyph,
+      domIconX,
+      domTextX,
+      domY,
       hbIconUrl: stateIconUrl(heartbeatIconName(heartbeatTier(m, cs))),
       hbLabel,
       hbIconX,
@@ -1189,6 +1238,12 @@ const graph = computed(() => {
 .cockpit-card.fit .squad-canvas { flex:1; min-height:0; }
 .cockpit-card.fit .squad-canvas svg { width:100%; height:100%; }
 .node-label { font-size:15px; font-weight:700; fill:var(--ink); letter-spacing:-0.01em; }
+/* Domain role line above the name (mockup's coloured "FINANZAS / RRHH") */
+.node-domain text {
+  font-size:9.5px; font-weight:800; letter-spacing:0.1em; text-transform:uppercase;
+  fill:var(--dom-accent, var(--muted));
+}
+.node-domain path { fill:none; stroke:var(--dom-accent, var(--muted)); stroke-width:2.6; stroke-linecap:round; stroke-linejoin:round; }
 
 /* Status pill under the node name — coloured chip per operational tone */
 .node-state text { font-size:9.5px; font-weight:800; letter-spacing:0.07em; text-transform:uppercase; }
@@ -1261,6 +1316,12 @@ const graph = computed(() => {
 .relation-label.recent { fill:#EF9F27; }
 .relation-label.old { fill:var(--muted); }
 .relation-label.expired { fill:#F0997B; }
+
+/* Last message type under the orb (mockup's "TAREA / ORDEN" wire caption) */
+.relation-action {
+  font-size:9.5px; font-weight:800; letter-spacing:0.09em; text-transform:uppercase;
+  paint-order:stroke; stroke:var(--canvas-bottom, #0c1414); stroke-width:3px; stroke-linejoin:round;
+}
 
 /* Relationship edges: heat = recency. Fresh conversations glow, cooling ones
    fade to a thin dashed whisper, held ones stay warm while work is unread.

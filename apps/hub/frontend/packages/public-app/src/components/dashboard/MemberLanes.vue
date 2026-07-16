@@ -25,6 +25,10 @@
         <div class="lane-id">
           <div class="lane-line">
             <span class="lane-name" :title="member.agent_name">{{ displayName(member) }}</span>
+            <span v-if="domainOf(member)" class="lane-domain" :style="{ color: avatarAccent(member) }">
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="domainGlyphPath(domainOf(member)!)" /></svg>
+              {{ t('sd_domain_' + domainOf(member)) }}
+            </span>
             <span class="op-chip" :class="getOpState(member).tone">
               <img class="op-icon" :src="operationSrc(member)" alt="" aria-hidden="true" />{{ t('sd_' + getOpState(member).key) }}
             </span>
@@ -106,7 +110,7 @@ import {
   normalizedRole, memberPalette, isWebOperator,
   memberIssues, memberActivity, memberOperationalState, heartbeatState,
   timeAgo, maxIssueLevel, agentDisplayNames, humanizeAgentName, compactPath, runSummary,
-  avatarForMember, presenceIconName, operationIconName,
+  avatarForMember, presenceIconName, operationIconName, domainForMember, domainGlyphPath,
   type Issue, type MemberActivityData, type TrafficLevel,
 } from '../../composables/sessionHelpers'
 import { avatarUrl, stateIconUrl } from '../../assets/acp/acpAssets'
@@ -180,6 +184,10 @@ function lastSeen(member: SessionMember): string {
 
 function avatarAccent(member: SessionMember): string {
   return isWebOperator(member.agent_name) ? '#a1aab5' : memberPalette(member).accent
+}
+
+function domainOf(member: SessionMember): string | null {
+  return domainForMember(member)
 }
 
 function getMemberIssues(member: SessionMember): Issue[] {
@@ -276,6 +284,8 @@ function laneClasses(member: SessionMember): string[] {
 .lane-id { grid-column:2; grid-row:1; min-width:0; display:flex; align-items:center; }
 .lane-line { width:100%; display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden; }
 .lane-name { min-width:0; flex:1; font-size:13px; font-weight:800; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* Domain role chip (from the member's real name) — mockup's coloured "FINANZAS" */
+.lane-domain { flex-shrink:0; display:inline-flex; align-items:center; gap:3px; font-size:8.5px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; }
 .lane-role-pill { flex-shrink:0; padding:1px 6px; border-radius:999px; border:1px solid var(--line); background:var(--soft); font-size:8px; font-weight:800; letter-spacing:0.035em; text-transform:uppercase; white-space:nowrap; }
 .lane-role-pill.role-chief { color:#EF9F27; border-color:rgba(239,159,39,0.24); background:rgba(239,159,39,0.09); }
 .lane-role-pill.role-collaborator { color:#1D9E75; border-color:rgba(29,158,117,0.24); background:rgba(29,158,117,0.09); }
