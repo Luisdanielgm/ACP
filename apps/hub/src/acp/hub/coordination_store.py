@@ -204,7 +204,10 @@ class InMemoryCoordinationStore:
     _pending_messages: dict[tuple[str, str], deque[dict[str, Any]]] = field(default_factory=dict)
     _session_events: dict[str, deque[dict[str, Any]]] = field(default_factory=dict)
     _member_notices: dict[tuple[str, str, str], dict[str, Any]] = field(default_factory=dict)
-    _delivered: set[tuple[str, str, str]] = field(default_factory=set)
+    # (session_id, recipient, message_id) -> processed_at, so the ledger can be
+    # pruned by time like the SQLite store instead of leaking for the life of a
+    # never-deleted session.
+    _delivered: dict[tuple[str, str, str], str] = field(default_factory=dict)
 
     def create_session(self, session: CoordinationSession) -> None:
         self._sessions[session.session_id] = session
@@ -254,7 +257,7 @@ class InMemoryCoordinationStore:
         for agent_name in list(session.members):
             self._agent_to_session.pop(agent_name, None)
             self._pending_messages.pop((session_id, agent_name), None)
-        self._delivered = {key for key in self._delivered if key[0] != session_id}
+        self._delivered = {key: ts for key, ts in self._delivered.items() if key[0] != session_id}
 
     def enqueue_message(
         self,
@@ -392,7 +395,7 @@ class InMemoryCoordinationStore:
         removed_events = len(before_events) - len(kept_events)
         self._session_events[session_id] = deque(kept_events)
         delivered_count = sum(1 for key in self._delivered if key[0] == session_id)
-        self._delivered = {key for key in self._delivered if key[0] != session_id}
+        self._delivered = {key: ts for key, ts in self._delivered.items() if key[0] != session_id}
         return {
             "cleared_pending_messages": pending_count,
             "cleared_message_events": removed_events,
@@ -410,7 +413,7 @@ class InMemoryCoordinationStore:
         key = (session_id, recipient, message_id)
         if key in self._delivered:
             return False
-        self._delivered.add(key)
+        self._delivered[key] = processed_at
         return True
 
     def append_event(self, session_id: str, event_payload: dict[str, Any]) -> None:
@@ -517,10 +520,12 @@ class InMemoryCoordinationStore:
         return removed
 
     def prune_idempotency_older_than(self, cutoff: str) -> int:
-        # _delivered tracks only (session_id, recipient, message_id) tuples with
-        # no processed_at timestamp, so time-based pruning is not meaningful
-        # here. No-op kept for interface parity with SqliteCoordinationStore.
-        return 0
+        # Drop dedup entries processed before the cutoff so a long-lived session's
+        # ledger cannot grow without bound (mirrors SqliteCoordinationStore).
+        stale = [key for key, processed_at in self._delivered.items() if str(processed_at) < cutoff]
+        for key in stale:
+            del self._delivered[key]
+        return len(stale)
 
     def _clone_session(self, session: CoordinationSession | None) -> CoordinationSession | None:
         if session is None:
