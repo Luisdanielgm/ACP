@@ -283,7 +283,7 @@ function laneClasses(member: SessionMember): string[] {
    the name column can never collapse to zero, the cells shrink gracefully. */
 .lane-id { grid-column:2; grid-row:1; min-width:0; display:flex; align-items:center; }
 .lane-line { width:100%; display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden; }
-.lane-name { min-width:0; flex:1; font-size:13px; font-weight:800; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.lane-name { min-width:0; flex:1; font-size:13px; font-weight:800; color:var(--ink); line-height:1.15; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow-wrap:anywhere; }
 /* Domain role chip (from the member's real name) — mockup's coloured "FINANZAS" */
 .lane-domain { flex-shrink:0; display:inline-flex; align-items:center; gap:3px; font-size:8.5px; font-weight:800; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; }
 .lane-role-pill { flex-shrink:0; padding:1px 6px; border-radius:999px; border:1px solid var(--line); background:var(--soft); font-size:8px; font-weight:800; letter-spacing:0.035em; text-transform:uppercase; white-space:nowrap; }

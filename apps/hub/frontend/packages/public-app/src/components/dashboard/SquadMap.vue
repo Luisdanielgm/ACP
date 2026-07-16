@@ -177,7 +177,10 @@
                 <path :d="node.domainGlyph" :transform="`translate(${node.domIconX}, ${node.domY - 9}) scale(0.46)`" />
                 <text :x="node.domTextX" :y="node.domY" :text-anchor="node.label.anchor">{{ node.domainLabel }}</text>
               </g>
-              <text class="node-label" :x="node.label.nameX" :y="node.label.nameY" :text-anchor="node.label.anchor">{{ node.labelName }}</text>
+              <text class="node-label" :x="node.label.nameX" :y="node.label.nameY" :text-anchor="node.label.anchor">
+                <tspan :x="node.label.nameX" dy="0">{{ node.nameLines[0] }}</tspan>
+                <tspan v-if="node.nameLines[1]" :x="node.label.nameX" dy="14">{{ node.nameLines[1] }}</tspan>
+              </text>
               <g class="node-state" :class="node.stateTone" :transform="`translate(${node.label.subX}, ${node.label.subY})`">
                 <rect :x="node.statePillX" y="-11" :width="node.statePillW" height="16" rx="8" />
                 <text x="0" y="1" :text-anchor="node.label.anchor">{{ node.stateLabel }}</text>
@@ -568,6 +571,24 @@ function labelFor(ux: number, uy: number, shellR: number, isChief: boolean, ring
   return { anchor: 'middle', nameX: 0, nameY: shellR + 22, subX: 0, subY: shellR + 39, clip: 26 }
 }
 
+// Long mixed-family names ("Aero Luxairways Personal…") don't fit one line:
+// split at a word boundary into at most two lines, ellipsizing the second.
+function wrapNodeName(value: string, maxPerLine: number): string[] {
+  const text = String(value || '').trim()
+  if (text.length <= maxPerLine) return [text]
+  const words = text.split(/\s+/)
+  let first = ''
+  for (const word of words) {
+    const candidate = first ? `${first} ${word}` : word
+    if (first && candidate.length > maxPerLine) break
+    first = candidate
+    if (first.length > maxPerLine) break
+  }
+  const rest = text.slice(first.length).trim()
+  if (!rest) return [clipText(first, maxPerLine)]
+  return [first, clipText(rest, maxPerLine)]
+}
+
 function pointToSegmentDistance(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
   const abx = bx - ax
   const aby = by - ay
@@ -600,7 +621,7 @@ interface MapNode {
   badgeSize: number
   crownScale: number
   label: NodeLabel
-  labelName: string
+  nameLines: string[]
   stateLabel: string
   stateTone: string
   statePillW: number
@@ -760,7 +781,7 @@ const graph = computed(() => {
   const useAspectLayout = Boolean(props.fitHeight)
   const outerR = crowd ? occupiedR + memberShellR + 104 : 0
   const naturalGutterX = crowd <= 2 ? 280 : 420
-  const naturalGutterY = crowd <= 2 ? 130 : 180
+  const naturalGutterY = crowd <= 2 ? 150 : 210
   const height = useAspectLayout
     ? 560
     : crowd ? Math.round(outerR * 2 + naturalGutterY) : 530
@@ -772,7 +793,10 @@ const graph = computed(() => {
   const targetStretchX = useAspectLayout ? Math.max(1.1, Math.min(1.55, fitAspect * 0.78)) : 1
   const targetStretchY = useAspectLayout ? 0.62 : 1
   const maxOrbitX = Math.max(1, width / 2 - memberShellR - 38)
-  const maxOrbitY = Math.max(1, Math.min(cy - memberShellR - 34, height - cy - memberShellR - 82))
+  // Vertical budgets cover the FULL label stacks, not just the shell: above a
+  // top node lives domain line + (wrapped) name (~64px); below a bottom node
+  // lives name + pill + heartbeat (+wrap) (~96px).
+  const maxOrbitY = Math.max(1, Math.min(cy - memberShellR - 76, height - cy - memberShellR - 96))
   const stretchX = crowd ? Math.min(targetStretchX, maxOrbitX / Math.max(1, occupiedR)) : 1
   const stretchY = crowd ? Math.min(targetStretchY, maxOrbitY / Math.max(1, occupiedR)) : 1
   const visibleRings = crowd ? tierRadii.slice(0, maxTier + 1) : [90, 150, 210]
@@ -791,6 +815,16 @@ const graph = computed(() => {
       tier,
       member,
     })
+  })
+  // The chief's label stack (name + pill + heartbeat) hangs ~104px below the
+  // centre. A member that lands in the bottom-centre corridor would sit right
+  // on top of it — push that node's Y past the stack instead of overlapping.
+  const chiefStackBottomY = cy + chiefShellR + 72 * scale
+  positions.forEach(pos => {
+    if (pos.member.agent_name === chiefMember.agent_name) return
+    if (Math.abs(pos.x - cx) >= 110 || pos.y <= cy) return
+    const minY = chiefStackBottomY + memberShellR + 10
+    if (pos.y < minY) pos.y = minY
   })
 
   // ── Relationship edges ──
@@ -1010,6 +1044,14 @@ const graph = computed(() => {
       locale.value,
       displayNames.get(m.agent_name) || humanizeAgentName(m.agent_name)
     )
+    // Long names wrap to two lines; the label BLOCK shifts so the extra line
+    // never invades the shell (top zone grows upward, others push the pill
+    // and heartbeat down instead).
+    const nameLines = wrapNodeName(displayName, lbl.clip)
+    const wrapExtra = nameLines.length > 1 ? 14 : 0
+    const isTopZone = lbl.anchor === 'middle' && lbl.nameY < 0
+    const nameY = isTopZone ? lbl.nameY - wrapExtra : lbl.nameY
+    const subY = isTopZone ? lbl.subY : lbl.subY + wrapExtra
     // Status pill under the name (mockup style): coloured chip, not plain text.
     const stateLabel = t('sd_' + opState.key)
     const statePillW = Math.round(stateLabel.length * 6.6 + 18)
@@ -1020,7 +1062,7 @@ const graph = computed(() => {
     const domainLabel = domainId ? t('sd_domain_' + domainId) : ''
     const domainGlyph = domainId ? domainGlyphPath(domainId) : ''
     const domTextW = domainLabel.length * 6
-    const domY = lbl.nameY - 15
+    const domY = nameY - 15
     let domIconX: number
     let domTextX: number
     if (lbl.anchor === 'start') {
@@ -1036,7 +1078,7 @@ const graph = computed(() => {
     // Heartbeat line: pulse-level icon + last-seen age ("hace 10s").
     const hbLabel = timeAgo(m.last_seen_at || m.joined_at, locale.value)
     const hbTextW = hbLabel.length * 5.6
-    const hbY = lbl.subY + 21
+    const hbY = subY + 21
     let hbIconX: number
     let hbTextX: number
     if (lbl.anchor === 'start') {
@@ -1086,8 +1128,8 @@ const graph = computed(() => {
       auraR: (isChief ? 47 : 41) * scale,
       badgeSize: Math.round(24 * scale),
       crownScale: scale,
-      label: lbl,
-      labelName: clipText(displayName, lbl.clip),
+      label: { ...lbl, nameY, subY },
+      nameLines,
       stateLabel,
       stateTone: opState.tone,
       statePillW,
