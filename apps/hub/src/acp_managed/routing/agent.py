@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import urllib.parse
+from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
@@ -108,6 +109,7 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
                 "agent_token": _sanitize_agent_token(token_record),
                 "workspace_session": _sanitize_workspace_session(record),
                 "acp_session": result,
+                "room_context": _room_context_payload(record.session_id),
                 **_managed_session_aliases(record=record, acp_session=result),
             }
         )
@@ -261,6 +263,21 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
                 "workspace_session": _sanitize_workspace_session(record),
             }
         )
+
+    def _room_context_payload(session_id: str) -> dict[str, Any]:
+        # Embedded in connect responses so agents SEE the room's durable
+        # context (wall + files) instead of having to know it exists.
+        posts = principal_store.list_room_wall_posts(session_id=session_id)
+        files = principal_store.list_room_files(session_id=session_id)
+        return {
+            "wall_posts": [_sanitize_room_wall_post(item) for item in posts],
+            "files": [_sanitize_room_file(item) for item in files],
+            "hint": (
+                "Durable room context lives on the wall and in room files. "
+                "Read or publish with: acp.py room-wall list|post and "
+                "acp.py room-files list|upload|download (managed agent token required)."
+            ),
+        }
 
     async def _managed_agent_workspace_session_wall_response(
         *,
@@ -473,6 +490,7 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
                 "agent_token": _sanitize_agent_token(token_record),
                 "workspace_session": _sanitize_workspace_session(record),
                 "acp_session": joined,
+                "room_context": _room_context_payload(record.session_id),
                 **_managed_session_aliases(record=record, acp_session=joined),
             }
         )

@@ -296,6 +296,9 @@ def _managed_agent_bootstrap_payload(
             f"- python ACP_AGENT/acp.py onboard --agent {preferred_agent_name} --agent-token {token_value} --project PROJECT_ID --workspace /path/to/project --capabilities backend,python",
             f"- python ACP_AGENT/acp.py chief start --agent {preferred_agent_name} --backlog-dir coord/backlog --provider claude_local --workspace /path/to/project",
             f"- python ACP_AGENT/acp.py runner start --agent {preferred_agent_name} --hub-http {origin} --session-id SESSION_ID --member-token MEMBER_TOKEN --provider claude_local --workspace /path/to/project",
+            f"- python ACP_AGENT/acp.py room-wall list --agent {preferred_agent_name} --agent-token {token_value} --session-id SESSION_ID",
+            f"- python ACP_AGENT/acp.py room-files list --agent {preferred_agent_name} --agent-token {token_value} --session-id SESSION_ID",
+            "El muro y los archivos de sala son el contexto durable (decisiones, instrucciones, artefactos): revisalos al entrar a una sala con room-wall list y room-files list, y publica decisiones importantes con room-wall post en lugar de dejarlas solo en mensajes transitorios.",
             "Para unirte a una sala existente, pide el SESSION_ID de esa sala y usa managed-join. Para onboarding autonomo de worker, usa connect u onboard: valida el token, encuentra la sala por project, se une, avisa READY al chief y deja el runner preparado.",
             "Para crear una sala nueva, usa managed-start. Para coordinar backlog autonomo, usa chief start con una cola local coord/backlog; las tareas JSON pueden incluir required_capabilities/tags para dispatch por capacidad, verify_command para reencolar con feedback cuando una entrega reportada como exitosa no verifica, y acceptance_criteria/verify_prompt para juez LLM con max_attempts. El chief despacha maximo una tarea por worker por tick, infiere task_id si hay una sola asignacion en vuelo y se auto-recupera de WAIT_ALREADY_ACTIVE propio. Para cerrar y limpiar una sala managed, usa managed-close.",
             "Para replies manuales, usa send/task/reply --task-id y --reply-to/--in-reply-to en vez de meter IDs en texto libre. El chief tambien reencola asignaciones vencidas por TTL para que no queden pegadas en assigned/.",
@@ -320,6 +323,8 @@ def _managed_agent_bootstrap_payload(
             "session_join_template": f"{origin}/managed/agent/sessions/{{session_id}}/join",
             "session_close_template": f"{origin}/managed/agent/sessions/{{session_id}}/close",
             "session_replay_template": f"{origin}/managed/agent/sessions/{{session_id}}/replay",
+            "session_wall_template": f"{origin}/managed/agent/sessions/{{session_id}}/wall",
+            "session_files_template": f"{origin}/managed/agent/sessions/{{session_id}}/files",
         },
         "command_examples": {
             "managed_sessions": f"python ACP_AGENT/acp.py managed-sessions --agent {preferred_agent_name} --agent-token {token_value}",
@@ -337,6 +342,18 @@ def _managed_agent_bootstrap_payload(
             ),
             "managed_close": (
                 f"python ACP_AGENT/acp.py managed-close --agent {preferred_agent_name} "
+                f"--agent-token {token_value} --session-id SESSION_ID"
+            ),
+            "room_wall_list": (
+                f"python ACP_AGENT/acp.py room-wall list --agent {preferred_agent_name} "
+                f"--agent-token {token_value} --session-id SESSION_ID"
+            ),
+            "room_wall_post": (
+                f"python ACP_AGENT/acp.py room-wall post --agent {preferred_agent_name} "
+                f"--agent-token {token_value} --session-id SESSION_ID --body \"Decision or durable instruction\""
+            ),
+            "room_files_list": (
+                f"python ACP_AGENT/acp.py room-files list --agent {preferred_agent_name} "
                 f"--agent-token {token_value} --session-id SESSION_ID"
             ),
             "connect_worker": (

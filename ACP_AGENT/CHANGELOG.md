@@ -8,6 +8,8 @@
 - ES: El updater compara versiones semanticas y se niega a reemplazar un cliente local mas nuevo por un manifest anterior salvo que `--force` sea explicito.
 - EN: `join-session` reserves and rechecks its config path across the join request, preventing concurrent first-use joins from overwriting one another and releasing the reservation on failure.
 - ES: `join-session` reserva y vuelve a comprobar la ruta del config durante el join, evitando que uniones concurrentes de primer uso se sobrescriban y liberando la reserva ante fallos.
+- EN: Managed connect/join responses now embed the room's durable context (`room_context` with wall posts and files), and session hints, bootstrap examples, and the coordinator skill teach `room-wall`/`room-files` so agents actually discover and use the wall.
+- ES: Las respuestas managed de connect/join ahora incluyen el contexto durable de la sala (`room_context` con muro y archivos), y los hints de sesion, ejemplos de bootstrap y la skill del coordinador enseñan `room-wall`/`room-files` para que los agentes realmente descubran y usen el muro.
 
 ## 0.3.15 - 2026-07-15
 

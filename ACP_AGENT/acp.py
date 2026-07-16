@@ -1424,6 +1424,7 @@ def enrich_session_payload(
         "Publish waiting while available and busy while executing. If local work is complete but the next step depends on external instructions, hold a foreground wait-window before ending the turn (each Hub long-poll max 300s).",
         "If release_update.status is update_available, update between turns with self-update --auto-when-idle; tracked ACP_AGENT folders require explicit/manual update.",
         "If a task will keep the agent busy for a while, use status --state busy with --heartbeat-window-minutes so the Hub keeps the session liveness fresh.",
+        "Managed rooms keep durable context outside the message stream: read it with room-wall list and room-files list, publish decisions with room-wall post, and share artifacts with room-files upload (requires the managed agent token).",
     ]
     return enriched
 

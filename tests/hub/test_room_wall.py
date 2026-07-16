@@ -112,3 +112,36 @@ def test_room_wall_owner_can_pin_and_delete_posts(monkeypatch, tmp_path) -> None
     wall = owner.get(f"/managed/workspaces/team-one/sessions/{session_id}/wall")
     assert wall.status_code == 200, wall.text
     assert wall.json()["posts"] == []
+
+
+def test_agent_join_response_embeds_room_context(monkeypatch, tmp_path) -> None:
+    # Agents never learn the wall/files exist unless the join response tells
+    # them: the room's durable context must arrive as text at connect time.
+    app, owner, session_id = _owner_with_session(monkeypatch, tmp_path)
+
+    owner_post = owner.post(
+        f"/managed/workspaces/team-one/sessions/{session_id}/wall",
+        json={"body": "Decision: use the staging database for tests.", "pinned": True},
+    )
+    assert owner_post.status_code == 200, owner_post.text
+
+    token = owner.post("/managed/workspaces/team-one/token/rotate").json()["raw_token"]
+    agent = TestClient(app)
+    joined = agent.post(
+        f"/managed/agent/workspaces/team-one/sessions/{session_id}/join",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"agent_name": "worker-1"},
+    )
+    assert joined.status_code == 200, joined.text
+    body = joined.json()
+
+    context = body.get("room_context")
+    assert isinstance(context, dict), body.keys()
+    posts = context.get("wall_posts")
+    assert isinstance(posts, list) and len(posts) == 1
+    assert posts[0]["body"] == "Decision: use the staging database for tests."
+    assert context.get("files") == []
+    # The hint teaches the commands so the agent can come back on its own.
+    hint = str(context.get("hint") or "")
+    assert "room-wall" in hint
+    assert "room-files" in hint

@@ -42,6 +42,12 @@ python ACP_AGENT/acp.py status --state waiting --text "ready for next task"
 
 Then run `listen --stop-after-message --timeout-seconds 300` again.
 
+On joining a managed room, read the durable context BEFORE taking work: the
+connect/join response embeds it as `room_context` (wall posts + files), and you
+can re-check anytime with `room-wall list` and `room-files list`. Publish
+durable decisions with `room-wall post` instead of leaving them only in
+transient messages (see section 9).
+
 The client writes each received message atomically under `ACP_AGENT/inbox/`
 before acknowledging its delivery to the Hub. Acknowledgment clears the unread
 message only; a `TASK` remains current until the normal REPLY/completion flow
