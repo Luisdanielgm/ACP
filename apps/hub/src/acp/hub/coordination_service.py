@@ -897,6 +897,17 @@ class SessionCoordinationService:
             )
             return member.as_payload(pending_count=self._pending_count_for(session_id, agent_name))
 
+    @staticmethod
+    def _apply_delivered_task(member: SessionMember, message: dict[str, Any]) -> None:
+        # send_message only stamps current_task when the recipient was free at
+        # send time; a TASK that sat in the queue must refresh these fields at
+        # delivery, or the member shows "processing TASK" with a stale task.
+        if str(message.get("action") or "").upper() != "TASK":
+            return
+        member.current_task = _payload_preview(message.get("payload"))
+        member.current_task_from = str(message.get("from") or "") or None
+        member.current_task_at = _utc_now_iso()
+
     async def wait_for_message(
         self,
         *,
@@ -933,6 +944,7 @@ class SessionCoordinationService:
                 member.status = "busy"
                 member.status_text = f"processing {message.get('action', 'INFO')}"
                 member.last_seen_at = _utc_now_iso()
+                self._apply_delivered_task(member, message)
                 self._store.update_member(session_id, member)
                 self._record_event(
                     session_id,
@@ -1003,6 +1015,36 @@ class SessionCoordinationService:
                 if current is not None and current.future is waiter:
                     self._waiters.pop((session_id, agent_name), None)
                     self._record_event(session_id, event="WAIT_CANCELLED", actor=agent_name, detail="wait request cancelled by client disconnect")
+                elif waiter.done() and not waiter.cancelled() and waiter.exception() is None:
+                    # The sender already resolved this wait, but the request task
+                    # was cancelled before the coroutine could return the result.
+                    # An auto-ack message lives ONLY inside this future (send never
+                    # persists it on the immediate-handoff path) — re-queue it so
+                    # it is not silently lost. Explicit-ack deliveries stay leased
+                    # in the store and redeliver on lease expiry; system notices
+                    # are persisted separately and must not be re-queued.
+                    orphaned = waiter.result()
+                    message = (orphaned or {}).get("message")
+                    if (
+                        isinstance(message, dict)
+                        and (orphaned or {}).get("delivery") is None
+                        and not message.get("system_event")
+                    ):
+                        priority_rank, sort_ts = _message_priority(message)
+                        self._store.enqueue_message(
+                            session_id=session_id,
+                            recipient_agent_name=agent_name,
+                            priority_rank=priority_rank,
+                            sort_ts=sort_ts,
+                            message=message,
+                        )
+                        self._record_event(
+                            session_id,
+                            event="WAIT_CANCELLED",
+                            actor=agent_name,
+                            message_id=message.get("id"),
+                            detail="wait cancelled after delivery; message re-queued for next wait",
+                        )
             raise
         async with self._lock:
             message = delivery_result["message"]
@@ -1012,6 +1054,7 @@ class SessionCoordinationService:
                 member.status = "busy"
                 member.status_text = f"processing {message.get('action', 'INFO')}"
                 member.last_seen_at = _utc_now_iso()
+                self._apply_delivered_task(member, message)
                 self._store.update_member(session_id, member)
             self._record_event(
                 session_id,

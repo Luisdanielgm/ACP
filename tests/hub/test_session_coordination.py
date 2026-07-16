@@ -1146,6 +1146,117 @@ def test_session_detail_history_keeps_rare_event_classes_despite_wait_flood(api_
     assert timestamps == sorted(timestamps)
 
 
+def test_cancelled_wait_does_not_lose_auto_delivered_message() -> None:
+    # Auto-ack immediate handoff puts the message ONLY inside the waiter's
+    # Future (send_message never persists it on this path). If the waiting
+    # request task is cancelled right after the sender resolves that future
+    # (uvicorn shutdown, client disconnect), the message must be re-queued —
+    # not silently dropped.
+    from acp.hub.coordination_service import SessionCoordinationService
+
+    async def scenario() -> None:
+        service = SessionCoordinationService()
+        chief = await service.create_session(owner_agent="chief")
+        worker = await service.join_session(join_code=chief["join_code"], agent_name="worker")
+
+        wait_task = asyncio.create_task(
+            service.wait_for_message(
+                session_id=chief["session_id"],
+                agent_name="worker",
+                member_token=worker["member_token"],
+                timeout_seconds=5,
+            )
+        )
+        await asyncio.sleep(0.05)  # let the waiter register
+
+        sent = await service.send_message(
+            session_id=chief["session_id"],
+            agent_name="chief",
+            member_token=chief["member_token"],
+            payload={
+                "from": "chief",
+                "to": "worker",
+                "action": "TASK",
+                "payload": "critical: rotate the credentials",
+            },
+        )
+        assert sent["delivery"] == "immediate"
+
+        # The waiter future is already resolved but the task has not resumed:
+        # cancelling now reproduces the shutdown/disconnect race.
+        wait_task.cancel()
+        results = await asyncio.gather(wait_task, return_exceptions=True)
+        assert isinstance(results[0], asyncio.CancelledError)
+
+        # The message must survive: the next wait delivers it.
+        redelivered = await service.wait_for_message(
+            session_id=chief["session_id"],
+            agent_name="worker",
+            member_token=worker["member_token"],
+            timeout_seconds=0.2,
+        )
+        assert redelivered is not None
+        assert redelivered["message"]["payload"] == "critical: rotate the credentials"
+
+    asyncio.run(scenario())
+
+
+def test_dequeued_task_updates_current_task_fields(api_client: Any) -> None:
+    # A TASK sent while the recipient is busy only lands in the queue; the
+    # member's current_task must be refreshed when the queued TASK is finally
+    # dequeued through wait, not stay stale/None.
+    chief = _create_session(api_client, "chief")
+    worker = _join_session(api_client, "worker", chief["join_code"])
+
+    busy = api_client.post(
+        "/sessions/status",
+        json={
+            "session_id": chief["session_id"],
+            "agent_name": "worker",
+            "member_token": worker["member_token"],
+            "status": "busy",
+            "status_text": "finishing previous work",
+        },
+    )
+    assert busy.status_code == 200
+
+    queued = api_client.post(
+        "/sessions/send",
+        json={
+            "session_id": chief["session_id"],
+            "agent_name": "chief",
+            "member_token": chief["member_token"],
+            "to": "worker",
+            "action": "TASK",
+            "payload": "Audit the payment flow",
+        },
+    )
+    assert queued.status_code == 200
+    assert queued.json()["delivery"] == "queued"
+
+    delivered = api_client.post(
+        "/sessions/wait",
+        json={
+            "session_id": chief["session_id"],
+            "agent_name": "worker",
+            "member_token": worker["member_token"],
+            "timeout_seconds": 0.2,
+        },
+    )
+    assert delivered.status_code == 200
+    assert delivered.json()["message"]["payload"] == "Audit the payment flow"
+
+    detail = api_client.get(
+        f"/sessions/{chief['session_id']}/detail",
+        params={"agent_name": "worker", "member_token": worker["member_token"]},
+    )
+    worker_member = next(
+        item for item in detail.json()["session"]["members"] if item["agent_name"] == "worker"
+    )
+    assert worker_member["current_task"] == "Audit the payment flow"
+    assert worker_member["current_task_from"] == "chief"
+
+
 def test_session_wait_does_not_override_busy_member_state(api_client: Any) -> None:
     chief = _create_session(api_client, "chief")
     worker = _join_session(api_client, "worker", chief["join_code"])
