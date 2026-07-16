@@ -452,6 +452,8 @@ Move faster with less manual coordination`,
   sd_last_seen_label: 'Last seen',
   sd_joined_label: 'Joined',
   sd_last_message_label: 'Last message',
+  sd_task_from_label: 'Assigned by',
+  sd_lane_detail_toggle: 'Toggle detail',
 
   // Admin
   sd_admin_actions_hint: 'Actions require admin permissions.',

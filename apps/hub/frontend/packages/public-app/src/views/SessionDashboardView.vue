@@ -309,7 +309,7 @@ function onCopy(payload: { value: string; label: string }) {
 
 async function copyInvite() {
   if (!session.payload.value) return
-  const text = buildInvitePrompt(session.payload.value, locale.value)
+  const text = buildInvitePrompt(session.payload.value, locale.value, window.location.origin)
   copyValue(text, t('sd_invite_prompt_label'))
 }
 

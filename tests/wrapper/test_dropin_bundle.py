@@ -494,6 +494,98 @@ def test_join_session_refuses_reusing_live_chief_config(tmp_path: Path) -> None:
         raise AssertionError("join-session should refuse a config that is already bound to a live session")
 
 
+def test_join_session_bootstraps_a_distinct_missing_config(tmp_path: Path) -> None:
+    module = _load_module("acp_dropin_runtime_join_missing_config", Path("ACP_AGENT/acp.py"))
+    config_path = tmp_path / "agents" / "external-worker.json"
+    calls: list[str] = []
+
+    def fake_post_json(*, hub_http: str, route: str, payload: dict[str, object], token: str | None = None) -> dict[str, object]:
+        calls.append(route)
+        if route == "/sessions/join":
+            assert hub_http == "https://hub.example"
+            assert payload["agent_name"] == "external-worker"
+            assert payload["join_code"] == "JOIN42"
+            return {
+                "session_id": "session-123",
+                "member_token": "worker-token",
+                "member_role": "collaborator",
+            }
+        if route == "/sessions/status":
+            return {"status": "ok"}
+        raise AssertionError(f"unexpected route: {route}")
+
+    module.post_json = fake_post_json
+
+    joined = module.join_session_from_args(
+        module.build_parser().parse_args(
+            [
+                "join-session",
+                "--config",
+                str(config_path),
+                "--agent",
+                "external-worker",
+                "--hub-http",
+                "https://hub.example",
+                "--code",
+                "JOIN42",
+            ]
+        )
+    )
+
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved["agent_name"] == "external-worker"
+    assert saved["hub_http"] == "https://hub.example"
+    assert saved["session_id"] == "session-123"
+    assert saved["member_token"] == "worker-token"
+    assert joined["operational_status"] == "waiting"
+    assert calls == ["/sessions/join", "/sessions/status"]
+
+
+def test_http_requests_send_a_stable_acp_user_agent_without_overwriting_callers(tmp_path: Path, monkeypatch) -> None:
+    module = _load_module("acp_dropin_runtime_user_agent", Path("ACP_AGENT/acp.py"))
+    captured: list[object] = []
+
+    class FakeResponse:
+        headers = {"Content-Type": "application/json"}
+
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b"{}"
+
+    def fake_urlopen(request: object, timeout: float) -> FakeResponse:
+        captured.append(request)
+        return FakeResponse()
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
+
+    module.request_json(method="GET", url="https://hub.example/health")
+    module.request_binary(url="https://hub.example/download", headers={})
+    upload = tmp_path / "artifact.txt"
+    upload.write_text("evidence", encoding="utf-8")
+    module.request_multipart_json(
+        url="https://hub.example/upload",
+        fields={"purpose": "artifact"},
+        file_path=upload,
+        headers={"Authorization": "Bearer test"},
+    )
+    module.request_json(
+        method="GET",
+        url="https://hub.example/custom",
+        headers={"User-Agent": "Custom-ACP-Client/9"},
+    )
+
+    assert len(captured) == 4
+    expected_user_agent = f"ACP-Agent-CLI/{Path('ACP_AGENT/VERSION').read_text(encoding='utf-8').strip()}"
+    for request in captured[:3]:
+        assert request.get_header("User-agent") == expected_user_agent
+    assert captured[3].get_header("User-agent") == "Custom-ACP-Client/9"
+
+
 def test_join_session_clears_stale_local_binding_before_rejoin(tmp_path: Path) -> None:
     module = _load_module("acp_dropin_runtime_join_stale_rebind", Path("ACP_AGENT/acp.py"))
     config_path = tmp_path / "claude-review.json"

@@ -139,7 +139,10 @@ watch(
 
 const inbox = ref<OperatorInboxMessage[]>([])
 const receiving = ref(false)
-const listening = ref(false)
+// Listening starts ON: the inbox is only useful when it fills itself. If the
+// real agent already holds the identity, the first silent poll gets a 409 and
+// flips this off automatically (see receiveOnce).
+const listening = ref(true)
 let listenTimer: ReturnType<typeof setInterval> | null = null
 
 async function receiveOnce(silent = false) {
@@ -172,7 +175,7 @@ watch(listening, active => {
     receiveOnce(true)
     listenTimer = setInterval(() => receiveOnce(true), 5000)
   }
-})
+}, { immediate: true })
 
 onUnmounted(() => {
   if (listenTimer) clearInterval(listenTimer)

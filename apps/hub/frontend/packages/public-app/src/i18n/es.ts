@@ -452,6 +452,8 @@ Avanza mas rapido con menos coordinacion manual`,
   sd_last_seen_label: 'Visto',
   sd_joined_label: 'Unido',
   sd_last_message_label: 'Ultimo mensaje',
+  sd_task_from_label: 'Asignada por',
+  sd_lane_detail_toggle: 'Ver detalle',
 
   // Admin
   sd_admin_actions_hint: 'Acciones requieren permisos admin.',

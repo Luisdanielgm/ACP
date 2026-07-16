@@ -759,7 +759,7 @@ onUnmounted(() => {
 
 async function copyInvite() {
   if (!session.payload.value) return
-  inviteText.value = buildInvitePrompt(session.payload.value, locale.value)
+  inviteText.value = buildInvitePrompt(session.payload.value, locale.value, window.location.origin)
   inviteOpen.value = true
   copyValue(inviteText.value, st('sd_invite_prompt_label'))
 }

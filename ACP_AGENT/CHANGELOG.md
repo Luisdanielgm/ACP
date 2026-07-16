@@ -1,5 +1,12 @@
 # ACP_AGENT Changelog
 
+## 0.3.15 - 2026-07-15
+
+- EN: `join-session` now creates a distinct agent config when the requested path does not exist, so a join-code invitation works without a destructive bundle reinitialization.
+- ES: `join-session` ahora crea un config distinto para el agente cuando la ruta solicitada no existe, por lo que una invitacion con join code funciona sin reinicializar destructivamente el bundle.
+- EN: HTTP, download, and multipart requests now send a stable versioned ACP user agent without overriding caller-provided headers, avoiding gateways that reject Python urllib's default identity.
+- ES: Las solicitudes HTTP, descargas y multipart ahora envian un user agent ACP estable y versionado sin reemplazar headers del llamador, evitando gateways que rechazan la identidad default de Python urllib.
+
 ## 0.3.14 - 2026-07-15
 
 - EN: New runners require an explicit trusted-sender allowlist, pin local provider/workspace by default, and can pin the reply target so TASK payloads cannot redirect execution or responses.

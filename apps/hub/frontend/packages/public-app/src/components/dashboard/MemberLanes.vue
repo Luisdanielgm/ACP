@@ -15,6 +15,7 @@
         :data-role="normalizedRole(member.role)"
         :style="{ '--role-accent': avatarAccent(member) }"
         :title="laneTooltip(member)"
+        @click="toggleLane(member.agent_name)"
       >
         <span class="lane-avatar">
           <img class="lane-avatar-face" :class="{ ghost: isStale(member) }" :src="avatarSrc(member)" :alt="member.agent_name" />
@@ -34,6 +35,15 @@
               :class="topIssue(member)!.level"
               :title="t('sd_' + topIssue(member)!.label)"
             ></span>
+            <button
+              class="lane-expand"
+              type="button"
+              :aria-expanded="isExpanded(member)"
+              :aria-label="t('sd_lane_detail_toggle')"
+              :title="t('sd_lane_detail_toggle')"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+            </button>
           </div>
         </div>
         <div class="lane-cells">
@@ -50,13 +60,36 @@
             <span class="cell-value clamp">{{ member.current_task || member.status_text || t('sd_no_detail') }}</span>
           </div>
         </div>
+        <!-- Expanded detail: real snapshot fields the compact row has no room for. -->
+        <div v-if="isExpanded(member)" class="lane-detail">
+          <div v-if="member.joined_at" class="detail-item">
+            <span class="detail-label">{{ t('sd_joined_label') }}</span>
+            <span class="detail-value">{{ timeAgo(member.joined_at, locale) }}</span>
+          </div>
+          <div v-if="member.current_task && member.current_task_from" class="detail-item">
+            <span class="detail-label">{{ t('sd_task_from_label') }}</span>
+            <span class="detail-value">{{ nameOf(member.current_task_from) }}</span>
+          </div>
+          <div v-if="member.delivery_mode" class="detail-item">
+            <span class="detail-label">{{ t('sd_delivery_mode_label') }}</span>
+            <span class="detail-value">{{ deliveryLabel(member.delivery_mode) }}</span>
+          </div>
+          <div v-if="member.provider && member.provider !== '-'" class="detail-item">
+            <span class="detail-label">{{ t('sd_provider_label') }}</span>
+            <span class="detail-value">{{ member.provider }}<template v-if="member.workspace_path"> · {{ compactPath(member.workspace_path) }}</template></span>
+          </div>
+          <div v-if="runSummary(member.last_run) !== '-'" class="detail-item">
+            <span class="detail-label">{{ t('sd_last_run_label') }}</span>
+            <span class="detail-value">{{ runSummary(member.last_run) }}</span>
+          </div>
+        </div>
         <button
           v-if="adminActionsAvailable"
           class="lane-kick"
           type="button"
           :title="t('sd_disconnect_member_btn')"
           :aria-label="t('sd_disconnect_member_btn')"
-          @click="$emit('disconnect-member', member.agent_name)"
+          @click.stop="$emit('disconnect-member', member.agent_name)"
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6L6 18" /><path d="M6 6l12 12" /></svg>
         </button>
@@ -66,7 +99,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from '@acp/shared'
 import { messages } from '../../i18n'
 import {
@@ -100,11 +133,37 @@ const displayNames = computed(() =>
   agentDisplayNames(props.members.filter(m => !isWebOperator(m.agent_name)).map(m => m.agent_name))
 )
 
-function displayName(member: SessionMember): string {
+function nameOf(agentName: string): string {
   return translateDisplayName(
     locale.value,
-    displayNames.value.get(member.agent_name) || humanizeAgentName(member.agent_name)
+    displayNames.value.get(agentName) || humanizeAgentName(agentName)
   )
+}
+
+function displayName(member: SessionMember): string {
+  return nameOf(member.agent_name)
+}
+
+// ── Expandable detail row ──
+
+const expanded = ref(new Set<string>())
+
+function isExpanded(member: SessionMember): boolean {
+  return expanded.value.has(member.agent_name)
+}
+
+// The whole row toggles; the chevron button rides the same bubbled click and
+// only adds keyboard focus + aria-expanded.
+function toggleLane(agentName: string) {
+  const next = new Set(expanded.value)
+  if (next.has(agentName)) next.delete(agentName)
+  else next.add(agentName)
+  expanded.value = next
+}
+
+function deliveryLabel(mode: string): string {
+  const known = ['attached', 'runner', 'immediate', 'queued', 'dequeued']
+  return known.includes(mode) ? t('sd_delivery_' + mode) : mode
 }
 
 function isStale(member: SessionMember): boolean {
@@ -169,6 +228,7 @@ function laneClasses(member: SessionMember): string[] {
   if (props.isFirstRender) classes.push('fade-in')
   if (activity.isBusy) classes.push('is-busy')
   if (isStale(member)) classes.push('is-stale')
+  if (isExpanded(member)) classes.push('is-open')
   return classes
 }
 </script>
@@ -197,6 +257,7 @@ function laneClasses(member: SessionMember): string[] {
   gap:6px 10px;
   padding:8px 10px; border:1px solid var(--line); border-radius:12px;
   background:var(--card-bg-strong); position:relative; overflow:hidden;
+  cursor:pointer;
   transition:border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .lane::after { content:''; position:absolute; inset:0 auto 0 0; width:3px; background:var(--role-accent, transparent); opacity:0.85; }
@@ -240,6 +301,18 @@ function laneClasses(member: SessionMember): string[] {
 .cell-value { font-size:13px; font-weight:850; font-variant-numeric:tabular-nums; color:var(--ink); line-height:1.15; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .lane-cell.warn .cell-value { color:#EF9F27; }
 .cell-value.clamp { font-size:10.5px; font-weight:650; color:var(--muted); white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
+/* Expand chevron: keyboard-focusable handle for the row toggle (the click
+   itself bubbles to the lane handler — no double toggle). */
+.lane-expand { flex-shrink:0; display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; padding:0; border:none; border-radius:6px; background:transparent; color:var(--muted); cursor:pointer; transition:transform 0.2s ease, color 0.15s ease; }
+.lane-expand:hover { color:var(--ink); }
+.lane.is-open .lane-expand { transform:rotate(180deg); }
+
+/* Expanded detail row: real snapshot fields, shown on demand */
+.lane-detail { grid-column:2 / -1; grid-row:3; min-width:0; display:flex; flex-wrap:wrap; gap:6px 16px; padding-top:6px; border-top:1px dashed var(--line); }
+.detail-item { display:flex; flex-direction:column; gap:1px; min-width:0; }
+.detail-label { font-size:7.5px; font-weight:750; letter-spacing:0.035em; text-transform:uppercase; color:var(--muted); white-space:nowrap; }
+.detail-value { font-size:11px; font-weight:650; color:var(--ink); max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
 .lane-kick { grid-column:3; grid-row:1 / 3; align-self:center; display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; padding:0; border:1px solid var(--line); border-radius:8px; background:transparent; color:var(--muted); cursor:pointer; transition:all 0.15s ease; }
 .lane-kick:hover { color:#F0997B; border-color:rgba(240,153,123,0.4); background:rgba(240,153,123,0.08); }
 

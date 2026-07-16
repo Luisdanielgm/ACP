@@ -66,6 +66,18 @@ PERSISTENT_LISTEN_WARNING = (
 )
 
 
+def _client_user_agent() -> str:
+    try:
+        version = (ACP_ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        version = "unknown"
+    safe_version = re.sub(r"[^0-9A-Za-z._+-]", "-", version) or "unknown"
+    return f"ACP-Agent-CLI/{safe_version}"
+
+
+ACP_CLIENT_USER_AGENT = _client_user_agent()
+
+
 @dataclass(frozen=True)
 class RuntimeSettings:
     agent_name: str
@@ -1140,6 +1152,7 @@ def resolve_hub_agent_settings(args: argparse.Namespace, *, require_hub_http: bo
         "connect",
         "coordinate",
         "invite",
+        "join-session",
     } and (
         isinstance(getattr(args, "config", None), str) and getattr(args, "config", "").strip()
         or isinstance(getattr(args, "agent", None), str) and getattr(args, "agent", "").strip()
@@ -1492,6 +1505,13 @@ def _managed_agent_headers(agent_token: str) -> dict[str, str]:
     }
 
 
+def _headers_with_user_agent(headers: dict[str, str] | None = None) -> dict[str, str]:
+    resolved = dict(headers or {})
+    if not any(key.lower() == "user-agent" for key in resolved):
+        resolved["User-Agent"] = ACP_CLIENT_USER_AGENT
+    return resolved
+
+
 def request_json(
     *,
     method: str,
@@ -1507,10 +1527,11 @@ def request_json(
     last_transient_body: str | None = None
     last_transient_code: int | None = None
     for attempt_index in range(attempts):
+        request_headers = _headers_with_user_agent(headers or {"Content-Type": "application/json"})
         request = urllib.request.Request(
             url,
             data=body,
-            headers=headers or {"Content-Type": "application/json"},
+            headers=request_headers,
             method=method.upper(),
         )
         try:
@@ -1545,7 +1566,7 @@ def request_json(
 
 
 def request_binary(*, url: str, headers: dict[str, str], timeout_seconds: float = 30.0) -> tuple[bytes, dict[str, str]]:
-    request = urllib.request.Request(url, headers=headers, method="GET")
+    request = urllib.request.Request(url, headers=_headers_with_user_agent(headers), method="GET")
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             return response.read(), {str(key).lower(): str(value) for key, value in response.headers.items()}
@@ -1594,7 +1615,12 @@ def request_multipart_json(
     )
     request_headers = {key: value for key, value in headers.items() if key.lower() != "content-type"}
     request_headers["Content-Type"] = f"multipart/form-data; boundary={boundary}"
-    request = urllib.request.Request(url, data=b"".join(chunks), headers=request_headers, method="POST")
+    request = urllib.request.Request(
+        url,
+        data=b"".join(chunks),
+        headers=_headers_with_user_agent(request_headers),
+        method="POST",
+    )
     try:
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             payload = json.loads(response.read().decode("utf-8"))
