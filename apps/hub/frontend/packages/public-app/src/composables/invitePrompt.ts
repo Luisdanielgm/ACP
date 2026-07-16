@@ -6,7 +6,7 @@ export interface InvitePromptPayload {
   hub_ws?: string
 }
 
-const MINIMUM_CLIENT_VERSION = '0.3.15'
+const MINIMUM_CLIENT_VERSION = '0.3.16'
 
 function normalizedHttpOrigin(value: string | undefined): string {
   const candidate = String(value || '').trim()
@@ -42,6 +42,8 @@ export function buildInvitePrompt(payload: InvitePromptPayload, lang = 'en', pag
   const join = String(payload.join_code || '').trim() || '<JOIN_CODE>'
   const es = lang === 'es'
   const lines: string[] = []
+  const download = (url: string, output: string) =>
+    `python -c "import urllib.request; request=urllib.request.Request('${url}', headers={'User-Agent': 'ACP-Invite-Bootstrap/${MINIMUM_CLIENT_VERSION}'}); open('${output}', 'wb').write(urllib.request.urlopen(request).read())"`
 
   if (es) {
     lines.push(`# Requisito: Python 3 y cliente ACP ${MINIMUM_CLIENT_VERSION} o posterior.`)
@@ -50,37 +52,43 @@ export function buildInvitePrompt(payload: InvitePromptPayload, lang = 'en', pag
     lines.push(`# Requirement: Python 3 and ACP client ${MINIMUM_CLIENT_VERSION} or newer.`)
     lines.push('# If ACP_AGENT/acp.py does not exist, download and extract the official bundle in the project root:')
   }
-  lines.push(`curl --fail --location "${origin}/downloads/ACP_AGENT.zip" --output ACP_AGENT.zip`)
+  lines.push(download(`${origin}/downloads/ACP_AGENT.zip`, 'ACP_AGENT.zip'))
   lines.push('python -m zipfile -e ACP_AGENT.zip ACP_AGENT')
   lines.push('')
 
-  lines.push(es ? '# Comprueba la version y actualiza solo cuando el cliente este inactivo:' : '# Check the version and update only while the client is idle:')
+  lines.push(es ? '# Comprueba y actualiza el cliente solo cuando este inactivo:' : '# Check and update the client only while it is idle:')
   lines.push('python ACP_AGENT/acp.py --version')
   lines.push(`python ACP_AGENT/acp.py update-check --hub-http "${origin}"`)
   lines.push(`python ACP_AGENT/acp.py self-update --hub-http "${origin}" --auto-when-idle`)
   lines.push('')
 
+  lines.push(es ? '# Si el cliente antiguo no alcanza el Hub, usa el updater oficial nuevo desde un directorio aislado:' : '# If the old client cannot reach the Hub, use the new official updater from an isolated directory:')
+  lines.push(download(`${origin}/downloads/ACP_AGENT.zip`, `ACP_AGENT-${MINIMUM_CLIENT_VERSION}.zip`))
+  lines.push(`python -m zipfile -e ACP_AGENT-${MINIMUM_CLIENT_VERSION}.zip .acp-agent-${MINIMUM_CLIENT_VERSION}`)
+  lines.push(`python .acp-agent-${MINIMUM_CLIENT_VERSION}/update_from_release.py --manifest-url "${origin}/downloads/ACP_AGENT.json" --target ACP_AGENT --check`)
+  lines.push(`python .acp-agent-${MINIMUM_CLIENT_VERSION}/update_from_release.py --manifest-url "${origin}/downloads/ACP_AGENT.json" --target ACP_AGENT --auto-when-idle`)
+  lines.push('')
+
+  lines.push(es ? '# Si el updater bloquea un repo tracked, NO lo sobrescribas silenciosamente. Revisa primero:' : '# If the updater blocks a tracked repo, do NOT overwrite it silently. Review it first:')
+  lines.push('git status --short -- ACP_AGENT')
+  lines.push(es ? '# Si muestra cambios locales (dirty), haz commit/stash o DETENTE; no uses el override sobre un arbol sucio.' : '# If it shows local changes (dirty), commit/stash them or STOP; do not use the override on a dirty tree.')
+  lines.push(es ? '# Solo despues de revisar los cambios y obtener aprobacion explicita, permite la actualizacion tracked:' : '# Only after reviewing the changes and obtaining explicit approval, allow the tracked update:')
+  lines.push(`python .acp-agent-${MINIMUM_CLIENT_VERSION}/update_from_release.py --manifest-url "${origin}/downloads/ACP_AGENT.json" --target ACP_AGENT --auto-when-idle --allow-tracked-repo`)
+  lines.push('')
+
+  lines.push(es ? `# Confirma ACP ${MINIMUM_CLIENT_VERSION} o posterior antes de unirte. Si la version es menor, DETENTE.` : `# Confirm ACP ${MINIMUM_CLIENT_VERSION} or newer before joining. If the version is older, STOP.`)
+  lines.push('python ACP_AGENT/acp.py --version')
+  lines.push('')
+
   lines.push(es ? '# Elige UN modo. Usa una identidad/config distinta por agente; nunca reutilices el config del chief.' : '# Choose ONE mode. Use a distinct identity/config per agent; never reuse the chief config.')
   lines.push('')
   lines.push(es ? '# Modo por turnos: une al agente (crea el config si no existe) y recibe un solo mensaje por ciclo.' : '# Turn-based mode: join the agent (creates the config when missing) and receive one message per cycle.')
-  lines.push('python ACP_AGENT/acp.py join-session \\')
-  lines.push('  --config ACP_AGENT/agents/<agent>.json \\')
-  lines.push('  --agent <agent> \\')
-  lines.push(`  --hub-http "${origin}" \\`)
-  lines.push(`  --code "${join}"`)
+  lines.push(`python ACP_AGENT/acp.py join-session --config ACP_AGENT/agents/<agent>.json --agent <agent> --hub-http "${origin}" --code "${join}"`)
   lines.push('python ACP_AGENT/acp.py listen --agent <agent> --stop-after-message --timeout-seconds 300')
   lines.push('')
 
   lines.push(es ? '# Modo siempre activo: NO ejecutes el join anterior; el runner se une y despierta al proveedor local.' : '# Always-on mode: do NOT run the join above; the runner joins and wakes the local provider.')
-  lines.push('python ACP_AGENT/acp.py runner start \\')
-  lines.push('  --config ACP_AGENT/agents/<agent>.json \\')
-  lines.push('  --agent <agent> \\')
-  lines.push(`  --hub-http "${origin}" \\`)
-  lines.push(`  --join-code "${join}" \\`)
-  lines.push('  --provider <codex_local|claude_local> \\')
-  lines.push('  --workspace "<ABSOLUTE_PROJECT_PATH>" \\')
-  lines.push('  --allow-sender "<TRUSTED_COORDINATOR>" \\')
-  lines.push('  --reply-to "<TRUSTED_COORDINATOR>"')
+  lines.push(`python ACP_AGENT/acp.py runner start --config ACP_AGENT/agents/<agent>.json --agent <agent> --hub-http "${origin}" --join-code "${join}" --provider <codex_local|claude_local> --workspace "<ABSOLUTE_PROJECT_PATH>" --allow-sender "<TRUSTED_COORDINATOR>" --reply-to "<TRUSTED_COORDINATOR>"`)
   lines.push('')
 
   lines.push(es ? '# No uses listen persistente en primer plano para un LLM. No compartas tokens generados ni otros configs.' : '# Do not use persistent foreground listen for an LLM. Do not share generated tokens or other configs.')

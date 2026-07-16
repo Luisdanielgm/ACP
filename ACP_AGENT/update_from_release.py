@@ -37,7 +37,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--manifest-url", default=DEFAULT_MANIFEST_URL, help="Release manifest URL")
     parser.add_argument("--target", default=str(ACP_ROOT), help="Target ACP_AGENT directory to update in place")
     parser.add_argument("--check", action="store_true", help="Only compare local and remote versions")
-    parser.add_argument("--force", action="store_true", help="Apply the update even when versions match")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Apply when versions match or explicitly allow replacing a newer local version with an older release",
+    )
     parser.add_argument(
         "--auto-when-idle",
         action="store_true",
@@ -112,7 +116,44 @@ def _sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def _version_key(value: str | None) -> tuple[tuple[int, str], ...]:
+_SEMVER_RE = re.compile(
+    r"^[vV]?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
+
+
+def _parse_semver(value: str | None) -> tuple[tuple[int, int, int], tuple[str, ...] | None] | None:
+    if not isinstance(value, str):
+        return None
+    match = _SEMVER_RE.fullmatch(value.strip())
+    if match is None:
+        return None
+    prerelease = tuple(match.group(4).split(".")) if match.group(4) else None
+    return (int(match.group(1)), int(match.group(2)), int(match.group(3))), prerelease
+
+
+def _compare_prerelease(left: tuple[str, ...] | None, right: tuple[str, ...] | None) -> int:
+    if left == right:
+        return 0
+    if left is None:
+        return 1
+    if right is None:
+        return -1
+    for left_part, right_part in zip(left, right):
+        if left_part == right_part:
+            continue
+        left_numeric = left_part.isdigit()
+        right_numeric = right_part.isdigit()
+        if left_numeric and right_numeric:
+            return -1 if int(left_part) < int(right_part) else 1
+        if left_numeric != right_numeric:
+            return -1 if left_numeric else 1
+        return -1 if left_part < right_part else 1
+    return -1 if len(left) < len(right) else 1
+
+
+def _loose_version_key(value: str | None) -> tuple[tuple[int, str], ...]:
     if not isinstance(value, str) or not value.strip():
         return tuple()
     parts = re.split(r"[.\-_]+", value.strip())
@@ -128,8 +169,15 @@ def _version_key(value: str | None) -> tuple[tuple[int, str], ...]:
 
 
 def _compare_versions(left: str | None, right: str | None) -> int:
-    left_key = _version_key(left)
-    right_key = _version_key(right)
+    left_semver = _parse_semver(left)
+    right_semver = _parse_semver(right)
+    if left_semver is not None and right_semver is not None:
+        if left_semver[0] != right_semver[0]:
+            return -1 if left_semver[0] < right_semver[0] else 1
+        return _compare_prerelease(left_semver[1], right_semver[1])
+
+    left_key = _loose_version_key(left)
+    right_key = _loose_version_key(right)
     if left_key == right_key:
         return 0
     max_len = max(len(left_key), len(right_key))
@@ -176,6 +224,25 @@ def target_has_tracked_files(target_dir: Path) -> bool:
     return result.returncode == 0 and bool(result.stdout.strip())
 
 
+def target_dirty_paths(target_dir: Path) -> list[str] | None:
+    """Return staged, unstaged, and untracked paths inside target; ignored files stay excluded."""
+
+    git_root = _git_root_for(target_dir)
+    if git_root is None:
+        return []
+    try:
+        relative_target = target_dir.resolve().relative_to(git_root)
+    except ValueError:
+        return []
+    result = _run_git(
+        cwd=git_root,
+        args=["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", relative_target.as_posix()],
+    )
+    if result.returncode != 0:
+        return None
+    return sorted(item[3:] for item in result.stdout.split("\0") if len(item) >= 4)
+
+
 def auto_update_safety(*, target_dir: Path, allow_tracked_repo: bool = False) -> dict[str, Any]:
     tracked = target_has_tracked_files(target_dir)
     if tracked and not allow_tracked_repo:
@@ -185,6 +252,21 @@ def auto_update_safety(*, target_dir: Path, allow_tracked_repo: bool = False) ->
             "detail": "ACP_AGENT files are tracked by git; autonomous updates would mutate the user's repository.",
             "manual_command": "python ACP_AGENT/update_from_release.py",
         }
+    if tracked and allow_tracked_repo:
+        dirty_paths = target_dirty_paths(target_dir)
+        if dirty_paths is None:
+            return {
+                "safe": False,
+                "reason": "target_git_status_unavailable",
+                "detail": "Cannot verify that the tracked ACP_AGENT target is clean; update refused.",
+            }
+        if dirty_paths:
+            return {
+                "safe": False,
+                "reason": "target_is_git_dirty",
+                "detail": "Tracked ACP_AGENT contains staged, unstaged, or untracked changes; commit/stash them first.",
+                "dirty_paths": dirty_paths,
+            }
     return {
         "safe": True,
         "reason": "safe_untracked_install" if not tracked else "tracked_repo_allowed",
@@ -300,10 +382,17 @@ def check_for_update(*, target_dir: Path, manifest_url: str) -> dict[str, Any]:
         raise ValueError("release manifest is missing bundle_url")
     bundle_url = urllib.parse.urljoin(manifest_url, bundle_url_value)
     current_version = local_version(target_dir)
+    version_comparison = _compare_versions(current_version, remote_version)
     policy_status = resolve_policy_status(local_version_value=current_version, manifest=manifest)
     safety = auto_update_safety(target_dir=target_dir)
     return {
-        "status": "current" if current_version == remote_version else "update_available",
+        "status": (
+            "current"
+            if version_comparison == 0
+            else "local_newer"
+            if current_version is not None and version_comparison > 0
+            else "update_available"
+        ),
         "local_version": current_version,
         "remote_version": remote_version,
         "bundle_url": bundle_url,
@@ -340,6 +429,14 @@ def update_from_manifest(
             "local_version": comparison["local_version"],
             "remote_version": comparison["remote_version"],
             "bundle_url": comparison["bundle_url"],
+        }
+    if comparison["status"] == "local_newer" and not force:
+        return {
+            "status": "local_newer",
+            "local_version": comparison["local_version"],
+            "remote_version": comparison["remote_version"],
+            "bundle_url": comparison["bundle_url"],
+            "detail": "Local ACP_AGENT is newer; refusing downgrade without explicit --force.",
         }
 
     if auto_when_idle:

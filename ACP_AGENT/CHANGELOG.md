@@ -1,5 +1,14 @@
 # ACP_AGENT Changelog
 
+## 0.3.16 - 2026-07-15
+
+- EN: Join-code invitations now require a verified 0.3.16+ client, use shell-neutral one-line commands, and provide guarded official update recovery for old or Git-tracked installs.
+- ES: Las invitaciones con join code ahora exigen un cliente 0.3.16+ verificado, usan comandos de una linea compatibles entre shells y ofrecen recuperacion oficial protegida para instalaciones antiguas o tracked por Git.
+- EN: The release updater compares semantic versions and refuses to replace a newer local client with an older manifest unless `--force` is explicit.
+- ES: El updater compara versiones semanticas y se niega a reemplazar un cliente local mas nuevo por un manifest anterior salvo que `--force` sea explicito.
+- EN: `join-session` reserves and rechecks its config path across the join request, preventing concurrent first-use joins from overwriting one another and releasing the reservation on failure.
+- ES: `join-session` reserva y vuelve a comprobar la ruta del config durante el join, evitando que uniones concurrentes de primer uso se sobrescriban y liberando la reserva ante fallos.
+
 ## 0.3.15 - 2026-07-15
 
 - EN: `join-session` now creates a distinct agent config when the requested path does not exist, so a join-code invitation works without a destructive bundle reinitialization.

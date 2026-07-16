@@ -39,6 +39,7 @@ from runner_support import (
 )
 
 from acp_distribution import AgentDistribution, load_distribution
+from config_reservation import ConfigReservation, assert_reservation_owned, reserve_config
 
 DEFAULT_BACKOFF = (0.5, 1.0, 2.0, 5.0)
 DEFAULT_POLL_MS = 800
@@ -1427,9 +1428,24 @@ def enrich_session_payload(
     return enriched
 
 
-def write_config(path: Path, payload: dict[str, Any]) -> None:
+def write_config(
+    path: Path,
+    payload: dict[str, Any],
+    *,
+    reservation: ConfigReservation | None = None,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    write_json_atomic(path, payload)
+    if reservation is not None:
+        if reservation.config_path.resolve() != path.resolve():
+            raise ValueError("config reservation does not match the destination")
+        assert_reservation_owned(reservation)
+        write_json_atomic(path, payload)
+        return
+    with reserve_config(path):
+        write_json_atomic(path, payload)
+
+
+reserve_join_config = reserve_config
 
 
 def clear_session_credentials(path: Path, config: dict[str, Any]) -> dict[str, Any]:
@@ -1978,6 +1994,7 @@ def _persist_session_binding(
     hub_ws_override: str | None = None,
     managed_agent_token: str | None = None,
     capabilities: list[str] | None = None,
+    config_reservation: ConfigReservation | None = None,
 ) -> HubAgentSettings:
     updated = dict(settings.config)
     updated["agent_name"] = settings.agent_name
@@ -1997,7 +2014,7 @@ def _persist_session_binding(
         updated["join_code"] = join_code
     if member_role:
         updated["member_role"] = member_role
-    write_config(settings.config_path, updated)
+    write_config(settings.config_path, updated, reservation=config_reservation)
     operational_settings = derive_hub_agent_settings(settings=settings, config=updated)
     safe_update_session_status(
         settings=operational_settings,
@@ -2060,38 +2077,46 @@ def create_session_and_optionally_listen(args: argparse.Namespace, *, listen_aft
 
 
 def join_session_from_args(args: argparse.Namespace) -> dict[str, Any]:
-    settings = ensure_detached_session_bootstrap(
-        resolve_hub_agent_settings(args),
+    config_path = resolve_cli_config_path(
+        config_path=getattr(args, "config", None),
+        agent_name=getattr(args, "agent", None),
         command_name="join-session",
+        allow_missing_agent_config=True,
     )
-    response = post_json(
-        hub_http=settings.hub_http,
-        route="/sessions/join",
-        payload={
-            "agent_name": settings.agent_name,
-            "join_code": args.code,
-            **({"capabilities": optional_capabilities_from_args_config(args, settings.config)} if optional_capabilities_from_args_config(args, settings.config) is not None else {}),
-            "token": settings.token,
-        },
-        token=settings.token,
-    )
-    operational_settings = _persist_session_binding(
-        settings=settings,
-        session_id=response["session_id"],
-        member_token=response["member_token"],
-        join_code=response.get("join_code"),
-        member_role=response.get("member_role"),
-        dashboard_session_path="/dashboard/session",
-        capabilities=optional_capabilities_from_args_config(args, settings.config),
-    )
-    return enrich_session_payload(
-        settings=operational_settings,
-        payload=response,
-        session_id=response["session_id"],
-        member_token=response["member_token"],
-        join_code=response.get("join_code"),
-        member_role=response.get("member_role"),
-    )
+    with reserve_join_config(config_path) as config_reservation:
+        settings = ensure_detached_session_bootstrap(
+            resolve_hub_agent_settings(args),
+            command_name="join-session",
+        )
+        response = post_json(
+            hub_http=settings.hub_http,
+            route="/sessions/join",
+            payload={
+                "agent_name": settings.agent_name,
+                "join_code": args.code,
+                **({"capabilities": optional_capabilities_from_args_config(args, settings.config)} if optional_capabilities_from_args_config(args, settings.config) is not None else {}),
+                "token": settings.token,
+            },
+            token=settings.token,
+        )
+        operational_settings = _persist_session_binding(
+            settings=settings,
+            session_id=response["session_id"],
+            member_token=response["member_token"],
+            join_code=response.get("join_code"),
+            member_role=response.get("member_role"),
+            dashboard_session_path="/dashboard/session",
+            capabilities=optional_capabilities_from_args_config(args, settings.config),
+            config_reservation=config_reservation,
+        )
+        return enrich_session_payload(
+            settings=operational_settings,
+            payload=response,
+            session_id=response["session_id"],
+            member_token=response["member_token"],
+            join_code=response.get("join_code"),
+            member_role=response.get("member_role"),
+        )
 
 
 def join_session_and_optionally_listen(args: argparse.Namespace, *, listen_after: bool) -> dict[str, Any]:

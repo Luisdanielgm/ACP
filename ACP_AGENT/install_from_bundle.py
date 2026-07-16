@@ -16,6 +16,7 @@ if str(ACP_ROOT) not in sys.path:
     sys.path.insert(0, str(ACP_ROOT))
 
 from acp_distribution import AgentDistribution, load_distribution
+from config_reservation import reserve_config
 
 ACP_ENTRYPOINT = ACP_ROOT / "acp.py"
 ACP_REQUIREMENTS = ACP_ROOT / "requirements.txt"
@@ -508,14 +509,16 @@ def initialize_agent_folder(
     _write_text(acp_root / "README.md", _bundle_readme())
 
     for name in agent_names:
-        _write_text(
-            acp_root / "agents" / f"{name}.json",
-            json.dumps(
-                _agent_config(name=name, hub_mode=hub_mode, hub_http=hub_http, hub_ws=hub_ws, token=token),
-                indent=2,
+        config_path = acp_root / "agents" / f"{name}.json"
+        with reserve_config(config_path):
+            _write_text(
+                config_path,
+                json.dumps(
+                    _agent_config(name=name, hub_mode=hub_mode, hub_http=hub_http, hub_ws=hub_ws, token=token),
+                    indent=2,
+                )
+                + "\n",
             )
-            + "\n",
-        )
         (acp_root / "inbox" / name).mkdir(parents=True, exist_ok=True)
         (acp_root / "outbox" / name).mkdir(parents=True, exist_ok=True)
         (acp_root / "sent" / name).mkdir(parents=True, exist_ok=True)

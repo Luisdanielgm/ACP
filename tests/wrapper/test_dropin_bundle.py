@@ -23,6 +23,7 @@ def _load_module(module_name: str, path: Path) -> object:
 def _copy_bundle_runtime_files(source: Path, target: Path) -> None:
     for name in (
         "acp.py",
+        "config_reservation.py",
         "acp_distribution.py",
         "DISTRIBUTION.json",
         "install_from_bundle.py",
@@ -541,6 +542,115 @@ def test_join_session_bootstraps_a_distinct_missing_config(tmp_path: Path) -> No
     assert calls == ["/sessions/join", "/sessions/status"]
 
 
+def test_join_session_reserves_missing_config_against_concurrent_overwrite(tmp_path: Path) -> None:
+    module = _load_module("acp_dropin_runtime_join_config_race", Path("ACP_AGENT/acp.py"))
+    config_path = tmp_path / "agents" / "worker.json"
+    args = module.build_parser().parse_args(
+        [
+            "join-session",
+            "--config",
+            str(config_path),
+            "--agent",
+            "worker",
+            "--hub-http",
+            "https://hub.example",
+            "--code",
+            "JOIN42",
+        ]
+    )
+    concurrent_error: list[str] = []
+    nested = False
+
+    def fake_post_json(*, hub_http: str, route: str, payload: dict[str, object], token: str | None = None) -> dict[str, object]:
+        nonlocal nested
+        if route == "/sessions/join":
+            if not nested:
+                nested = True
+                try:
+                    module.join_session_from_args(args)
+                except ValueError as exc:
+                    concurrent_error.append(str(exc))
+                finally:
+                    nested = False
+            else:
+                return {
+                    "session_id": "session-second",
+                    "member_token": "token-second",
+                    "member_role": "collaborator",
+                }
+            return {
+                "session_id": "session-first",
+                "member_token": "token-first",
+                "member_role": "collaborator",
+            }
+        if route == "/sessions/status":
+            return {"status": "ok"}
+        raise AssertionError(f"unexpected route: {route}")
+
+    module.post_json = fake_post_json
+    module.join_session_from_args(args)
+
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert saved["session_id"] == "session-first"
+    assert saved["member_token"] == "token-first"
+    assert concurrent_error and "reserved by another process" in concurrent_error[0]
+    assert list(config_path.parent.glob("*.join.lock")) == []
+
+
+def test_join_session_releases_missing_config_reservation_after_failure(tmp_path: Path) -> None:
+    module = _load_module("acp_dropin_runtime_join_config_cleanup", Path("ACP_AGENT/acp.py"))
+    config_path = tmp_path / "agents" / "worker.json"
+    args = module.build_parser().parse_args(
+        [
+            "join-session",
+            "--config",
+            str(config_path),
+            "--agent",
+            "worker",
+            "--hub-http",
+            "https://hub.example",
+            "--code",
+            "JOIN42",
+        ]
+    )
+
+    def failing_post_json(**_kwargs: object) -> dict[str, object]:
+        raise ValueError("simulated join failure")
+
+    module.post_json = failing_post_json
+    try:
+        module.join_session_from_args(args)
+    except ValueError as exc:
+        assert "simulated join failure" in str(exc)
+    else:
+        raise AssertionError("join-session should propagate the simulated failure")
+
+    assert not config_path.exists()
+    assert list(config_path.parent.glob("*.join.lock")) == []
+
+
+def test_all_config_writers_respect_join_reservation_and_recover_dead_owner(tmp_path: Path) -> None:
+    module = _load_module("acp_dropin_runtime_config_writer_lock", Path("ACP_AGENT/acp.py"))
+    config_path = tmp_path / "agents" / "worker.json"
+
+    with module.reserve_join_config(config_path) as reservation:
+        try:
+            module.write_config(config_path, {"agent_name": "other"})
+        except ValueError as exc:
+            assert "reserved by another process" in str(exc)
+        else:
+            raise AssertionError("an unowned config writer must not bypass the reservation")
+        module.write_config(config_path, {"agent_name": "worker"}, reservation=reservation)
+
+    lock_path = config_path.with_name(f"{config_path.name}.join.lock")
+    lock_path.write_text('{"pid": 99999999, "created_at": 0, "token": "dead"}\n', encoding="utf-8")
+    with module.reserve_join_config(config_path) as reservation:
+        module.write_config(config_path, {"agent_name": "recovered"}, reservation=reservation)
+    assert not lock_path.exists()
+    assert json.loads(config_path.read_text(encoding="utf-8"))["agent_name"] == "recovered"
+    assert "with reserve_config(config_path)" in Path("ACP_AGENT/install_from_bundle.py").read_text(encoding="utf-8")
+
+
 def test_http_requests_send_a_stable_acp_user_agent_without_overwriting_callers(tmp_path: Path, monkeypatch) -> None:
     module = _load_module("acp_dropin_runtime_user_agent", Path("ACP_AGENT/acp.py"))
     captured: list[object] = []
@@ -862,6 +972,65 @@ def test_update_check_reports_policy_status(tmp_path: Path) -> None:
     assert comparison["policy_status"] == "required"
     assert comparison["update_required"] is True
     assert comparison["update_recommended"] is True
+
+
+def test_updater_uses_semver_and_refuses_downgrade_without_force(tmp_path: Path) -> None:
+    module = _load_module("acp_dropin_updater_no_downgrade", Path("ACP_AGENT/update_from_release.py"))
+    assert module._compare_versions("0.3.16-rc.1", "0.3.16") < 0
+    assert module._compare_versions("0.3.16+build.7", "0.3.16") == 0
+    assert module._compare_versions("1.10.0", "1.9.99") > 0
+
+    target = tmp_path / "ACP_AGENT"
+    target.mkdir()
+    (target / "VERSION").write_text("1.2.0\n", encoding="utf-8")
+    (target / "sentinel.txt").write_text("keep\n", encoding="utf-8")
+    manifest_path = tmp_path / "ACP_AGENT.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "product": "ACP_AGENT",
+                "version": "1.1.9",
+                "bundle_url": "https://hub.example/downloads/older.zip",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = module.update_from_manifest(
+        target_dir=target,
+        manifest_url=manifest_path.as_uri(),
+        force=False,
+    )
+
+    assert result["status"] == "local_newer"
+    assert result["local_version"] == "1.2.0"
+    assert result["remote_version"] == "1.1.9"
+    assert (target / "VERSION").read_text(encoding="utf-8").strip() == "1.2.0"
+    assert (target / "sentinel.txt").read_text(encoding="utf-8") == "keep\n"
+
+
+def test_tracked_override_refuses_dirty_target_but_ignores_outside_changes(tmp_path: Path) -> None:
+    module = _load_module("acp_dropin_updater_dirty_guard", Path("ACP_AGENT/update_from_release.py"))
+    repo = tmp_path / "repo"
+    target = repo / "ACP_AGENT"
+    target.mkdir(parents=True)
+    (target / "VERSION").write_text("0.3.15\n", encoding="utf-8")
+    (repo / "outside.txt").write_text("clean\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "ACP Test"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "baseline"], cwd=repo, check=True)
+
+    (repo / "outside.txt").write_text("dirty outside\n", encoding="utf-8")
+    assert module.auto_update_safety(target_dir=target, allow_tracked_repo=True)["safe"] is True
+
+    (target / "VERSION").write_text("dirty tracked\n", encoding="utf-8")
+    (target / "new-local.txt").write_text("dirty untracked\n", encoding="utf-8")
+    safety = module.auto_update_safety(target_dir=target, allow_tracked_repo=True)
+    assert safety["safe"] is False
+    assert safety["reason"] == "target_is_git_dirty"
+    assert sorted(safety["dirty_paths"]) == ["ACP_AGENT/VERSION", "ACP_AGENT/new-local.txt"]
 
 
 def test_update_from_manifest_refreshes_project_and_global_skills(tmp_path: Path) -> None:

@@ -7,6 +7,7 @@
     "packages/managed-app"
   ],
   "scripts": {
+    "test": "npm test --workspace=packages/public-app",
     "build": "npm run build --workspace=packages/shared && npm run build --workspace=packages/public-app && npm run build --workspace=packages/managed-app",
     "dev:public": "npm run dev --workspace=packages/public-app",
     "dev:managed": "npm run dev --workspace=packages/managed-app"
