@@ -4,6 +4,7 @@ import json
 import os
 import queue
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -164,6 +165,16 @@ def build_reply_payload(
     return payload
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
+def _provider_executable(executable: str) -> str:
+    if not _is_windows():
+        return executable
+    return shutil.which(executable) or executable
+
+
 def _provider_command(
     *,
     provider: str,
@@ -173,10 +184,10 @@ def _provider_command(
     provider_session_id = state_entry.get("provider_session_id") if isinstance(state_entry, dict) else None
     if provider == "codex_local":
         if isinstance(provider_session_id, str) and provider_session_id.strip():
-            return ["codex", "resume", provider_session_id.strip(), "-"], instructions
-        return ["codex", "exec", "--skip-git-repo-check", "-"], instructions
+            return [_provider_executable("codex"), "resume", provider_session_id.strip(), "-"], instructions
+        return [_provider_executable("codex"), "exec", "--skip-git-repo-check", "-"], instructions
     if provider == "claude_local":
-        command = ["claude", "--print"]
+        command = [_provider_executable("claude"), "--print"]
         if isinstance(provider_session_id, str) and provider_session_id.strip():
             command.extend(["--resume", provider_session_id.strip()])
         return command, instructions
@@ -293,6 +304,20 @@ def _execute_provider_once(
             provider_session_id=state_entry.get("provider_session_id") if isinstance(state_entry, dict) else None,
             provider_session_params={"command": command},
             metadata={"error_type": "file_not_found"},
+        )
+    except OSError as exc:
+        finished_at = utc_now_iso()
+        return ProviderExecutionResult(
+            outcome="failed",
+            summary=f"{provider} executable could not be started",
+            started_at=started_at,
+            finished_at=finished_at,
+            exit_code=None,
+            stdout_text="",
+            stderr_text=str(exc),
+            provider_session_id=state_entry.get("provider_session_id") if isinstance(state_entry, dict) else None,
+            provider_session_params={"command": command},
+            metadata={"error_type": "execution_error"},
         )
 
     def _reader(stream_name: str, handle: Any) -> None:
