@@ -545,12 +545,12 @@ function formatSlug(value: string): string {
   top: 0;
   right: 0;
   left: 0;
-  height: var(--managed-topbar-height, 56px);
+  height: var(--managed-topbar-height, 50px);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  padding: 8px 16px;
+  padding: 6px 16px;
   background: color-mix(in srgb, var(--surface-1) 82%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -651,7 +651,7 @@ function formatSlug(value: string): string {
 
 :global(body.managed-shell) {
   --managed-sidebar-width: 264px;
-  --managed-topbar-height: 56px;
+  --managed-topbar-height: 50px;
 }
 :global(body.managed-shell main#main-content) {
   padding-top: var(--managed-topbar-height);
@@ -696,7 +696,7 @@ function formatSlug(value: string): string {
   }
   .shell-topbar {
     left: var(--managed-sidebar-width);
-    padding: 8px 20px;
+    padding: 6px 20px;
     transition: left var(--transition-spring);
   }
   .menu-button,
@@ -743,7 +743,7 @@ function formatSlug(value: string): string {
 
 @media (max-width: 640px) {
   .shell-topbar {
-    padding: 8px 12px;
+    padding: 6px 12px;
   }
   .shell-sidebar {
     width: min(88vw, 280px);

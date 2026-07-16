@@ -205,7 +205,7 @@
             v-model:timeline-filter="session.timelineFilter.value"
             :effective-motion="effectiveMotion"
             compact
-            :compact-rows="3"
+            :compact-rows="4"
             @expand="openDock('timeline')"
           />
         </section>
@@ -1046,7 +1046,7 @@ watchEffect(() => {
 /* Left column: live map on top, activity feed under it */
 /* The slim topbar (78px → 56px) freed ~26px of viewport: most goes to the
    timeline strip so its rows stop looking squashed, the rest to the map. */
-.cockpit-left { display:grid; grid-template-rows:minmax(0, 1fr) 168px; gap:10px; min-height:0; overflow:hidden; }
+.cockpit-left { display:grid; grid-template-rows:minmax(0, 1fr) 176px; gap:10px; min-height:0; overflow:hidden; }
 .cockpit-left > :first-child { min-height:0; }
 
 /* Right column: ONE panel — lanes scroll inside, legend pinned at the bottom */

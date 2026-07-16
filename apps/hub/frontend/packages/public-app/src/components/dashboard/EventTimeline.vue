@@ -25,7 +25,10 @@
           <span>{{ timelineFilter === 'all' ? t('sd_no_session_events') : t('sd_no_filtered_events') }}</span>
         </div>
         <div v-for="(event, i) in visibleEvents" :key="`${event.ts || ''}:${event.event || ''}:${i}`"
-          class="event-card" :class="eventCardClasses(event)">
+          class="event-card" :class="[...eventCardClasses(event), { 'is-open': isOpen(event, i) }]"
+          role="button" tabindex="0"
+          @click="onRowClick(event, i)"
+          @keydown.enter.prevent="onRowClick(event, i)">
           <div class="event-top">
             <div class="event-primary">
               <img class="event-type-icon" :src="stateIconUrl(messageIconNameForEvent(event))" alt="" aria-hidden="true" />
@@ -58,6 +61,12 @@
           <div v-if="event.payload_preview" class="task">{{ event.payload_preview }}</div>
           <div v-if="event.extra?.summary" class="task">{{ event.extra.summary }}</div>
           <div v-if="event.extra?.log_preview" class="task">{{ event.extra.log_preview }}</div>
+          <!-- Expanded row: raw facts hidden by the compact presentation -->
+          <div v-if="isOpen(event, i)" class="event-meta">
+            <span class="event-meta-item">{{ event.ts }}</span>
+            <span class="event-meta-item">{{ event.event }}</span>
+            <span v-if="event.actor" class="event-meta-item">{{ event.actor }}<template v-if="event.target"> → {{ event.target }}</template></span>
+          </div>
         </div>
       </div>
     </div>
@@ -91,7 +100,7 @@ const props = withDefaults(defineProps<{
   compactRows: 3,
 })
 
-defineEmits<{
+const emit = defineEmits<{
   'update:timelineFilter': [value: TimelineFilter]
   expand: []
 }>()
@@ -100,6 +109,31 @@ const { locale, t } = useI18n(messages)
 
 const timelineFilters = ['all', 'session', 'message', 'wait', 'status'] as const
 const timelineDensity = ref<'detailed' | 'compact'>(props.compact ? 'compact' : 'detailed')
+
+// ── Click-to-expand ──
+// Strip rows are too small to expand in place: clicking one opens the full
+// Actividad view. In the full view, clicking a row reveals its raw facts.
+const expandedRows = ref(new Set<string>())
+
+function rowKey(event: SessionEvent, index: number): string {
+  return `${event.ts || ''}:${event.event || ''}:${index}`
+}
+
+function isOpen(event: SessionEvent, index: number): boolean {
+  return !props.compact && expandedRows.value.has(rowKey(event, index))
+}
+
+function onRowClick(event: SessionEvent, index: number) {
+  if (props.compact) {
+    emit('expand')
+    return
+  }
+  const key = rowKey(event, index)
+  const next = new Set(expandedRows.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  expandedRows.value = next
+}
 const visibleEvents = computed(() =>
   props.compact ? props.events.slice(-Math.max(1, props.compactRows)) : props.events
 )
@@ -203,7 +237,12 @@ watch(() => props.events.length, () => {
 .timeline::-webkit-scrollbar-thumb { background:var(--scroll-thumb); border-radius:10px; }
 .timeline::-webkit-scrollbar-thumb:hover { background:var(--scroll-thumb-hover); }
 .timeline.compact .event-detail, .timeline.compact .task { display:none; }
-.event-card { border:1px solid var(--line); border-radius:14px; padding:14px; background:var(--card-bg); position:relative; overflow:hidden; transition:all 0.25s cubic-bezier(0.16,1,0.3,1); }
+/* An expanded row always shows its detail, even in compact density */
+.timeline.compact .event-card.is-open .event-detail,
+.timeline.compact .event-card.is-open .task { display:block; }
+.event-card { border:1px solid var(--line); border-radius:14px; padding:14px; background:var(--card-bg); position:relative; overflow:hidden; cursor:pointer; transition:all 0.25s cubic-bezier(0.16,1,0.3,1); }
+.event-meta { display:flex; flex-wrap:wrap; gap:6px 14px; margin-top:10px; padding-top:8px; border-top:1px dashed var(--line); }
+.event-meta-item { font-size:10.5px; font-family:'JetBrains Mono',monospace; color:var(--muted); }
 .event-card::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background:rgba(148,163,184,0.35); }
 .event-card.message::before { background:#85B7EB; }
 .event-card.wait::before { background:#EF9F27; }
@@ -260,8 +299,8 @@ watch(() => props.events.length, () => {
 .compact-panel .filter-row :deep(button) { min-height:24px; padding:3px 8px; font-size:9px; white-space:nowrap; }
 .compact-panel .timeline-expand { color:var(--accent); border-color:var(--accent-glow); }
 .compact-panel .panel-body { flex:1; min-height:0; padding:5px 8px; overflow:hidden; }
-.compact-panel .timeline { height:100%; max-height:none; display:flex; flex-direction:column; justify-content:flex-end; gap:3px; overflow:hidden; padding:0; }
-.compact-panel .event-card { min-height:0; padding:4px 7px 4px 9px; border-radius:7px; }
+.compact-panel .timeline { height:100%; max-height:none; display:flex; flex-direction:column; justify-content:flex-end; gap:4px; overflow:hidden; padding:0; }
+.compact-panel .event-card { min-height:0; padding:6px 8px 6px 10px; border-radius:8px; }
 .compact-panel .event-card:hover { transform:none; }
 .compact-panel .event-primary { gap:5px; flex:1; overflow:hidden; }
 .compact-panel .event-type-icon { width:14px; height:14px; }
