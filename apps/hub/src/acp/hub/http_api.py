@@ -779,13 +779,17 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
         auth_service = getattr(runtime, "auth_service", None)
         if auth_service is None:
             auth_service = PermissiveAuthService(required_token=getattr(runtime, "required_token", None))
-        auth_error = auth_service.authorize_http_send(
-            authorization=authorization,
-            x_acp_token=x_acp_token,
-            body_token=parsed.get("token") if isinstance(parsed.get("token"), str) else None,
-        )
-        if auth_error is not None:
-            return JSONResponse(status_code=_error_status_code(auth_error), content=_safe_error_payload(auth_error))
+        body_token = parsed.get("token") if isinstance(parsed.get("token"), str) else None
+        # The join code is the guest credential. Validate an explicitly supplied
+        # admin token, but do not require the global Hub token in invitations.
+        if authorization is not None or x_acp_token is not None or body_token is not None:
+            auth_error = auth_service.authorize_http_send(
+                authorization=authorization,
+                x_acp_token=x_acp_token,
+                body_token=body_token,
+            )
+            if auth_error is not None:
+                return JSONResponse(status_code=_error_status_code(auth_error), content=_safe_error_payload(auth_error))
 
         try:
             agent_name = _normalize_agent_name(parsed.get("agent_name"))

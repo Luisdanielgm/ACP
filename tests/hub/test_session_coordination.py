@@ -1684,6 +1684,36 @@ def test_session_detail_allows_admin_token_when_configured(tokenized_api_client:
     assert detail.json()["session"]["session_id"] == created.json()["session_id"]
 
 
+def test_join_code_allows_guest_join_when_admin_token_is_configured(tokenized_api_client: Any) -> None:
+    denied_create = tokenized_api_client.post("/sessions", json={"agent_name": "untrusted-chief"})
+    assert denied_create.status_code == 401
+    assert denied_create.json()["code"] == "AUTH_REQUIRED"
+
+    created = tokenized_api_client.post(
+        "/sessions",
+        json={"agent_name": "chief", "token": "secret-token"},
+        headers={"X-ACP-Token": "secret-token"},
+    )
+    assert created.status_code == 201
+
+    joined = tokenized_api_client.post(
+        "/sessions/join",
+        json={"agent_name": "worker", "join_code": created.json()["join_code"]},
+    )
+
+    assert joined.status_code == 200
+    assert joined.json()["status"] == "ok"
+    assert joined.json()["session_id"] == created.json()["session_id"]
+
+    rejected = tokenized_api_client.post(
+        "/sessions/join",
+        json={"agent_name": "untrusted-worker", "join_code": created.json()["join_code"]},
+        headers={"X-ACP-Token": "wrong-token"},
+    )
+    assert rejected.status_code == 401
+    assert rejected.json()["code"] == "AUTH_INVALID"
+
+
 def test_dashboard_login_creates_cookie_session_for_overview(tokenized_api_client: Any) -> None:
     login = tokenized_api_client.post("/dashboard/auth/login", json={"token": "secret-token"})
     assert login.status_code == 200
