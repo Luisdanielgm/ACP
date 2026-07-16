@@ -366,6 +366,9 @@ async def _run_maintenance_once(runtime: HubRuntime) -> None:
     if event_store is not None and hasattr(event_store, "prune_events_older_than"):
         event_store.prune_events_older_than(cutoff)
     await runtime.coordination.prune_idempotency_older_than(cutoff)
+    # Persistent sessions are never deleted, so their wait/heartbeat noise
+    # would grow forever; retention trims noise only (protected events stay).
+    await runtime.coordination.prune_noise_events_older_than(cutoff)
 
 
 async def _maintenance_loop(runtime: HubRuntime) -> None:

@@ -401,6 +401,7 @@ Avanza mas rapido con menos coordinacion manual`,
   sd_event_RUN_FINISHED: 'Run terminado',
   sd_event_RUN_REPLY_SENT: 'Reply de run enviado',
   sd_event_RUN_INTERRUPTED: 'Run interrumpido',
+  sd_event_WALL_POSTED: 'Muro actualizado',
 
   // Event Details
   sd_detail_session_created: 'Sesion creada',

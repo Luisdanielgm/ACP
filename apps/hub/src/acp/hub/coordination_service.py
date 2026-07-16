@@ -485,6 +485,12 @@ class SessionCoordinationService:
         async with self._lock:
             return self._store.prune_idempotency_older_than(cutoff)
 
+    async def prune_noise_events_older_than(self, cutoff: str) -> int:
+        async with self._lock:
+            return self._store.prune_noise_events_older_than(
+                cutoff, noise_event_types=_HISTORY_NOISE_EVENTS
+            )
+
     def close(self) -> None:
         """Release the underlying store's persistent connection, if any."""
         close = getattr(self._store, "close", None)
@@ -1035,6 +1041,59 @@ class SessionCoordinationService:
                 detail=f"{message.get('action', 'INFO')} delivered through active wait",
             )
         return delivery_result
+
+    async def notify_wall_post(
+        self,
+        *,
+        session_id: str,
+        author_name: str,
+        preview: str,
+    ) -> dict[str, Any] | None:
+        """Record a WALL_POSTED event and wake live waiters with a system note.
+
+        The wall is durable context: members blocked in wait learn about a new
+        post immediately instead of only at their next connect. The note is
+        one-shot (never queued for absent members — they get the full wall in
+        their connect response).
+        """
+        async with self._lock:
+            session = self._store.get_session(session_id)
+            if session is None:
+                return None
+            now = _utc_now_iso()
+            body_preview = _payload_preview(preview)
+            self._record_event(
+                session_id,
+                event="WALL_POSTED",
+                actor=author_name,
+                payload_preview=body_preview,
+                detail="room wall updated",
+            )
+            woken: list[str] = []
+            for member_name in list(session.members):
+                if member_name == author_name:
+                    continue
+                waiting = self._waiters.get((session_id, member_name))
+                if waiting is None or waiting.future.done():
+                    continue
+                self._waiters.pop((session_id, member_name), None)
+                waiting.future.set_result(
+                    {
+                        "message": {
+                            "system_event": "WALL_POSTED",
+                            "from": author_name,
+                            "action": "INFO",
+                            "payload": (
+                                f"Room wall updated by {author_name}: {body_preview} "
+                                "Read the full wall with room-wall list."
+                            ),
+                            "ts": now,
+                        },
+                        "delivery": None,
+                    }
+                )
+                woken.append(member_name)
+            return {"event": "WALL_POSTED", "woken": woken}
 
     async def acknowledge_message(
         self,

@@ -145,3 +145,21 @@ def test_agent_join_response_embeds_room_context(monkeypatch, tmp_path) -> None:
     hint = str(context.get("hint") or "")
     assert "room-wall" in hint
     assert "room-files" in hint
+
+
+def test_wall_post_records_coordination_event(monkeypatch, tmp_path) -> None:
+    # The wall must participate in the live loop: posting records WALL_POSTED
+    # in the session history so the dashboard timeline (and replay) show it.
+    app, owner, session_id = _owner_with_session(monkeypatch, tmp_path)
+
+    posted = owner.post(
+        f"/managed/workspaces/team-one/sessions/{session_id}/wall",
+        json={"body": "Decision: freeze the schema until Friday.", "pinned": False},
+    )
+    assert posted.status_code == 200, posted.text
+
+    session = owner.get(f"/managed/workspaces/team-one/sessions/{session_id}").json()["acp_session"]
+    wall_events = [item for item in session["history"] if item["event"] == "WALL_POSTED"]
+    assert len(wall_events) == 1
+    assert wall_events[0]["actor"] == "admin@example.com"
+    assert "freeze the schema" in str(wall_events[0].get("payload_preview") or "")

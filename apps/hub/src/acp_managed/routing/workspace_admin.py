@@ -550,6 +550,11 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
             body=payload.body,
             pinned=payload.pinned,
         )
+        await runtime.coordination.notify_wall_post(
+            session_id=record.session_id,
+            author_name=principal.email,
+            preview=payload.body,
+        )
         return JSONResponse(
             {
                 "status": "created",

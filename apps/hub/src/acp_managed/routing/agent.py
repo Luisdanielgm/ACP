@@ -436,6 +436,11 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
             body=payload.body,
             pinned=False,
         )
+        await runtime.coordination.notify_wall_post(
+            session_id=record.session_id,
+            author_name=requested_agent_name,
+            preview=payload.body,
+        )
         return JSONResponse(
             {
                 "status": "created",

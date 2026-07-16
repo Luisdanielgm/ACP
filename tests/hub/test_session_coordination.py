@@ -1184,6 +1184,75 @@ def test_balanced_history_survives_wait_floods_beyond_any_scan_window(tmp_path) 
         assert str(balanced[0]["event"]) == "SESSION_CREATED"
 
 
+def test_wall_post_notification_wakes_live_waiters() -> None:
+    # A wall post is a durable decision: members blocked in wait must learn
+    # about it immediately through a one-shot system message, not only the
+    # next time they reconnect.
+    from acp.hub.coordination_service import SessionCoordinationService
+
+    async def scenario() -> None:
+        service = SessionCoordinationService()
+        chief = await service.create_session(owner_agent="chief")
+        worker = await service.join_session(join_code=chief["join_code"], agent_name="worker")
+
+        wait_task = asyncio.create_task(
+            service.wait_for_message(
+                session_id=chief["session_id"],
+                agent_name="worker",
+                member_token=worker["member_token"],
+                timeout_seconds=5,
+            )
+        )
+        await asyncio.sleep(0.05)
+
+        result = await service.notify_wall_post(
+            session_id=chief["session_id"],
+            author_name="chief",
+            preview="Decision: deploys are frozen until QA signs off.",
+        )
+        assert result is not None
+        assert result["woken"] == ["worker"]
+
+        delivered = await wait_task
+        assert delivered is not None
+        message = delivered["message"]
+        assert message["system_event"] == "WALL_POSTED"
+        assert message["from"] == "chief"
+        assert "deploys are frozen" in str(message["payload"])
+
+        detail = await service.session_detail(session_id=chief["session_id"])
+        assert any(item["event"] == "WALL_POSTED" for item in detail["history"])
+
+    asyncio.run(scenario())
+
+
+def test_prune_noise_events_keeps_protected_history(tmp_path) -> None:
+    # Persistent sessions accumulate wait/heartbeat rows forever (~1440 per
+    # member per day). Maintenance prunes old NOISE events only: messages,
+    # session lifecycle, and status events stay, as does recent noise.
+    from acp.hub.coordination_store import InMemoryCoordinationStore, SqliteCoordinationStore
+    from acp.hub.migrations import apply_sqlite_migrations
+
+    noise = ("WAIT_STARTED", "WAIT_TIMEOUT", "WAIT_CANCELLED", "WAIT_EVICTED", "HEARTBEAT")
+
+    sqlite_path = tmp_path / "prune-noise.sqlite3"
+    apply_sqlite_migrations(sqlite_path=sqlite_path)
+    stores = [InMemoryCoordinationStore(), SqliteCoordinationStore(sqlite_path=sqlite_path)]
+
+    for store in stores:
+        session_id = "session-prune"
+        store.append_event(session_id, {"event_id": "old-msg", "ts": "2026-07-01T00:00:00+00:00", "event": "MESSAGE_SENT", "actor": "chief"})
+        store.append_event(session_id, {"event_id": "old-wait", "ts": "2026-07-01T00:00:01+00:00", "event": "WAIT_TIMEOUT", "actor": "worker"})
+        store.append_event(session_id, {"event_id": "old-beat", "ts": "2026-07-01T00:00:02+00:00", "event": "HEARTBEAT", "actor": "worker"})
+        store.append_event(session_id, {"event_id": "new-wait", "ts": "2026-07-15T00:00:00+00:00", "event": "WAIT_TIMEOUT", "actor": "worker"})
+
+        removed = store.prune_noise_events_older_than("2026-07-10T00:00:00+00:00", noise_event_types=noise)
+        assert removed == 2, type(store).__name__
+
+        remaining = [item["event_id"] for item in store.get_session_events(session_id, limit=100)]
+        assert remaining == ["old-msg", "new-wait"], type(store).__name__
+
+
 def test_cancelled_wait_does_not_lose_auto_delivered_message() -> None:
     # Auto-ack immediate handoff puts the message ONLY inside the waiter's
     # Future (send_message never persists it on this path). If the waiting

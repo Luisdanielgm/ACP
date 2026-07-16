@@ -401,6 +401,7 @@ Move faster with less manual coordination`,
   sd_event_RUN_FINISHED: 'Run finished',
   sd_event_RUN_REPLY_SENT: 'Run reply sent',
   sd_event_RUN_INTERRUPTED: 'Run interrupted',
+  sd_event_WALL_POSTED: 'Wall updated',
 
   // Event Details
   sd_detail_session_created: 'Session created',

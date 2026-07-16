@@ -579,7 +579,7 @@ export function eventClass(value: string | undefined): string {
   if (['SESSION_CREATED', 'SESSION_JOINED', 'SESSION_LEFT', 'SESSION_CLOSED'].includes(v)) return 'session'
   if (['WAIT_STARTED', 'WAIT_TIMEOUT'].includes(v)) return 'wait'
   if (['STATUS_UPDATED', 'HEARTBEAT'].includes(v)) return 'status'
-  if (['MESSAGE_SENT', 'MESSAGE_DELIVERED'].includes(v)) return 'message'
+  if (['MESSAGE_SENT', 'MESSAGE_DELIVERED', 'WALL_POSTED'].includes(v)) return 'message'
   if (['RUN_STARTED', 'RUN_LOG', 'RUN_FINISHED', 'RUN_REPLY_SENT', 'RUN_INTERRUPTED'].includes(v)) return 'status'
   return 'session'
 }

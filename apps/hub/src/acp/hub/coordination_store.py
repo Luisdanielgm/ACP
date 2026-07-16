@@ -172,6 +172,10 @@ class CoordinationStore(Protocol):
 
     def count_session_events(self, session_id: str) -> int: ...
 
+    def prune_noise_events_older_than(
+        self, cutoff: str, *, noise_event_types: tuple[str, ...]
+    ) -> int: ...
+
     def last_session_event_ts(self, session_id: str) -> str | None: ...
 
     def put_notice(
@@ -447,6 +451,23 @@ class InMemoryCoordinationStore:
 
     def count_session_events(self, session_id: str) -> int:
         return len(self._session_events.get(session_id, ()))
+
+    def prune_noise_events_older_than(
+        self, cutoff: str, *, noise_event_types: tuple[str, ...]
+    ) -> int:
+        # Persistent sessions never get deleted, so their wait/heartbeat spam
+        # must be trimmed by retention. Protected (non-noise) events stay.
+        noise = set(noise_event_types)
+        removed = 0
+        for session_id, events in self._session_events.items():
+            kept = deque(
+                item
+                for item in events
+                if not (str(item.get("event")) in noise and str(item.get("ts") or "") < cutoff)
+            )
+            removed += len(events) - len(kept)
+            self._session_events[session_id] = kept
+        return removed
 
     def last_session_event_ts(self, session_id: str) -> str | None:
         events = self._session_events.get(session_id)
@@ -1025,6 +1046,25 @@ class SqliteCoordinationStore:
                 if isinstance(payload, dict):
                     payloads.append(payload)
             return payloads
+
+    def prune_noise_events_older_than(
+        self, cutoff: str, *, noise_event_types: tuple[str, ...]
+    ) -> int:
+        # Persistent sessions never get deleted, so their wait/heartbeat spam
+        # must be trimmed by retention. Protected (non-noise) events stay.
+        if not noise_event_types:
+            return 0
+        placeholders = ",".join("?" for _ in noise_event_types)
+        with self._connection() as conn:
+            cursor = conn.execute(
+                f"""
+                DELETE FROM coordination_events
+                WHERE event_type IN ({placeholders}) AND created_at < ?
+                """,
+                (*noise_event_types, cutoff),
+            )
+            conn.commit()
+            return int(cursor.rowcount or 0)
 
     def count_session_events(self, session_id: str) -> int:
         with self._connection() as conn:
