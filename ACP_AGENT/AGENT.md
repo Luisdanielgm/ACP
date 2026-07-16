@@ -268,7 +268,7 @@ Si se selecciona un config, estos comandos tambien pueden usar `managed_agent_to
 
 ### Muro y archivos durables de sala
 
-Los mensajes `TASK`/`INFO`/`REPLY` son coordinacion transitoria. Las decisiones e instrucciones durables pertenecen al muro o a los archivos de la sala:
+Los mensajes `TASK`/`INFO`/`REPLY` son coordinacion transitoria. Las decisiones e instrucciones durables pertenecen al muro o a los archivos de la sala. Ambos existen SOLO en salas managed (requieren agent token managed); las sesiones simples por join code son efimeras y no tienen muro:
 
 ```powershell
 python ACP_AGENT/acp.py room-wall list --config ACP_AGENT/agents/worker-1.json --session-id SESSION_ID
