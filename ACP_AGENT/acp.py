@@ -1448,13 +1448,18 @@ def write_config(
 reserve_join_config = reserve_config
 
 
-def clear_session_credentials(path: Path, config: dict[str, Any]) -> dict[str, Any]:
+def clear_session_credentials(
+    path: Path,
+    config: dict[str, Any],
+    *,
+    reservation: ConfigReservation | None = None,
+) -> dict[str, Any]:
     updated = dict(config)
     updated.pop("session_id", None)
     updated.pop("member_token", None)
     updated.pop("join_code", None)
     updated.pop("member_role", None)
-    write_config(path, updated)
+    write_config(path, updated, reservation=reservation)
     return updated
 
 
@@ -1475,7 +1480,12 @@ def _is_stale_session_binding_error(message: str) -> bool:
     )
 
 
-def ensure_detached_session_bootstrap(settings: HubAgentSettings, *, command_name: str) -> HubAgentSettings:
+def ensure_detached_session_bootstrap(
+    settings: HubAgentSettings,
+    *,
+    command_name: str,
+    config_reservation: ConfigReservation | None = None,
+) -> HubAgentSettings:
     if settings.session_id is None or settings.member_token is None:
         return settings
 
@@ -1489,7 +1499,12 @@ def ensure_detached_session_bootstrap(settings: HubAgentSettings, *, command_nam
     except ValueError as exc:
         message = str(exc)
         if _is_stale_session_binding_error(message):
-            updated = clear_session_credentials(settings.config_path, settings.config)
+            # Reuse the caller's reservation when one is already held (the
+            # reservation lock is not re-entrant, so re-reserving here would
+            # collide with our own live pid and abort the join).
+            updated = clear_session_credentials(
+                settings.config_path, settings.config, reservation=config_reservation
+            )
             return derive_hub_agent_settings(settings=settings, config=updated)
         raise ValueError(
             f"{command_name} requires a detached config, but the current session binding could not be verified: {message}"
@@ -2087,6 +2102,7 @@ def join_session_from_args(args: argparse.Namespace) -> dict[str, Any]:
         settings = ensure_detached_session_bootstrap(
             resolve_hub_agent_settings(args),
             command_name="join-session",
+            config_reservation=config_reservation,
         )
         response = post_json(
             hub_http=settings.hub_http,
