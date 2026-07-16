@@ -1080,6 +1080,72 @@ def test_session_wait_timeout_keeps_member_in_waiting_state(api_client: Any) -> 
     assert any(event["event"] == "WAIT_TIMEOUT" for event in body["history"])
 
 
+def test_session_detail_history_keeps_rare_event_classes_despite_wait_flood(api_client: Any) -> None:
+    # A polling member records WAIT_STARTED/WAIT_TIMEOUT every few seconds, so
+    # a plain last-N history window eventually contains ONLY wait events and
+    # the dashboard's message/session/status filters go empty. The history must
+    # stay class-balanced: recent message/session/status events survive the flood.
+    chief = _create_session(api_client, "chief")
+    worker = _join_session(api_client, "worker", chief["join_code"])
+
+    sent = api_client.post(
+        "/sessions/send",
+        json={
+            "session_id": chief["session_id"],
+            "agent_name": "chief",
+            "member_token": chief["member_token"],
+            "to": "worker",
+            "action": "TASK",
+            "payload": "Review the auth module",
+        },
+    )
+    assert sent.status_code == 200
+
+    status = api_client.post(
+        "/sessions/status",
+        json={
+            "session_id": chief["session_id"],
+            "agent_name": "worker",
+            "member_token": worker["member_token"],
+            "status": "busy",
+            "status_text": "working on auth",
+        },
+    )
+    assert status.status_code == 200
+
+    # Flood the history with more wait events than the whole window holds.
+    for _ in range(150):
+        waited = api_client.post(
+            "/sessions/wait",
+            json={
+                "session_id": chief["session_id"],
+                "agent_name": "chief",
+                "member_token": chief["member_token"],
+                "timeout_seconds": 0.01,
+            },
+        )
+        assert waited.status_code == 200
+
+    detail = api_client.get(
+        f"/sessions/{chief['session_id']}/detail",
+        params={"agent_name": "chief", "member_token": chief["member_token"]},
+    )
+    assert detail.status_code == 200
+    history = detail.json()["session"]["history"]
+
+    events = {str(item["event"]) for item in history}
+    assert "MESSAGE_SENT" in events
+    assert "SESSION_CREATED" in events
+    assert "SESSION_JOINED" in events
+    assert "STATUS_UPDATED" in events
+    # The flood itself still shows up as the dominant recent activity.
+    assert "WAIT_TIMEOUT" in events
+
+    # History stays chronologically ordered after the merge.
+    timestamps = [str(item.get("ts", "")) for item in history]
+    assert timestamps == sorted(timestamps)
+
+
 def test_session_wait_does_not_override_busy_member_state(api_client: Any) -> None:
     chief = _create_session(api_client, "chief")
     worker = _join_session(api_client, "worker", chief["join_code"])
