@@ -161,6 +161,15 @@ class CoordinationStore(Protocol):
 
     def get_session_events(self, session_id: str, *, limit: int) -> list[dict[str, Any]]: ...
 
+    def get_balanced_session_events(
+        self,
+        session_id: str,
+        *,
+        limit: int,
+        protected_limit: int,
+        noise_event_types: tuple[str, ...],
+    ) -> list[dict[str, Any]]: ...
+
     def count_session_events(self, session_id: str) -> int: ...
 
     def last_session_event_ts(self, session_id: str) -> str | None: ...
@@ -408,6 +417,33 @@ class InMemoryCoordinationStore:
         if limit <= 0:
             return []
         return [dict(item) for item in events[-limit:]]
+
+    def get_balanced_session_events(
+        self,
+        session_id: str,
+        *,
+        limit: int,
+        protected_limit: int,
+        noise_event_types: tuple[str, ...],
+    ) -> list[dict[str, Any]]:
+        # Last `limit` events, plus enough older non-noise events to guarantee
+        # `protected_limit` of them survive a wait/heartbeat flood of any size.
+        events = list(self._session_events.get(session_id, ()))
+        if limit <= 0:
+            return []
+        noise = set(noise_event_types)
+        keep = set(range(max(0, len(events) - limit), len(events)))
+        remaining = protected_limit - sum(
+            1 for index in keep if str(events[index].get("event")) not in noise
+        )
+        for index in range(len(events) - 1, -1, -1):
+            if remaining <= 0:
+                break
+            if index in keep or str(events[index].get("event")) in noise:
+                continue
+            keep.add(index)
+            remaining -= 1
+        return [dict(events[index]) for index in sorted(keep)]
 
     def count_session_events(self, session_id: str) -> int:
         return len(self._session_events.get(session_id, ()))
@@ -938,6 +974,54 @@ class SqliteCoordinationStore:
             payloads: list[dict[str, Any]] = []
             for row in reversed(rows):
                 payload = json.loads(str(row["payload_json"]))
+                if isinstance(payload, dict):
+                    payloads.append(payload)
+            return payloads
+
+    def get_balanced_session_events(
+        self,
+        session_id: str,
+        *,
+        limit: int,
+        protected_limit: int,
+        noise_event_types: tuple[str, ...],
+    ) -> list[dict[str, Any]]:
+        # Last `limit` events, plus enough older non-noise events to guarantee
+        # `protected_limit` of them survive a wait/heartbeat flood of any size.
+        if limit <= 0:
+            return []
+        with self._connection() as conn:
+            recent = conn.execute(
+                """
+                SELECT event_seq, event_type, payload_json
+                FROM coordination_events
+                WHERE session_id = ?
+                ORDER BY event_seq DESC
+                LIMIT ?
+                """,
+                (session_id, int(limit)),
+            ).fetchall()
+            rows_by_seq: dict[int, str] = {int(row["event_seq"]): str(row["payload_json"]) for row in recent}
+            noise = set(noise_event_types)
+            missing = protected_limit - sum(1 for row in recent if str(row["event_type"]) not in noise)
+            if missing > 0 and noise_event_types:
+                min_seq = min(rows_by_seq) if rows_by_seq else 0
+                placeholders = ",".join("?" for _ in noise_event_types)
+                older = conn.execute(
+                    f"""
+                    SELECT event_seq, payload_json
+                    FROM coordination_events
+                    WHERE session_id = ? AND event_seq < ? AND event_type NOT IN ({placeholders})
+                    ORDER BY event_seq DESC
+                    LIMIT ?
+                    """,
+                    (session_id, min_seq, *noise_event_types, int(missing)),
+                ).fetchall()
+                for row in older:
+                    rows_by_seq[int(row["event_seq"])] = str(row["payload_json"])
+            payloads: list[dict[str, Any]] = []
+            for seq in sorted(rows_by_seq):
+                payload = json.loads(rows_by_seq[seq])
                 if isinstance(payload, dict):
                     payloads.append(payload)
             return payloads

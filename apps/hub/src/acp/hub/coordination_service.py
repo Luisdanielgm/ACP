@@ -27,10 +27,11 @@ from acp.hub.coordination_store import CoordinationStore, InMemoryCoordinationSt
 
 _SESSION_EVENT_LIMIT = 250
 # Wait/heartbeat polling floods the plain last-N window until it holds ONLY
-# wait events and every other dashboard filter goes empty. History therefore
-# scans a wider window and guarantees a floor of recent events per class.
-_HISTORY_SCAN_LIMIT = 2000
-_HISTORY_CLASS_FLOOR = 40
+# wait events and every other dashboard filter goes empty. The store therefore
+# guarantees a floor of the most recent non-noise events regardless of how
+# many noise events came after them (no scan window is big enough).
+_HISTORY_PROTECTED_FLOOR = 90
+_HISTORY_NOISE_EVENTS = ("WAIT_STARTED", "WAIT_TIMEOUT", "WAIT_CANCELLED", "WAIT_EVICTED", "HEARTBEAT")
 _PAYLOAD_PREVIEW_LIMIT = 240
 _ACTION_PRIORITY = {"REPLY": 0, "TASK": 1, "INFO": 2}
 _NAMED_PRIORITY = {"urgent": -2, "high": -1, "normal": 0, "low": 1}
@@ -43,45 +44,6 @@ _SAFE_CAPABILITY = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,63}$")
 
 def _utc_now_iso() -> str:
     return utc_now_iso()
-
-
-def _event_class(name: str | None) -> str:
-    # Mirrors the dashboard's eventClass() so the server-side floor protects
-    # exactly the classes the UI filters on.
-    value = str(name or "").upper()
-    if value in ("WAIT_STARTED", "WAIT_TIMEOUT", "WAIT_CANCELLED", "WAIT_EVICTED"):
-        return "wait"
-    if value in ("STATUS_UPDATED", "HEARTBEAT", "RUN_STARTED", "RUN_LOG", "RUN_FINISHED", "RUN_REPLY_SENT", "RUN_INTERRUPTED"):
-        return "status"
-    if value.startswith("MESSAGE"):
-        return "message"
-    return "session"
-
-
-def _balanced_session_history(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Trim chronological events to the history window without starving a class.
-
-    Keeps the newest ``_SESSION_EVENT_LIMIT`` events, then walks backwards and
-    re-adds the most recent events of every non-wait class until each reaches
-    ``_HISTORY_CLASS_FLOOR`` (or the scan window is exhausted). Order is
-    preserved; only wait/heartbeat spam loses depth.
-    """
-    if len(events) <= _SESSION_EVENT_LIMIT:
-        return events
-    keep = set(range(len(events) - _SESSION_EVENT_LIMIT, len(events)))
-    counts: dict[str, int] = {}
-    for index in keep:
-        cls = _event_class(events[index].get("event"))
-        counts[cls] = counts.get(cls, 0) + 1
-    for index in range(len(events) - 1, -1, -1):
-        if index in keep:
-            continue
-        cls = _event_class(events[index].get("event"))
-        if cls == "wait" or counts.get(cls, 0) >= _HISTORY_CLASS_FLOOR:
-            continue
-        keep.add(index)
-        counts[cls] = counts.get(cls, 0) + 1
-    return [events[index] for index in sorted(keep)]
 
 
 def _should_record_heartbeat(previous_seen_at: str | None, *, now: datetime) -> bool:
@@ -489,8 +451,11 @@ class SessionCoordinationService:
             elif agent_name is not None or member_token is not None:
                 raise SessionDashboardAccessError("agent_name and member_token must be provided together.")
             payload = self._build_session_payload(session, include_join_code=include_join_code, refresh=False)
-            payload["history"] = _balanced_session_history(
-                self._store.get_session_events(session_id, limit=_HISTORY_SCAN_LIMIT)
+            payload["history"] = self._store.get_balanced_session_events(
+                session_id,
+                limit=_SESSION_EVENT_LIMIT,
+                protected_limit=_HISTORY_PROTECTED_FLOOR,
+                noise_event_types=_HISTORY_NOISE_EVENTS,
             )
             payload["summary"] = self._build_session_summary(session, refresh=False)
             return payload

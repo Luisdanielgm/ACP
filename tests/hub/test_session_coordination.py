@@ -1146,6 +1146,44 @@ def test_session_detail_history_keeps_rare_event_classes_despite_wait_flood(api_
     assert timestamps == sorted(timestamps)
 
 
+def test_balanced_history_survives_wait_floods_beyond_any_scan_window(tmp_path) -> None:
+    # A session polling every few seconds accumulates tens of thousands of wait
+    # events per day. Protected classes (messages, session lifecycle, status)
+    # must survive in the history REGARDLESS of how many noise events came
+    # after them — no fixed scan window is big enough.
+    from acp.hub.coordination_store import InMemoryCoordinationStore, SqliteCoordinationStore
+    from acp.hub.migrations import apply_sqlite_migrations
+
+    noise = ("WAIT_STARTED", "WAIT_TIMEOUT", "WAIT_CANCELLED", "WAIT_EVICTED", "HEARTBEAT")
+
+    sqlite_path = tmp_path / "balanced-history.sqlite3"
+    apply_sqlite_migrations(sqlite_path=sqlite_path)
+    stores = [InMemoryCoordinationStore(), SqliteCoordinationStore(sqlite_path=sqlite_path)]
+
+    for store in stores:
+        session_id = "session-flood"
+        store.append_event(session_id, {"event_id": "e-created", "ts": "2026-07-16T00:00:00+00:00", "event": "SESSION_CREATED", "actor": "chief"})
+        store.append_event(session_id, {"event_id": "e-sent", "ts": "2026-07-16T00:00:01+00:00", "event": "MESSAGE_SENT", "actor": "chief", "target": "worker"})
+        store.append_event(session_id, {"event_id": "e-status", "ts": "2026-07-16T00:00:02+00:00", "event": "STATUS_UPDATED", "actor": "worker"})
+        for index in range(5000):
+            store.append_event(
+                session_id,
+                {"event_id": f"e-wait-{index}", "ts": f"2026-07-16T01:{index // 3600:02d}:{index % 60:02d}+00:00", "event": "WAIT_TIMEOUT", "actor": "worker"},
+            )
+
+        balanced = store.get_balanced_session_events(
+            session_id, limit=250, protected_limit=90, noise_event_types=noise
+        )
+        names = {str(item["event"]) for item in balanced}
+        assert "MESSAGE_SENT" in names, type(store).__name__
+        assert "SESSION_CREATED" in names, type(store).__name__
+        assert "STATUS_UPDATED" in names, type(store).__name__
+        assert "WAIT_TIMEOUT" in names, type(store).__name__
+        assert len(balanced) <= 250 + 90
+        # Chronological: the old protected events come first.
+        assert str(balanced[0]["event"]) == "SESSION_CREATED"
+
+
 def test_cancelled_wait_does_not_lose_auto_delivered_message() -> None:
     # Auto-ack immediate handoff puts the message ONLY inside the waiter's
     # Future (send_message never persists it on this path). If the waiting
