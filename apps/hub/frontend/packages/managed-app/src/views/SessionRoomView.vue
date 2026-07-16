@@ -134,9 +134,9 @@ watchEffect(() => {
   gap: 12px;
 }
 .room-page.live-room-page {
-  height: calc(100dvh - 78px);
+  height: calc(100dvh - var(--managed-topbar-height, 56px));
   margin-block: 0;
-  padding-block: 10px;
+  padding-block: 8px;
   overflow: hidden;
   min-height: 0;
 }
@@ -184,7 +184,7 @@ watchEffect(() => {
   .room-page { padding: 0 14px; margin: 16px auto; }
   .room-page.live-room-page {
     height: auto;
-    min-height: calc(100dvh - 72px);
+    min-height: calc(100dvh - var(--managed-topbar-height, 56px));
     margin: 12px auto;
     padding-block: 0;
     overflow: visible;

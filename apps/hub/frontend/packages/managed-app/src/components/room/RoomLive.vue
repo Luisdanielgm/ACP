@@ -1044,7 +1044,9 @@ watchEffect(() => {
 .cockpit-grid > * { min-height: 0; }
 
 /* Left column: live map on top, activity feed under it */
-.cockpit-left { display:grid; grid-template-rows:minmax(0, 1fr) 148px; gap:10px; min-height:0; overflow:hidden; }
+/* The slim topbar (78px → 56px) freed ~26px of viewport: most goes to the
+   timeline strip so its rows stop looking squashed, the rest to the map. */
+.cockpit-left { display:grid; grid-template-rows:minmax(0, 1fr) 168px; gap:10px; min-height:0; overflow:hidden; }
 .cockpit-left > :first-child { min-height:0; }
 
 /* Right column: ONE panel — lanes scroll inside, legend pinned at the bottom */
@@ -1145,7 +1147,7 @@ watchEffect(() => {
   z-index:210;
   display:flex;
   justify-content:flex-end;
-  padding:72px 16px 18px;
+  padding:calc(var(--managed-topbar-height, 56px) + 10px) 16px 18px;
   background:rgba(0,0,0,0.5);
   backdrop-filter:blur(4px);
   -webkit-backdrop-filter:blur(4px);

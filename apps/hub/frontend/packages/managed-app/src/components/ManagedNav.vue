@@ -545,12 +545,12 @@ function formatSlug(value: string): string {
   top: 0;
   right: 0;
   left: 0;
-  height: 78px;
+  height: var(--managed-topbar-height, 56px);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  padding: 16px 20px;
+  gap: 14px;
+  padding: 8px 16px;
   background: color-mix(in srgb, var(--surface-1) 82%, transparent);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -564,14 +564,14 @@ function formatSlug(value: string): string {
   min-width: 0;
 }
 .menu-button {
-  width: 44px;
-  height: 44px;
+  width: 34px;
+  height: 34px;
   display: inline-flex;
   flex-direction: column;
   justify-content: center;
-  gap: 5px;
-  padding: 0 11px;
-  border-radius: 14px;
+  gap: 4px;
+  padding: 0 8px;
+  border-radius: 10px;
   border: 1px solid var(--glass-border);
   background: var(--glass-bg);
   cursor: pointer;
@@ -612,8 +612,8 @@ function formatSlug(value: string): string {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   flex-shrink: 0;
   border-radius: var(--radius-md);
   border: 1px solid var(--glass-border);
@@ -651,9 +651,10 @@ function formatSlug(value: string): string {
 
 :global(body.managed-shell) {
   --managed-sidebar-width: 264px;
+  --managed-topbar-height: 56px;
 }
 :global(body.managed-shell main#main-content) {
-  padding-top: 78px;
+  padding-top: var(--managed-topbar-height);
 }
 
 /* Collapse toggle: desktop-only affordance on the sidebar edge */
@@ -695,7 +696,7 @@ function formatSlug(value: string): string {
   }
   .shell-topbar {
     left: var(--managed-sidebar-width);
-    padding: 16px 24px;
+    padding: 8px 20px;
     transition: left var(--transition-spring);
   }
   .menu-button,
@@ -706,7 +707,7 @@ function formatSlug(value: string): string {
     display: inline-flex;
   }
   :global(body.managed-shell main#main-content) {
-    padding-top: 78px;
+    padding-top: var(--managed-topbar-height);
     padding-left: var(--managed-sidebar-width);
     transition: padding-left var(--transition-spring);
   }
@@ -742,8 +743,7 @@ function formatSlug(value: string): string {
 
 @media (max-width: 640px) {
   .shell-topbar {
-    padding: 12px 14px;
-    height: 72px;
+    padding: 8px 12px;
   }
   .shell-sidebar {
     width: min(88vw, 280px);
