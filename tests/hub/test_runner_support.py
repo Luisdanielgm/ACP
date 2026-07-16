@@ -41,6 +41,19 @@ def test_codex_provider_resolves_windows_command_shim(monkeypatch) -> None:
     assert stdin_text == "Inspect the task"
 
 
+def test_codex_resume_stays_in_noninteractive_exec_mode(monkeypatch) -> None:
+    monkeypatch.setattr(runner_support, "_provider_executable", lambda executable: executable)
+
+    command, stdin_text = runner_support._provider_command(
+        provider="codex_local",
+        instructions="Continue the task",
+        state_entry={"provider_session_id": "session-123"},
+    )
+
+    assert command == ["codex", "exec", "resume", "session-123", "-"]
+    assert stdin_text == "Continue the task"
+
+
 def test_provider_permission_error_returns_failed_result(monkeypatch, tmp_path: Path) -> None:
     def _deny_launch(*args, **kwargs):
         raise PermissionError(5, "Access is denied")

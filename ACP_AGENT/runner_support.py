@@ -184,7 +184,7 @@ def _provider_command(
     provider_session_id = state_entry.get("provider_session_id") if isinstance(state_entry, dict) else None
     if provider == "codex_local":
         if isinstance(provider_session_id, str) and provider_session_id.strip():
-            return [_provider_executable("codex"), "resume", provider_session_id.strip(), "-"], instructions
+            return [_provider_executable("codex"), "exec", "resume", provider_session_id.strip(), "-"], instructions
         return [_provider_executable("codex"), "exec", "--skip-git-repo-check", "-"], instructions
     if provider == "claude_local":
         command = [_provider_executable("claude"), "--print"]
