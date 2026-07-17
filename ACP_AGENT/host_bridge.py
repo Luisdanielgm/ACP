@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -24,6 +25,37 @@ class HostBindingError(ValueError):
 
 class HostDeliveryError(RuntimeError):
     """Raised when a host did not durably accept a delivery."""
+
+
+def _request_bytes_with_deadline(
+    request: urllib.request.Request,
+    *,
+    timeout_seconds: float,
+    deadline_monotonic: float,
+) -> bytes:
+    remaining = deadline_monotonic - time.monotonic()
+    if remaining <= 0:
+        raise HostDeliveryError("host request exceeded its completion deadline")
+    outcome: list[tuple[bool, Any]] = []
+
+    def perform_request() -> None:
+        try:
+            with urllib.request.urlopen(request, timeout=min(timeout_seconds, remaining)) as response:
+                outcome.append((True, response.read()))
+        except Exception as exc:
+            outcome.append((False, exc))
+
+    worker = threading.Thread(target=perform_request, name="acp-host-http", daemon=True)
+    worker.start()
+    worker.join(remaining)
+    if worker.is_alive():
+        raise HostDeliveryError("host request exceeded its completion deadline")
+    if not outcome:
+        raise HostDeliveryError("host request ended without a result")
+    succeeded, value = outcome[0]
+    if not succeeded:
+        raise value
+    return value
 
 
 @dataclass(frozen=True)
@@ -126,20 +158,31 @@ class _HttpSessionAdapter:
         self,
         *,
         request_timeout_seconds: float = 1800.0,
+        deadline_monotonic: float | None = None,
         credential_resolver: CredentialResolver | None = None,
     ) -> None:
         self.request_timeout_seconds = request_timeout_seconds
+        self.deadline_monotonic = deadline_monotonic
         self.credential_resolver = credential_resolver
 
     def deliver(self, binding: HostBinding, delivery: HostDelivery) -> HostResult:
         endpoint, session_id, directory, credential_ref = self._validated(binding)
+        deadline = time.monotonic() + self.request_timeout_seconds
+        if self.deadline_monotonic is not None:
+            deadline = min(deadline, self.deadline_monotonic)
         query = urllib.parse.urlencode({"directory": directory}) if directory else ""
         url = f"{endpoint}/session/{urllib.parse.quote(session_id, safe='')}/message"
         if query:
             url = f"{url}?{query}"
         headers = self._headers(credential_ref)
         message_id = delivery.host_message_id()
-        history = self._request_json(url=url, method="GET", headers=headers)
+        history = self._request_json(
+            url=url,
+            method="GET",
+            headers=headers,
+            timeout_seconds=self._remaining_timeout(deadline),
+            deadline_monotonic=deadline,
+        )
         recovered = _correlated_result(
             history,
             message_id=message_id,
@@ -149,10 +192,18 @@ class _HttpSessionAdapter:
         if recovered is not None:
             return recovered
         if _history_contains(history, message_id=message_id):
-            deadline = time.monotonic() + self.request_timeout_seconds
             while time.monotonic() < deadline:
                 time.sleep(min(0.25, max(0.0, deadline - time.monotonic())))
-                history = self._request_json(url=url, method="GET", headers=headers)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                history = self._request_json(
+                    url=url,
+                    method="GET",
+                    headers=headers,
+                    timeout_seconds=remaining,
+                    deadline_monotonic=deadline,
+                )
                 recovered = _correlated_result(
                     history,
                     message_id=message_id,
@@ -169,7 +220,14 @@ class _HttpSessionAdapter:
             },
             ensure_ascii=True,
         ).encode()
-        payload = self._request_json(url=url, method="POST", headers=headers, body=body)
+        payload = self._request_json(
+            url=url,
+            method="POST",
+            headers=headers,
+            body=body,
+            timeout_seconds=self._remaining_timeout(deadline),
+            deadline_monotonic=deadline,
+        )
         result = _correlated_result(
             payload,
             message_id=message_id,
@@ -199,16 +257,32 @@ class _HttpSessionAdapter:
         url: str,
         method: str,
         headers: Mapping[str, str],
+        timeout_seconds: float,
+        deadline_monotonic: float | None = None,
         body: bytes | None = None,
     ) -> Any:
         request = urllib.request.Request(url, data=body, headers=dict(headers), method=method)
+        deadline = time.monotonic() + timeout_seconds
+        if deadline_monotonic is not None:
+            deadline = min(deadline, deadline_monotonic)
         try:
-            with urllib.request.urlopen(request, timeout=self.request_timeout_seconds) as response:
-                return json.loads(response.read().decode() or "{}")
+            raw_response = _request_bytes_with_deadline(
+                request,
+                timeout_seconds=timeout_seconds,
+                deadline_monotonic=deadline,
+            )
+            return json.loads(raw_response.decode() or "{}")
         except urllib.error.HTTPError as exc:
             raise HostDeliveryError(f"host rejected delivery with HTTP {exc.code}") from None
         except (urllib.error.URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError):
             raise HostDeliveryError("host delivery failed before a valid result was received") from None
+
+    @staticmethod
+    def _remaining_timeout(deadline: float) -> float:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise HostDeliveryError("host delivery exceeded its completion deadline")
+        return remaining
 
     def _validated(self, binding: HostBinding) -> tuple[str, str, str | None, str | None]:
         if binding.adapter_id != self.manifest.adapter_id:
@@ -362,18 +436,21 @@ class HostBridge:
 def default_registry(
     *,
     request_timeout_seconds: float = 1800.0,
+    deadline_monotonic: float | None = None,
     credential_resolver: CredentialResolver | None = None,
 ) -> AdapterRegistry:
     registry = AdapterRegistry()
     registry.register(
         OpenCodeServerAdapter(
             request_timeout_seconds=request_timeout_seconds,
+            deadline_monotonic=deadline_monotonic,
             credential_resolver=credential_resolver,
         )
     )
     registry.register(
         KiloServeAdapter(
             request_timeout_seconds=request_timeout_seconds,
+            deadline_monotonic=deadline_monotonic,
             credential_resolver=credential_resolver,
         )
     )

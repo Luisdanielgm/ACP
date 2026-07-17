@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,7 @@ from host_bridge import (  # noqa: E402
     KiloServeAdapter,
     OpenCodeServerAdapter,
 )
+import host_bridge as host_bridge_module  # noqa: E402
 
 
 def _response(message_id: str = "msg-1", *, session_id: str = "session-1") -> dict[str, Any]:
@@ -358,6 +360,125 @@ def test_http_host_adapters_share_the_same_conformance_contract(adapter_type: An
     assert "directory=" in posts[0]["query"]
 
 
+def test_http_host_adapter_uses_one_deadline_for_history_and_activation(monkeypatch: Any) -> None:
+    adapter = OpenCodeServerAdapter(request_timeout_seconds=10)
+    binding = HostBinding(
+        adapter_id=adapter.manifest.adapter_id,
+        values={"endpoint": "http://127.0.0.1:4096", "session_id": "existing-session"},
+    )
+    delivery = HostDelivery(
+        message_id="msg-1",
+        correlation_id="msg-1",
+        sender="chief",
+        instructions="Inspect",
+    )
+    now = [100.0]
+    timeouts: list[float] = []
+    monkeypatch.setattr(host_bridge_module.time, "monotonic", lambda: now[0])
+
+    def request_json(*, method: str, timeout_seconds: float, **_kwargs: Any) -> Any:
+        timeouts.append(timeout_seconds)
+        if method == "GET":
+            now[0] += 6.0
+            return []
+        return {
+            "info": {
+                "id": "assistant-1",
+                "role": "assistant",
+                "parentID": delivery.host_message_id(),
+                "sessionID": "existing-session",
+                "time": {"completed": 1},
+            },
+            "parts": [{"type": "text", "text": "Host finished"}],
+        }
+
+    monkeypatch.setattr(adapter, "_request_json", request_json)
+
+    assert adapter.deliver(binding, delivery).summary == "Host finished"
+    assert timeouts == pytest.approx([10.0, 4.0])
+
+
+def test_http_host_adapter_preserves_an_upstream_absolute_deadline(monkeypatch: Any) -> None:
+    adapter = OpenCodeServerAdapter(request_timeout_seconds=10, deadline_monotonic=107.0)
+    binding = HostBinding(
+        adapter_id=adapter.manifest.adapter_id,
+        values={"endpoint": "http://127.0.0.1:4096", "session_id": "existing-session"},
+    )
+    delivery = HostDelivery(
+        message_id="msg-1",
+        correlation_id="msg-1",
+        sender="chief",
+        instructions="Inspect",
+    )
+    now = [100.0]
+    timeouts: list[float] = []
+    monkeypatch.setattr(host_bridge_module.time, "monotonic", lambda: now[0])
+
+    def request_json(*, method: str, timeout_seconds: float, **_kwargs: Any) -> Any:
+        timeouts.append(timeout_seconds)
+        if method == "GET":
+            now[0] += 6.0
+            return []
+        return {
+            "info": {
+                "id": "assistant-1",
+                "role": "assistant",
+                "parentID": delivery.host_message_id(),
+                "sessionID": "existing-session",
+                "time": {"completed": 1},
+            },
+            "parts": [{"type": "text", "text": "Host finished"}],
+        }
+
+    monkeypatch.setattr(adapter, "_request_json", request_json)
+
+    assert adapter.deliver(binding, delivery).summary == "Host finished"
+    assert timeouts == pytest.approx([7.0, 1.0])
+
+
+def test_http_host_json_read_stops_at_its_deadline(monkeypatch: Any) -> None:
+    adapter = OpenCodeServerAdapter(request_timeout_seconds=0.01)
+    release = threading.Event()
+
+    class FakeSocket:
+        def settimeout(self, _seconds: float) -> None:
+            return None
+
+    class Raw:
+        _sock = FakeSocket()
+
+    class Fp:
+        raw = Raw()
+
+    class SlowResponse:
+        fp = Fp()
+
+        def __enter__(self) -> "SlowResponse":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def read(self) -> bytes:
+            release.wait(0.5)
+            return b"{"
+
+    monkeypatch.setattr(host_bridge_module.urllib.request, "urlopen", lambda *_args, **_kwargs: SlowResponse())
+
+    started = time.perf_counter()
+    try:
+        with pytest.raises(HostDeliveryError, match="deadline"):
+            adapter._request_json(
+                url="http://127.0.0.1:4096/session/existing/message",
+                method="GET",
+                headers={},
+                timeout_seconds=0.01,
+            )
+        assert time.perf_counter() - started < 0.2
+    finally:
+        release.set()
+
+
 def test_crash_after_host_acceptance_recovers_without_second_activation(tmp_path: Path, fake_host: Any) -> None:
     endpoint, state = fake_host
     state_path = tmp_path / "bridge-state.json"
@@ -426,7 +547,7 @@ def test_existing_incomplete_host_message_is_never_resubmitted(fake_host: Any) -
             "parts": [{"type": "text", "text": "Inspect"}],
         }
     )
-    adapter = OpenCodeServerAdapter(request_timeout_seconds=0.01)
+    adapter = OpenCodeServerAdapter(request_timeout_seconds=0.1)
     binding = HostBinding(
         adapter_id=adapter.manifest.adapter_id,
         values={"endpoint": endpoint, "session_id": "existing-session"},

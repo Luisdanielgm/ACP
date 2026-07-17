@@ -78,8 +78,8 @@ Repeat `--allow-sender` for trusted coordinators. Pre-0.3.14 runner configs may 
 For an existing OpenCode/Kilo session, use `host-bridge start --config ACP_AGENT/agents/<agent>.json` instead of `runner`.
 Configure `host_bridge_adapter_id`, loopback `host_bridge_endpoint`,
 `host_bridge_session_id`, and `host_bridge_allowed_senders`.
-Optional `host_bridge_credential_ref: "env:NAME"` resolves a JSON `username`/`password` object.
-Never store literal credentials; `host-bridge once` is the bounded smoke/debug mode.
+Optional `host_bridge_credential_ref: "env:NAME"` resolves a JSON `username`/`password` object; host timeout is capped at 240 and shrinks to preserve REPLY/ACK before lease expiry.
+Never store literal credentials or run two bridges for one binding; `host-bridge once` is the bounded smoke/debug mode.
 
 ## 5. Payload safety
 

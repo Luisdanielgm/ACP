@@ -4,7 +4,10 @@ import argparse
 import importlib.util
 import json
 import sys
+import threading
+import time
 import urllib.error
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -55,9 +58,11 @@ class FakeHub:
         self.malformed_ack = False
         self.malformed_reply = False
         self.accepted_reply_ids: set[str] = set()
+        self.timeouts: list[tuple[str, float | None]] = []
 
     def post_json(self, *, route: str, payload: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
         self.calls.append((route, payload))
+        self.timeouts.append((route, _kwargs.get("timeout_seconds")))
         if route == "/sessions/wait":
             response = self.responses.pop(0)
             if isinstance(response, BaseException):
@@ -84,7 +89,12 @@ class FakeHub:
         raise AssertionError(f"unexpected route: {route}")
 
 
-def _message_response(*, sender: str = "chief", host_session: str = "host-session-1") -> dict[str, Any]:
+def _message_response(
+    *,
+    sender: str = "chief",
+    host_session: str = "host-session-1",
+    lease_seconds: float = 300.0,
+) -> dict[str, Any]:
     return {
         "status": "message",
         "message": {
@@ -99,6 +109,9 @@ def _message_response(*, sender: str = "chief", host_session: str = "host-sessio
             "ack_required": True,
             "message_id": MESSAGE_ID,
             "receipt_handle": "receipt-1",
+            "lease_expires_at": (
+                datetime.now(timezone.utc) + timedelta(seconds=lease_seconds)
+            ).isoformat(timespec="microseconds").replace("+00:00", "Z"),
         },
         "host_session": host_session,
     }
@@ -188,6 +201,71 @@ def test_valid_delivery_uses_bound_session_then_replies_and_acks(tmp_path: Path,
     acknowledgment = hub.calls[2][1]
     assert acknowledgment["message_id"] == MESSAGE_ID
     assert acknowledgment["receipt_handle"] == "receipt-1"
+    timeout_by_route = dict(hub.timeouts)
+    assert 0 < timeout_by_route["/sessions/send"] <= 20
+    assert 0 < timeout_by_route["/sessions/ack"] <= 20
+
+
+def test_delivery_lease_reduces_host_budget_before_reply_and_ack(tmp_path: Path, monkeypatch: Any) -> None:
+    config_path = _write_config(tmp_path, host_bridge_host_timeout_seconds=240.0)
+    hub = FakeHub([_message_response(lease_seconds=70.0)])
+    adapter = RecordingAdapter()
+    configured_timeouts: list[float] = []
+
+    def registry_factory(*, request_timeout_seconds: float, **_kwargs: Any) -> AdapterRegistry:
+        configured_timeouts.append(request_timeout_seconds)
+        return _registry(adapter)
+
+    monkeypatch.setattr(acp_cli, "post_json", hub.post_json)
+    monkeypatch.setattr(acp_cli, "default_registry", registry_factory)
+
+    assert acp_cli.host_bridge_once(_args(config_path))["status"] == "completed"
+    assert configured_timeouts[0] == 240.0
+    assert 0 < configured_timeouts[-1] < 30.0
+    assert len(adapter.deliveries) == 1
+
+
+def test_hub_json_read_honors_absolute_deadline(monkeypatch: Any) -> None:
+    release = threading.Event()
+
+    class FakeSocket:
+        def settimeout(self, _seconds: float) -> None:
+            return None
+
+    class Raw:
+        _sock = FakeSocket()
+
+    class Fp:
+        raw = Raw()
+
+    class SlowResponse:
+        fp = Fp()
+
+        def __enter__(self) -> "SlowResponse":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def read(self) -> bytes:
+            release.wait(0.5)
+            return b"{"
+
+    monkeypatch.setattr(acp_cli.urllib.request, "urlopen", lambda *_args, **_kwargs: SlowResponse())
+
+    started = time.perf_counter()
+    try:
+        with pytest.raises(ValueError, match="deadline"):
+            acp_cli.request_json(
+                method="POST",
+                url="https://hub.example/sessions/send",
+                payload={},
+                timeout_seconds=0.01,
+                deadline_monotonic=acp_cli.time.monotonic() + 0.01,
+            )
+        assert time.perf_counter() - started < 0.2
+    finally:
+        release.set()
 
 
 def test_restart_after_reply_acceptance_reuses_reply_id_and_does_not_redeliver_host(
@@ -376,6 +454,28 @@ def test_host_timeout_cannot_outlive_delivery_lease(tmp_path: Path, monkeypatch:
 
     with pytest.raises(ValueError, match="host_timeout_seconds"):
         acp_cli.host_bridge_once(_args(config_path))
+
+    assert hub.calls == []
+
+
+@pytest.mark.parametrize("mode", ["once", "start"])
+def test_live_binding_lock_prevents_concurrent_bridge_processes(
+    tmp_path: Path,
+    monkeypatch: Any,
+    mode: str,
+) -> None:
+    config_path = _write_config(tmp_path)
+    args = _args(config_path, command=mode)
+    profile = acp_cli.resolve_host_bridge_profile(args)
+    hub = FakeHub([])
+    monkeypatch.setattr(acp_cli, "post_json", hub.post_json)
+
+    with acp_cli.reserve_config(profile["lock_target"]):
+        with pytest.raises(ValueError, match="reserved by another process"):
+            if mode == "once":
+                acp_cli.host_bridge_once(args)
+            else:
+                acp_cli.host_bridge_start(args, max_cycles=1)
 
     assert hub.calls == []
 

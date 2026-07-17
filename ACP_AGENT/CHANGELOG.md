@@ -6,6 +6,8 @@
 - ES: Se agregaron los comandos explicitos `host-bridge start|once`, que reciben TASK de ACP sin proveedor/modelo en espera, entregan de a uno a una sesion OpenCode o Kilo vinculada, envian un REPLY correlacionado e idempotente y confirman ACK solo despues del progreso durable validado por el Hub.
 - EN: Host bindings are explicit and fail closed: loopback endpoint, existing host session id, trusted senders, optional directory, and optional `env:NAME` Basic credential reference; no host autodiscovery or literal credential is supported.
 - ES: Los bindings del host son explicitos y fail-closed: endpoint loopback, id de sesion existente, remitentes confiables, directorio opcional y referencia opcional `env:NAME` a credencial Basic; no se admite autodiscovery ni credencial literal.
+- EN: Malformed receive envelopes fail closed, interrupts stop cleanly, an exclusive binding lock rejects concurrent bridge processes, and the Hub lease expiry budgets host work, correlated REPLY, ACK, and a final safety buffer under one end-to-end deadline.
+- ES: Los envelopes de recepcion invalidos fallan de forma cerrada, las interrupciones terminan limpiamente, un lock exclusivo por binding rechaza procesos concurrentes y el vencimiento del lease del Hub distribuye host, REPLY correlacionado, ACK y un buffer final bajo un unico deadline end-to-end.
 
 ## 0.3.17 - 2026-07-16
 

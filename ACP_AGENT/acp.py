@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -58,6 +59,9 @@ DEFAULT_LISTEN_TIMEOUT_SECONDS = 300.0
 DEFAULT_DELIVERY_LEASE_SECONDS = 60.0
 HOST_BRIDGE_DELIVERY_LEASE_SECONDS = 300.0
 HOST_BRIDGE_MAX_HOST_TIMEOUT_SECONDS = 240.0
+HOST_BRIDGE_REPLY_TIMEOUT_SECONDS = 20.0
+HOST_BRIDGE_ACK_TIMEOUT_SECONDS = 20.0
+HOST_BRIDGE_LEASE_BUFFER_SECONDS = 5.0
 TRANSIENT_HTTP_STATUS_CODES = {502, 503, 504}
 TRANSIENT_RETRY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
 TRANSIENT_RETRY_SAFE_POST_ROUTES = {
@@ -1578,6 +1582,37 @@ def _headers_with_user_agent(headers: dict[str, str] | None = None) -> dict[str,
     return resolved
 
 
+def _request_bytes_with_deadline(
+    request: urllib.request.Request,
+    *,
+    timeout_seconds: float,
+    deadline_monotonic: float,
+) -> bytes:
+    remaining = deadline_monotonic - time.monotonic()
+    if remaining <= 0:
+        raise ValueError("hub request exceeded its deadline")
+    outcome: list[tuple[bool, Any]] = []
+
+    def perform_request() -> None:
+        try:
+            with urllib.request.urlopen(request, timeout=min(timeout_seconds, remaining)) as response:
+                outcome.append((True, response.read()))
+        except Exception as exc:
+            outcome.append((False, exc))
+
+    worker = threading.Thread(target=perform_request, name="acp-hub-http", daemon=True)
+    worker.start()
+    worker.join(remaining)
+    if worker.is_alive():
+        raise ValueError("hub request exceeded its deadline")
+    if not outcome:
+        raise ValueError("hub request ended without a result")
+    succeeded, value = outcome[0]
+    if not succeeded:
+        raise value
+    return value
+
+
 def request_json(
     *,
     method: str,
@@ -1585,6 +1620,7 @@ def request_json(
     payload: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
     timeout_seconds: float = 310.0,
+    deadline_monotonic: float | None = None,
     retry_transient: bool = False,
     retry_backoff_seconds: tuple[float, ...] = TRANSIENT_RETRY_BACKOFF_SECONDS,
 ) -> dict[str, Any]:
@@ -1601,8 +1637,23 @@ def request_json(
             method=method.upper(),
         )
         try:
-            with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
-                return json.loads(response.read().decode("utf-8"))
+            effective_deadline = None
+            request_timeout = timeout_seconds
+            if deadline_monotonic is not None:
+                effective_deadline = min(deadline_monotonic, time.monotonic() + timeout_seconds)
+                request_timeout = effective_deadline - time.monotonic()
+                if request_timeout <= 0:
+                    raise ValueError("hub request exceeded its deadline")
+            if effective_deadline is None:
+                with urllib.request.urlopen(request, timeout=request_timeout) as response:
+                    raw_response = response.read()
+            else:
+                raw_response = _request_bytes_with_deadline(
+                    request,
+                    timeout_seconds=request_timeout,
+                    deadline_monotonic=effective_deadline,
+                )
+            return json.loads(raw_response.decode("utf-8"))
         except urllib.error.HTTPError as exc:
             response_body = exc.read().decode("utf-8", errors="replace")
             if (
@@ -1723,13 +1774,22 @@ def managed_command_hub_http_from_args(args: argparse.Namespace, *, command_name
         ) from exc
 
 
-def post_json(*, hub_http: str, route: str, payload: dict[str, Any], token: str | None = None) -> dict[str, Any]:
+def post_json(
+    *,
+    hub_http: str,
+    route: str,
+    payload: dict[str, Any],
+    token: str | None = None,
+    timeout_seconds: float = 310.0,
+    deadline_monotonic: float | None = None,
+) -> dict[str, Any]:
     return request_json(
         method="POST",
         url=f"{hub_http.rstrip('/')}{route}",
         payload=payload,
         headers=_http_headers(token=token),
-        timeout_seconds=310.0,
+        timeout_seconds=timeout_seconds,
+        deadline_monotonic=deadline_monotonic,
         retry_transient=route in TRANSIENT_RETRY_SAFE_POST_ROUTES,
     )
 
@@ -4427,6 +4487,9 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
     if isinstance(credential_ref, str):
         values["credential_ref"] = credential_ref
     binding = HostBinding(adapter_id=adapter_id, values=values)
+    lock_target = (
+        ACP_ROOT / "inbox" / "host_bridge_locks" / f"{binding.fingerprint()}.runtime"
+    ).resolve()
 
     wait_arg = getattr(args, "wait_timeout_seconds", None)
     wait_value = wait_arg if wait_arg is not None else get_config_value(config, "host_bridge_wait_timeout_seconds")
@@ -4459,9 +4522,11 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
     return {
         "settings": settings,
         "binding": binding,
+        "lock_target": lock_target,
         "allowed_senders": tuple(allowed_senders),
         "state_path": state_path,
         "wait_timeout_seconds": wait_timeout,
+        "host_timeout_seconds": host_timeout,
         "retry_delay_seconds": retry_delay,
         "registry": registry,
     }
@@ -4484,11 +4549,57 @@ def _host_bridge_wait(profile: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _host_bridge_delivery_deadline(response: dict[str, Any]) -> float:
+    delivery = response.get("delivery")
+    expires_at = delivery.get("lease_expires_at") if isinstance(delivery, dict) else None
+    if not isinstance(expires_at, str) or not expires_at.strip():
+        raise HostDeliveryError("ACP delivery lease expiry is missing")
+    try:
+        expires = datetime.fromisoformat(expires_at.strip().replace("Z", "+00:00"))
+    except ValueError:
+        raise HostDeliveryError("ACP delivery lease expiry is invalid") from None
+    if expires.tzinfo is None:
+        raise HostDeliveryError("ACP delivery lease expiry is invalid")
+    remaining = min(
+        (expires.astimezone(timezone.utc) - datetime.now(timezone.utc)).total_seconds(),
+        HOST_BRIDGE_DELIVERY_LEASE_SECONDS,
+    )
+    required_progress = (
+        HOST_BRIDGE_REPLY_TIMEOUT_SECONDS
+        + HOST_BRIDGE_ACK_TIMEOUT_SECONDS
+        + HOST_BRIDGE_LEASE_BUFFER_SECONDS
+    )
+    if remaining <= required_progress:
+        raise HostDeliveryError("ACP delivery lease is too short for safe host completion")
+    return time.monotonic() + remaining
+
+
+def _host_bridge_request_budget(
+    profile: dict[str, Any],
+    *,
+    maximum_seconds: float,
+    reserve_seconds: float,
+) -> tuple[float, float]:
+    deadline = profile.get("delivery_deadline_monotonic")
+    if not isinstance(deadline, (int, float)):
+        raise HostDeliveryError("ACP delivery lease deadline is unavailable")
+    request_deadline = float(deadline) - reserve_seconds
+    remaining = request_deadline - time.monotonic()
+    if remaining <= 0:
+        raise HostDeliveryError("ACP delivery lease has no safe progress budget")
+    return min(maximum_seconds, remaining), request_deadline
+
+
 def _host_bridge_ack(profile: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
     settings: HubAgentSettings = profile["settings"]
     delivery = response.get("delivery")
     if not isinstance(delivery, dict):
         raise HostDeliveryError("ACP delivery acknowledgment data is missing")
+    timeout_seconds, deadline = _host_bridge_request_budget(
+        profile,
+        maximum_seconds=HOST_BRIDGE_ACK_TIMEOUT_SECONDS,
+        reserve_seconds=HOST_BRIDGE_LEASE_BUFFER_SECONDS,
+    )
     acknowledgment = post_json(
         hub_http=settings.hub_http,
         route="/sessions/ack",
@@ -4500,6 +4611,8 @@ def _host_bridge_ack(profile: dict[str, Any], response: dict[str, Any]) -> dict[
             "receipt_handle": delivery.get("receipt_handle"),
         },
         token=settings.token,
+        timeout_seconds=timeout_seconds,
+        deadline_monotonic=deadline,
     )
     if acknowledgment.get("status") != "acknowledged" or acknowledgment.get("message_id") != delivery.get("message_id"):
         raise HostDeliveryError("ACP ack did not confirm the leased message")
@@ -4514,6 +4627,11 @@ def _host_bridge_reply(
 ) -> dict[str, Any]:
     settings: HubAgentSettings = profile["settings"]
     binding: HostBinding = profile["binding"]
+    timeout_seconds, deadline = _host_bridge_request_budget(
+        profile,
+        maximum_seconds=HOST_BRIDGE_REPLY_TIMEOUT_SECONDS,
+        reserve_seconds=HOST_BRIDGE_ACK_TIMEOUT_SECONDS + HOST_BRIDGE_LEASE_BUFFER_SECONDS,
+    )
     sent = post_json(
         hub_http=settings.hub_http,
         route="/sessions/send",
@@ -4536,6 +4654,8 @@ def _host_bridge_reply(
             "in_reply_to": delivery.correlation_id,
         },
         token=settings.token,
+        timeout_seconds=timeout_seconds,
+        deadline_monotonic=deadline,
     )
     if sent.get("message_id") != reply_id or sent.get("delivery") not in {"immediate", "queued", "duplicate"}:
         raise HostDeliveryError("ACP reply did not confirm the correlated message")
@@ -4543,14 +4663,38 @@ def _host_bridge_reply(
 
 
 def _host_bridge_poll(profile: dict[str, Any]) -> dict[str, Any]:
+    response = _host_bridge_wait(profile)
+    registry = profile["registry"]
+    if isinstance(response, dict) and response.get("status") == "message":
+        profile["delivery_deadline_monotonic"] = _host_bridge_delivery_deadline(response)
+        host_timeout, _deadline = _host_bridge_request_budget(
+            profile,
+            maximum_seconds=profile["host_timeout_seconds"],
+            reserve_seconds=(
+                HOST_BRIDGE_REPLY_TIMEOUT_SECONDS
+                + HOST_BRIDGE_ACK_TIMEOUT_SECONDS
+                + HOST_BRIDGE_LEASE_BUFFER_SECONDS
+            ),
+        )
+        registry = default_registry(
+            request_timeout_seconds=host_timeout,
+            deadline_monotonic=(
+                profile["delivery_deadline_monotonic"]
+                - HOST_BRIDGE_REPLY_TIMEOUT_SECONDS
+                - HOST_BRIDGE_ACK_TIMEOUT_SECONDS
+                - HOST_BRIDGE_LEASE_BUFFER_SECONDS
+            ),
+            credential_resolver=_host_bridge_credential,
+        )
+        registry.get(profile["binding"].adapter_id)
     bridge = HostBridge(
-        registry=profile["registry"],
+        registry=registry,
         binding=profile["binding"],
         store=JsonBridgeStore(profile["state_path"]),
         allowed_senders=profile["allowed_senders"],
     )
-    return bridge.poll_once(
-        receive=lambda: _host_bridge_wait(profile),
+    return bridge.handle(
+        response,
         acknowledge=lambda response: _host_bridge_ack(profile, dict(response)),
         reply=lambda delivery, result, reply_id: _host_bridge_reply(profile, delivery, result, reply_id),
     )
@@ -4568,7 +4712,8 @@ def _stop_host_bridge(profile: dict[str, Any], cycles: int) -> dict[str, Any]:
 def host_bridge_once(args: argparse.Namespace) -> dict[str, Any]:
     profile = resolve_host_bridge_profile(args)
     try:
-        return _host_bridge_poll(profile)
+        with reserve_config(profile["lock_target"]):
+            return _host_bridge_poll(profile)
     except KeyboardInterrupt:
         return _stop_host_bridge(profile, 0)
 
@@ -4576,27 +4721,28 @@ def host_bridge_once(args: argparse.Namespace) -> dict[str, Any]:
 def host_bridge_start(args: argparse.Namespace, *, max_cycles: int | None = None) -> dict[str, Any]:
     profile = resolve_host_bridge_profile(args)
     cycles = 0
-    while True:
-        try:
-            try:
-                result = _host_bridge_poll(profile)
-            except HostBindingError:
-                raise
-            except HostDeliveryError as exc:
-                emit_json_line({"status": "host_bridge_retry", "detail": str(exc), "acked": False})
-                time.sleep(profile["retry_delay_seconds"])
-                result = {"status": "retry"}
-            except ValueError as exc:
-                if _is_fatal_session_command_error(str(exc)):
+    try:
+        with reserve_config(profile["lock_target"]):
+            while True:
+                try:
+                    result = _host_bridge_poll(profile)
+                except HostBindingError:
                     raise
-                emit_json_line({"status": "host_bridge_retry", "detail": str(exc), "acked": False})
-                time.sleep(profile["retry_delay_seconds"])
-                result = {"status": "retry"}
-        except KeyboardInterrupt:
-            return _stop_host_bridge(profile, cycles)
-        cycles += 1
-        if max_cycles is not None and cycles >= max_cycles:
-            return {"status": result.get("status", "idle"), "cycles": cycles}
+                except HostDeliveryError as exc:
+                    emit_json_line({"status": "host_bridge_retry", "detail": str(exc), "acked": False})
+                    time.sleep(profile["retry_delay_seconds"])
+                    result = {"status": "retry"}
+                except ValueError as exc:
+                    if _is_fatal_session_command_error(str(exc)):
+                        raise
+                    emit_json_line({"status": "host_bridge_retry", "detail": str(exc), "acked": False})
+                    time.sleep(profile["retry_delay_seconds"])
+                    result = {"status": "retry"}
+                cycles += 1
+                if max_cycles is not None and cycles >= max_cycles:
+                    return {"status": result.get("status", "idle"), "cycles": cycles}
+    except KeyboardInterrupt:
+        return _stop_host_bridge(profile, cycles)
 
 
 def _runner_allowed_senders(value: Any) -> list[str]:
