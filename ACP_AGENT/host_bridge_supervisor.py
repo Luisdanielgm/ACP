@@ -197,7 +197,10 @@ class HostBridgeSupervisor:
         endpoint_context = reserve_config(endpoint_lock) if endpoint_lock else None
         with state_lock:
             if endpoint_context is not None:
-                endpoint_context.__enter__()
+                try:
+                    endpoint_context.__enter__()
+                except ValueError:
+                    return {"status": "endpoint_collision", "endpoint": self.spec.endpoint}
             try:
                 return self._reconcile_locked()
             finally:
