@@ -146,6 +146,7 @@ def _args(config_path: Path, *, command: str = "once") -> argparse.Namespace:
         agent=None,
         adapter_id=None,
         endpoint=None,
+        host_executable=None,
         host_session_id=None,
         directory=None,
         credential_ref=None,
@@ -584,6 +585,44 @@ def test_codex_bearer_credential_is_resolved_only_from_env(monkeypatch: Any) -> 
     assert credential is not None
     assert credential.bearer_token == "test-bearer"
     assert credential.username is None
+
+
+def test_claude_cli_profile_uses_explicit_executable_and_existing_session(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        host_bridge_adapter_id="claude_code_cli",
+        host_bridge_endpoint=None,
+        host_bridge_executable=r"C:\\Tools\\claude.exe",
+        host_bridge_session_id="claude-existing",
+    )
+    profile = acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+    assert profile["binding"].adapter_id == "claude_code_cli"
+    assert dict(profile["binding"].values) == {
+        "executable": r"C:\\Tools\\claude.exe",
+        "session_id": "claude-existing",
+    }
+
+
+def test_host_bridge_cli_accepts_explicit_claude_executable() -> None:
+    parser = acp_cli.build_parser()
+    args = parser.parse_args(
+        [
+            "host-bridge",
+            "once",
+            "--adapter-id",
+            "claude_code_cli",
+            "--host-executable",
+            r"C:\\Tools\\claude.exe",
+            "--host-session-id",
+            "claude-existing",
+            "--allow-sender",
+            "chief",
+        ]
+    )
+
+    assert args.adapter_id == "claude_code_cli"
+    assert args.host_executable == r"C:\\Tools\\claude.exe"
 
 
 def test_literal_credential_is_rejected_before_wait(tmp_path: Path, monkeypatch: Any) -> None:

@@ -470,9 +470,17 @@ def default_registry(
         )
     )
     from codex_app_server_adapter import CodexAppServerAdapter
+    from claude_code_cli_adapter import ClaudeCodeCliAdapter
 
     registry.register(
         CodexAppServerAdapter(
+            request_timeout_seconds=request_timeout_seconds,
+            deadline_monotonic=deadline_monotonic,
+            credential_resolver=credential_resolver,
+        )
+    )
+    registry.register(
+        ClaudeCodeCliAdapter(
             request_timeout_seconds=request_timeout_seconds,
             deadline_monotonic=deadline_monotonic,
             credential_resolver=credential_resolver,

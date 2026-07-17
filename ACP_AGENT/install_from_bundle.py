@@ -28,6 +28,7 @@ ACP_DISTRIBUTION_MODULE = ACP_ROOT / "acp_distribution.py"
 ACP_RELEASE_CHECKLIST = ACP_ROOT / "RELEASE_CHECKLIST.md"
 ACP_HOST_BRIDGE = ACP_ROOT / "host_bridge.py"
 ACP_CODEX_APP_SERVER_ADAPTER = ACP_ROOT / "codex_app_server_adapter.py"
+ACP_CLAUDE_CODE_CLI_ADAPTER = ACP_ROOT / "claude_code_cli_adapter.py"
 SKILL_SOURCE = ACP_ROOT / "skills" / "acp-session-coordinator"
 _DISTRIBUTION = load_distribution(ACP_ROOT)
 
@@ -469,6 +470,7 @@ def initialize_agent_folder(
     _copy_file(ACP_ENTRYPOINT, acp_root / "acp.py", force=force)
     _copy_file(ACP_HOST_BRIDGE, acp_root / "host_bridge.py", force=force)
     _copy_file(ACP_CODEX_APP_SERVER_ADAPTER, acp_root / "codex_app_server_adapter.py", force=force)
+    _copy_file(ACP_CLAUDE_CODE_CLI_ADAPTER, acp_root / "claude_code_cli_adapter.py", force=force)
     _copy_file(ACP_DISTRIBUTION_MODULE, acp_root / "acp_distribution.py", force=force)
     _copy_file(ACP_DISTRIBUTION, acp_root / "DISTRIBUTION.json", force=force)
     _copy_file(ACP_REQUIREMENTS, acp_root / "requirements.txt", force=force)

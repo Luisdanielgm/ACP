@@ -75,10 +75,11 @@ Chief tasks in `pending/` should use `task_id`, `instructions`, `required_capabi
 New runners require explicit `--allow-sender`; provider/workspace are pinned by default and `--reply-to` pins the response, so TASK JSON cannot redirect them.
 Repeat `--allow-sender` for trusted coordinators. Pre-0.3.14 runner configs may temporarily use `--legacy-runner-policy` (version `0`) until they migrate.
 
-For an existing OpenCode, Kilo, or Codex app-server session, use `host-bridge start --config ACP_AGENT/agents/<agent>.json` instead of `runner`.
-Configure `host_bridge_adapter_id`, loopback `host_bridge_endpoint`, and `host_bridge_allowed_senders`; use `host_bridge_session_id` for OpenCode/Kilo or `host_bridge_thread_id` for Codex.
+For an existing OpenCode, Kilo, Codex app-server, or persisted Claude Code session, use `host-bridge start --config ACP_AGENT/agents/<agent>.json` instead of `runner`.
+Configure `host_bridge_adapter_id`, loopback `host_bridge_endpoint`, and `host_bridge_allowed_senders`; use `host_bridge_session_id` for OpenCode/Kilo/Claude or `host_bridge_thread_id` for Codex.
 Codex requires an already-running explicit WebSocket endpoint and existing thread id; it never discovers processes or creates threads, and it does not accept directory/cwd overrides. Its WebSocket transport is experimental, so keep it loopback-only.
-Optional `host_bridge_credential_ref: "env:NAME"` resolves JSON `username`/`password` for OpenCode/Kilo or `bearer_token` for Codex; host timeout is capped at 240 and shrinks to preserve REPLY/ACK before lease expiry.
+Claude Code uses `host_bridge_adapter_id: "claude_code_cli"`, `host_bridge_executable` as an explicit absolute path, and an existing `host_bridge_session_id`. It starts one bounded `claude -p --resume` only after a trusted TASK, so idle ACP waiting has no Claude/model invocation. It resumes persisted Claude Code context but cannot push into an already-running terminal/IDE process; retries fail closed and Claude Desktop/Channels are not supported by this adapter.
+Optional `host_bridge_credential_ref: "env:NAME"` resolves JSON `username`/`password` for OpenCode/Kilo or `bearer_token` for Codex/Claude; host timeout is capped at 240 and shrinks to preserve REPLY/ACK before lease expiry.
 Never store literal credentials or run two bridges for one binding; `host-bridge once` is the bounded smoke/debug mode.
 
 ## 5. Payload safety

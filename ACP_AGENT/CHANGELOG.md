@@ -1,5 +1,14 @@
 # ACP_AGENT Changelog
 
+## 0.3.20 - 2026-07-17
+
+- EN: Added `claude_code_cli`, a portable Host Bridge adapter that invokes the official `claude -p --resume <session_id>` surface only after a valid ACP TASK, parses the terminal stream-json result, and does not invoke Claude while the ACP inbox is idle.
+- ES: Se agrego `claude_code_cli`, un adapter portable de Host Bridge que invoca la superficie oficial `claude -p --resume <session_id>` solo despues de un TASK ACP valido, procesa el resultado terminal stream-json y no invoca Claude mientras el inbox ACP esta idle.
+- EN: The binding requires an explicit absolute Claude executable and existing session id. Retries fail closed because the CLI does not expose durable prompt-level reconciliation; local authentication or an `env:NAME` bearer credential reference is required at delivery time.
+- ES: El binding requiere un ejecutable Claude absoluto y explicito y un id de sesion existente. Los reintentos fallan cerrados porque la CLI no expone reconciliacion durable por prompt; se requiere autenticacion local o una referencia bearer `env:NAME` al entregar.
+- EN: This release supports Claude Code persisted sessions, not Claude Desktop. It does not claim push delivery into an already-running Claude terminal/IDE session or Claude Channels support.
+- ES: Esta release soporta sesiones persistidas de Claude Code, no Claude Desktop. No declara entrega push hacia una sesion terminal/IDE Claude ya activa ni soporte de Claude Channels.
+
 ## 0.3.19 - 2026-07-17
 
 - EN: Added the portable `codex_app_server` Host Bridge adapter for an explicit existing Codex thread over a loopback WebSocket, using the official initialize, thread/resume, turn/start, item/completed, turn/completed, and turn/interrupt protocol.
