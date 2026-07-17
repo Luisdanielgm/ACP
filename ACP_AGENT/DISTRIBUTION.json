@@ -5,5 +5,11 @@
   "default_hub_label": "community-managed hub",
   "default_hub_http": null,
   "default_hub_ws": null,
-  "default_manifest_url": null
+  "default_manifest_url": null,
+  "host_adapters": [
+    {"adapter_id": "opencode_server", "capabilities": ["existing-session", "http-delivery", "correlated-result"]},
+    {"adapter_id": "kilo_serve", "capabilities": ["existing-session", "http-delivery", "correlated-result", "directory-context"]},
+    {"adapter_id": "codex_app_server", "capabilities": ["existing-session", "websocket-delivery", "client-message-correlation", "streaming-terminal-result", "cancellation"]},
+    {"adapter_id": "claude_code_cli", "capabilities": ["existing-session", "cli-resume", "streaming-terminal-result", "cancellation", "fail-closed-retry"]}
+  ]
 }

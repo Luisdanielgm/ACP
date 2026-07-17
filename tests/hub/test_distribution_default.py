@@ -13,6 +13,7 @@ assert _SPEC is not None and _SPEC.loader is not None
 acp_distribution = importlib.util.module_from_spec(_SPEC)
 sys.modules[_SPEC.name] = acp_distribution
 _SPEC.loader.exec_module(acp_distribution)
+from host_bridge import default_registry  # noqa: E402
 
 
 def test_default_distribution_id_is_acp_community(tmp_path: Path) -> None:
@@ -21,3 +22,21 @@ def test_default_distribution_id_is_acp_community(tmp_path: Path) -> None:
     # default, which must already read as the community flavor.
     distribution = acp_distribution.load_distribution(base_dir=tmp_path)
     assert distribution.distribution_id == "acp-community"
+
+
+def test_distribution_declares_all_host_bridge_adapters_and_capabilities() -> None:
+    distribution = acp_distribution.load_distribution(base_dir=repo_root / "ACP_AGENT")
+    declarations = {item.adapter_id: set(item.capabilities) for item in distribution.host_adapters}
+
+    assert set(declarations) == {
+        "opencode_server",
+        "kilo_serve",
+        "codex_app_server",
+        "claude_code_cli",
+    }
+    assert {"existing-session", "http-delivery"} <= declarations["opencode_server"]
+    assert {"existing-session", "directory-context"} <= declarations["kilo_serve"]
+    assert {"existing-session", "websocket-delivery", "cancellation"} <= declarations["codex_app_server"]
+    assert {"existing-session", "cli-resume", "fail-closed-retry"} <= declarations["claude_code_cli"]
+    registered = {manifest.adapter_id: set(manifest.capabilities) for manifest in default_registry().manifests()}
+    assert registered == declarations

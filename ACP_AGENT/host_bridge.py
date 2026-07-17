@@ -148,6 +148,9 @@ class AdapterRegistry:
         except KeyError as exc:
             raise HostBindingError("configured host adapter is not registered") from exc
 
+    def manifests(self) -> tuple[HostManifest, ...]:
+        return tuple(adapter.manifest for adapter in self._adapters.values())
+
 
 CredentialResolver = Callable[[str], HostCredential | None]
 

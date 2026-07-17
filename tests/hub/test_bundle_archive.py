@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -54,6 +55,49 @@ def test_discover_downloads_dir_falls_back_to_process_cwd(monkeypatch, tmp_path:
     monkeypatch.chdir(tmp_path)
 
     assert _discover_downloads_dir() == downloads_dir.resolve()
+
+
+def test_canonical_bundle_contains_all_host_bridge_components() -> None:
+    bundle_path = ensure_bundle_archive()
+    required = {
+        "host_bridge.py",
+        "acp.py",
+        "acp_distribution.py",
+        "DISTRIBUTION.json",
+        "install_from_bundle.py",
+        "update_from_release.py",
+        "VERSION",
+        "requirements.txt",
+        "codex_app_server_adapter.py",
+        "claude_code_cli_adapter.py",
+        "skills/acp-session-coordinator/SKILL.md",
+    }
+
+    with ZipFile(bundle_path) as archive:
+        assert required <= set(archive.namelist())
+
+
+def test_canonical_bundle_members_match_source_hashes() -> None:
+    bundle_path = ensure_bundle_archive()
+    members = {
+        "acp.py",
+        "acp_distribution.py",
+        "host_bridge.py",
+        "codex_app_server_adapter.py",
+        "claude_code_cli_adapter.py",
+        "install_from_bundle.py",
+        "update_from_release.py",
+        "DISTRIBUTION.json",
+        "VERSION",
+        "requirements.txt",
+        "skills/acp-session-coordinator/SKILL.md",
+    }
+
+    with ZipFile(bundle_path) as archive:
+        for member in members:
+            source = (REPO_ROOT / "ACP_AGENT" / member).read_bytes()
+            bundled = archive.read(member)
+            assert hashlib.sha256(bundled).digest() == hashlib.sha256(source).digest()
 
 
 def test_project_and_bundle_session_coordinator_skills_are_synchronized() -> None:

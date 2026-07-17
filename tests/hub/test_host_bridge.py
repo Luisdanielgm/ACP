@@ -32,6 +32,20 @@ from host_bridge import (  # noqa: E402
 import host_bridge as host_bridge_module  # noqa: E402
 
 
+def test_default_registry_loads_all_declared_host_adapters() -> None:
+    registry = host_bridge_module.default_registry()
+    manifests = {manifest.adapter_id: set(manifest.capabilities) for manifest in registry.manifests()}
+
+    assert set(manifests) == {
+        "opencode_server",
+        "kilo_serve",
+        "codex_app_server",
+        "claude_code_cli",
+    }
+    assert {"existing-session", "http-delivery"} <= manifests["opencode_server"]
+    assert {"existing-session", "cli-resume"} <= manifests["claude_code_cli"]
+
+
 def _response(message_id: str = "msg-1", *, session_id: str = "session-1") -> dict[str, Any]:
     return {
         "status": "message",

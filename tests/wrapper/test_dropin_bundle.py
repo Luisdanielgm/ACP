@@ -306,6 +306,7 @@ def test_dropin_installer_main_works_in_place_without_prompting_for_optional_tok
     assert (target / "requirements.txt").exists()
     bundle_info = json.loads((target / "BUNDLE_INFO.json").read_text(encoding="utf-8"))
     assert bundle_info["installed_version"] == Path("ACP_AGENT/VERSION").read_text(encoding="utf-8").strip()
+    assert bundle_info["release_date"] == "2026-07-17"
     assert bundle_info["installed_at"]
 
 
@@ -920,6 +921,10 @@ def test_update_from_release_replaces_core_files_and_preserves_runtime_state(tmp
     (target / "agents" / "codex-chief.json").write_text('{"agent_name":"codex-chief"}\n', encoding="utf-8")
     (target / "inbox").mkdir()
     (target / "inbox" / "keep.txt").write_text("preserve\n", encoding="utf-8")
+    (target / "outbox").mkdir()
+    (target / "outbox" / "keep.txt").write_text("preserve\n", encoding="utf-8")
+    (target / "sent").mkdir()
+    (target / "sent" / "keep.txt").write_text("preserve\n", encoding="utf-8")
 
     release_dir = tmp_path / "release"
     release_dir.mkdir()
@@ -957,6 +962,8 @@ def test_update_from_release_replaces_core_files_and_preserves_runtime_state(tmp
     assert bundle_info["release_date"] == "2026-03-07"
     assert (target / "agents" / "codex-chief.json").exists()
     assert (target / "inbox" / "keep.txt").read_text(encoding="utf-8") == "preserve\n"
+    assert (target / "outbox" / "keep.txt").read_text(encoding="utf-8") == "preserve\n"
+    assert (target / "sent" / "keep.txt").read_text(encoding="utf-8") == "preserve\n"
 
 
 def test_update_check_reports_policy_status(tmp_path: Path) -> None:
