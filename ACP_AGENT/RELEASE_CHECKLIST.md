@@ -3,6 +3,7 @@
 Esta guia es obligatoria cuando cambie cualquiera de estas piezas:
 
 - `ACP_AGENT/acp.py`
+- `ACP_AGENT/host_bridge.py`
 - `ACP_AGENT/update_from_release.py`
 - `ACP_AGENT/install_from_bundle.py`
 - `ACP_AGENT/AGENT.md`

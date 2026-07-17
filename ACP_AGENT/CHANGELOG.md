@@ -1,5 +1,14 @@
 # ACP_AGENT Changelog
 
+## 0.3.17 - 2026-07-16
+
+- EN: Added the portable Host Bridge core with durable delivery state, correlated idempotent replies, and host-neutral manifests, opaque session bindings, results, and adapter registry contracts. Before POST, adapters reconcile the deterministic host message ID against session history so restart after remote acceptance cannot activate the prompt twice.
+- ES: Se agrego el nucleo portable de Host Bridge con estado durable de entregas, respuestas correlacionadas e idempotentes y contratos neutrales de manifest, binding opaco de sesion, resultado y registry de adapters. Antes del POST, los adapters reconcilian el ID determinista contra el historial de la sesion para que un reinicio despues de la aceptacion remota no active dos veces el prompt.
+- EN: Added conformant existing-session HTTP adapters for OpenCode server and Kilo Code `kilo serve`; bindings are explicit, loopback-only in this first slice, and resolve optional Basic credentials by reference without persisting secrets.
+- ES: Se agregaron adapters HTTP conformantes para sesiones existentes de OpenCode server y Kilo Code `kilo serve`; los bindings son explicitos, limitados a loopback en este primer slice y resuelven credenciales Basic opcionales por referencia sin persistir secretos.
+- EN: Fresh drop-in installation now copies the Host Bridge module together with the advertised 0.3.17 runtime.
+- ES: La instalacion drop-in nueva ahora copia el modulo Host Bridge junto con el runtime 0.3.17 anunciado.
+
 ## 0.3.16 - 2026-07-15
 
 - EN: Join-code invitations now require a verified 0.3.16+ client, use shell-neutral one-line commands, and provide guarded official update recovery for old or Git-tracked installs.
