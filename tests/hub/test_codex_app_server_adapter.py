@@ -22,7 +22,9 @@ from host_bridge import (  # noqa: E402
     HostDelivery,
     HostDeliveryError,
     JsonBridgeStore,
+    binding_lock_fingerprint,
 )
+from config_reservation import reserve_config  # noqa: E402
 
 
 THREAD_ID = "019f58d8-b3e2-7570-a416-4d2ee9140e90"
@@ -197,6 +199,44 @@ def test_codex_adapter_ignores_partial_events_until_terminal_completion() -> Non
     assert "turn/interrupt" in [message["method"] for message in connection.sent]
 
 
+def test_codex_bindings_share_endpoint_lock_scope_but_not_delivery_identity() -> None:
+    first = _binding()
+    second = HostBinding(
+        adapter_id="codex_app_server",
+        values={"endpoint": "ws://127.0.0.1:4500", "thread_id": "thread-2"},
+    )
+
+    assert first.fingerprint() != second.fingerprint()
+    assert binding_lock_fingerprint(first, scope="endpoint") == binding_lock_fingerprint(second, scope="endpoint")
+
+
+def test_codex_loopback_aliases_share_endpoint_lock_scope() -> None:
+    first = _binding()
+    second = HostBinding(
+        adapter_id="codex_app_server",
+        values={"endpoint": "ws://localhost:4500", "thread_id": "thread-2"},
+    )
+
+    assert binding_lock_fingerprint(first, scope="endpoint") == binding_lock_fingerprint(second, scope="endpoint")
+
+
+def test_codex_bindings_on_different_endpoints_have_isolated_lock_scope() -> None:
+    first = _binding()
+    second = HostBinding(
+        adapter_id="codex_app_server",
+        values={"endpoint": "ws://127.0.0.1:4501", "thread_id": THREAD_ID},
+    )
+
+    assert binding_lock_fingerprint(first, scope="endpoint") != binding_lock_fingerprint(second, scope="endpoint")
+
+
+def test_shared_codex_endpoint_reservation_rejects_second_bridge(tmp_path: Path) -> None:
+    lock_target = tmp_path / f"{binding_lock_fingerprint(_binding(), scope='endpoint')}.runtime"
+    with reserve_config(lock_target):
+        with pytest.raises(ValueError, match="reserved by another process"):
+            with reserve_config(lock_target):
+                pass
+
 def test_codex_adapter_interrupts_an_accepted_turn_after_protocol_error() -> None:
     connection = FakeCodexConnection(events=["not a Codex protocol message"])
     adapter = CodexAppServerAdapter(request_timeout_seconds=1, connect=FakeConnect(connection))
@@ -237,6 +277,11 @@ def test_codex_retry_without_visible_client_id_fails_closed_without_duplicate_tu
 
     with pytest.raises(HostDeliveryError):
         first.handle(_response(), acknowledge=lambda _: None, reply=lambda *_: None)
+
+    first_record = next(iter(json.loads(state_path.read_text(encoding="utf-8"))["deliveries"].values()))
+    assert first_record["status"] == "received"
+    assert not first_record.get("replied")
+    assert not first_record.get("acked")
 
     retry_connection = FakeCodexConnection(turns=[])
     retry_adapter = CodexAppServerAdapter(request_timeout_seconds=1, connect=FakeConnect(retry_connection))

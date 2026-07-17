@@ -36,7 +36,7 @@ def test_distribution_declares_all_host_bridge_adapters_and_capabilities() -> No
     }
     assert {"existing-session", "http-delivery"} <= declarations["opencode_server"]
     assert {"existing-session", "directory-context"} <= declarations["kilo_serve"]
-    assert {"existing-session", "websocket-delivery", "cancellation"} <= declarations["codex_app_server"]
+    assert {"existing-session", "websocket-delivery", "cancellation", "endpoint-serialized"} <= declarations["codex_app_server"]
     assert {"existing-session", "cli-resume", "fail-closed-retry"} <= declarations["claude_code_cli"]
     registered = {manifest.adapter_id: set(manifest.capabilities) for manifest in default_registry().manifests()}
     assert registered == declarations

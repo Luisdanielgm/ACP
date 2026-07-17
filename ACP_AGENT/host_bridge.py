@@ -99,6 +99,39 @@ class HostBinding:
         return {"adapter_id": self.adapter_id, "binding_fingerprint": self.fingerprint()}
 
 
+def binding_lock_fingerprint(binding: HostBinding, *, scope: str = "binding") -> str:
+    """Return a durable lock key for the host resource being activated.
+
+    Most adapters can run concurrently when their complete binding differs. A
+    host that advertises endpoint serialization, such as Codex app-server,
+    must instead reserve the endpoint independent of its thread/session id.
+    """
+    if scope == "binding":
+        return binding.fingerprint()
+    if scope != "endpoint":
+        raise ValueError("unsupported host binding lock scope")
+    endpoint = binding.values.get("endpoint")
+    if not isinstance(endpoint, str) or not endpoint.strip():
+        raise HostBindingError("endpoint lock scope requires an endpoint")
+    parsed = urllib.parse.urlparse(endpoint.strip())
+    hostname = (parsed.hostname or "").lower()
+    if hostname in {"localhost", "127.0.0.1", "::1"}:
+        hostname = "loopback"
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    authority = f"{hostname}:{port}" if port is not None else hostname
+    normalized = urllib.parse.urlunparse((parsed.scheme.lower(), authority, parsed.path.rstrip("/"), "", "", ""))
+    encoded = json.dumps(
+        {"adapter_id": binding.adapter_id, "endpoint": normalized},
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 @dataclass(frozen=True)
 class HostDelivery:
     message_id: str

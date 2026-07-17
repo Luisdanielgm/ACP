@@ -20,7 +20,7 @@ class HostAdapterDeclaration:
 _DEFAULT_HOST_ADAPTERS = (
     HostAdapterDeclaration("opencode_server", ("existing-session", "http-delivery", "correlated-result")),
     HostAdapterDeclaration("kilo_serve", ("existing-session", "http-delivery", "correlated-result", "directory-context")),
-    HostAdapterDeclaration("codex_app_server", ("existing-session", "websocket-delivery", "client-message-correlation", "streaming-terminal-result", "cancellation")),
+    HostAdapterDeclaration("codex_app_server", ("existing-session", "websocket-delivery", "client-message-correlation", "streaming-terminal-result", "cancellation", "endpoint-serialized")),
     HostAdapterDeclaration("claude_code_cli", ("existing-session", "cli-resume", "streaming-terminal-result", "cancellation", "fail-closed-retry")),
 )
 

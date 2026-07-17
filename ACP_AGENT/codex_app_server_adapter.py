@@ -35,6 +35,7 @@ class CodexAppServerAdapter:
             "client-message-correlation",
             "streaming-terminal-result",
             "cancellation",
+            "endpoint-serialized",
         ),
     )
 

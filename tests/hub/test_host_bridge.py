@@ -44,6 +44,7 @@ def test_default_registry_loads_all_declared_host_adapters() -> None:
     }
     assert {"existing-session", "http-delivery"} <= manifests["opencode_server"]
     assert {"existing-session", "cli-resume"} <= manifests["claude_code_cli"]
+    assert {"endpoint-serialized"} <= manifests["codex_app_server"]
 
 
 def _response(message_id: str = "msg-1", *, session_id: str = "session-1") -> dict[str, Any]:

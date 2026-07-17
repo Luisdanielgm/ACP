@@ -577,6 +577,55 @@ def test_codex_profile_uses_explicit_thread_id_without_cwd_override(tmp_path: Pa
     }
 
 
+def test_codex_profiles_share_endpoint_reservation_across_threads(tmp_path: Path) -> None:
+    (tmp_path / "first").mkdir()
+    (tmp_path / "second").mkdir()
+    first_config = _write_config(
+        tmp_path / "first",
+        host_bridge_adapter_id="codex_app_server",
+        host_bridge_endpoint="ws://127.0.0.1:4500",
+        host_bridge_thread_id="thread-one",
+        host_bridge_session_id=None,
+    )
+    second_config = _write_config(
+        tmp_path / "second",
+        host_bridge_adapter_id="codex_app_server",
+        host_bridge_endpoint="ws://127.0.0.1:4500",
+        host_bridge_thread_id="thread-two",
+        host_bridge_session_id=None,
+    )
+
+    first = acp_cli.resolve_host_bridge_profile(_args(first_config))
+    second = acp_cli.resolve_host_bridge_profile(_args(second_config))
+
+    assert first["binding"].fingerprint() != second["binding"].fingerprint()
+    assert first["lock_target"] == second["lock_target"]
+
+
+def test_codex_profiles_on_different_endpoints_have_isolated_reservations(tmp_path: Path) -> None:
+    (tmp_path / "first").mkdir()
+    (tmp_path / "second").mkdir()
+    first_config = _write_config(
+        tmp_path / "first",
+        host_bridge_adapter_id="codex_app_server",
+        host_bridge_endpoint="ws://127.0.0.1:4500",
+        host_bridge_thread_id="thread-one",
+        host_bridge_session_id=None,
+    )
+    second_config = _write_config(
+        tmp_path / "second",
+        host_bridge_adapter_id="codex_app_server",
+        host_bridge_endpoint="ws://127.0.0.1:4501",
+        host_bridge_thread_id="thread-two",
+        host_bridge_session_id=None,
+    )
+
+    first = acp_cli.resolve_host_bridge_profile(_args(first_config))
+    second = acp_cli.resolve_host_bridge_profile(_args(second_config))
+
+    assert first["lock_target"] != second["lock_target"]
+
+
 def test_codex_bearer_credential_is_resolved_only_from_env(monkeypatch: Any) -> None:
     monkeypatch.setenv("CODEX_APP_SERVER_CREDENTIAL", json.dumps({"bearer_token": "test-bearer"}))
 

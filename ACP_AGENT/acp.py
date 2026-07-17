@@ -50,6 +50,7 @@ from host_bridge import (
     HostDeliveryError,
     HostResult,
     JsonBridgeStore,
+    binding_lock_fingerprint,
     default_registry,
 )
 
@@ -4518,10 +4519,6 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
     if isinstance(credential_ref, str):
         values["credential_ref"] = credential_ref
     binding = HostBinding(adapter_id=adapter_id, values=values)
-    lock_target = (
-        ACP_ROOT / "inbox" / "host_bridge_locks" / f"{binding.fingerprint()}.runtime"
-    ).resolve()
-
     wait_arg = getattr(args, "wait_timeout_seconds", None)
     wait_value = wait_arg if wait_arg is not None else get_config_value(config, "host_bridge_wait_timeout_seconds")
     wait_timeout = float(wait_value if wait_value is not None else 120.0)
@@ -4549,7 +4546,11 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
         request_timeout_seconds=host_timeout,
         credential_resolver=_host_bridge_credential,
     )
-    registry.get(adapter_id)
+    adapter = registry.get(adapter_id)
+    lock_scope = "endpoint" if "endpoint-serialized" in adapter.manifest.capabilities else "binding"
+    lock_target = (
+        ACP_ROOT / "inbox" / "host_bridge_locks" / f"{binding_lock_fingerprint(binding, scope=lock_scope)}.runtime"
+    ).resolve()
     return {
         "settings": settings,
         "binding": binding,

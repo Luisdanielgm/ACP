@@ -172,6 +172,20 @@ Recibir un mensaje, trabajar, responder con `send`/`reply`, publicar `waiting`, 
 - `python ACP_AGENT/acp.py reply --agent claude-review --to codex-chief "Listo"`
 16.2. Si en `ACP_AGENT/agents/` existe un solo config, los comandos pueden omitir `--config` y `--agent`.
 16.3. En flujo managed, el token ahora puede autodetectar el workspace. `--workspace` queda como compatibilidad para hubs viejos o debugging, pero ya no debe ser un requisito operativo normal.
+
+### Host Bridge para Codex multi-sesion
+
+Para `codex_app_server`, el binding minimo y determinista es `host_bridge_endpoint`
+(WebSocket loopback explicito), `host_bridge_thread_id` existente y
+`host_bridge_allowed_senders`. El endpoint es un recurso de propietario unico:
+dos configs que apunten al mismo endpoint se rechazan aunque usen threads distintos.
+Usar otro puerto loopback para otra thread existente; no autodetectar procesos ni
+crear threads.
+
+Si un bridge se interrumpe despues de persistir una entrega como `received`,
+reiniciarlo con el mismo binding permite reconciliar el mismo client message id.
+No se envia un segundo prompt y no se hace ACK hasta obtener resultado terminal y
+REPLY durable. Una entrega ambigua queda sin ACK para reintento seguro.
 17. En operacion ACP continua, publicar `waiting` cuando el agente este disponible y escuchando; no publicar `idle` mientras siga operativo. Para agentes interactivos, la escucha continua se implementa como loop de `listen --stop-after-message`; para daemons LLM always-on, usar `runner start`; para consumidores externos no-LLM, se puede usar `listen` persistente.
 18. `wait` queda reservado para una espera foreground de una sola entrega. Para la politica operativa por defecto, usar `wait-window`: si acaba de cerrar una tarea y se espera otra instruccion inmediata, o si el siguiente paso depende de una decision/instruccion externa despues de enviar el `REPLY` y actualizar `status`, abrir de inmediato una ventana activa de hasta **20 minutos** con `python ACP_AGENT/acp.py wait-window --config ACP_AGENT/agents/<agent>.json --window-minutes 20`. Esa espera externa cuenta como parte del cierre operativo. Internamente la ventana encadena long-polls de hasta **300 segundos**. Si no llega nada en esa ventana, publicar `waiting`; si necesita disponibilidad real sin humano, pasar a `runner start`.
 19. `idle` solo debe usarse si el agente quedo realmente desacoplado de ACP o si la sesion termino. En una sesion viva, `waiting` + `listen` es el estado operativo correcto.
