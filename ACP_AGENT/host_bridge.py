@@ -660,6 +660,7 @@ def _host_delivery(message: Mapping[str, Any]) -> HostDelivery:
     task_id: str | None = None
     instructions: str | None = None
     reply_to: str | None = None
+    correlation_id: str | None = None
     if isinstance(payload, str):
         try:
             parsed = json.loads(payload)
@@ -676,6 +677,10 @@ def _host_delivery(message: Mapping[str, Any]) -> HostDelivery:
                 and isinstance(parsed.get("original_sender"), str)
             ):
                 reply_to = parsed["original_sender"].strip() or None
+                correlation_id = parsed["original_message_id"].strip() or None
+                preserved_payload = parsed.get("original_payload")
+                if isinstance(preserved_payload, str) and preserved_payload:
+                    instructions = f"{instructions}\n\nOriginal {parsed['original_action']} payload:\n{preserved_payload}"
         elif payload.strip():
             instructions = payload.strip()
     if instructions is None:
@@ -683,7 +688,7 @@ def _host_delivery(message: Mapping[str, Any]) -> HostDelivery:
     message_id = str(message["id"])
     return HostDelivery(
         message_id=message_id,
-        correlation_id=message_id,
+        correlation_id=correlation_id or message_id,
         sender=str(message["from"]),
         instructions=instructions,
         task_id=task_id,

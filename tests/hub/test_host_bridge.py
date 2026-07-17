@@ -74,7 +74,9 @@ def test_task_wakeup_envelope_is_accepted_by_task_only_host_bridge() -> None:
     message, _delivery = host_bridge_module._validated_envelope(response, ("reply-collector",))
     delivery = host_bridge_module._host_delivery(message)
     assert delivery.instructions.startswith("Handle this collected response")
+    assert "Original REPLY payload:\nresult" in delivery.instructions
     assert delivery.reply_to == "wiki-bridge"
+    assert delivery.correlation_id == "reply-1"
     assert json.loads(message["payload"])["original_message_id"] == "reply-1"
 
 

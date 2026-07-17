@@ -205,3 +205,13 @@ def test_task_wakeup_malformed_source_fails_closed(tmp_path: Path) -> None:
             forward=lambda _payload: pytest.fail("must not forward"),
             acknowledge=lambda _delivery: pytest.fail("must not ack"),
         )
+
+
+def test_task_wakeup_oversized_payload_stays_retryable(tmp_path: Path) -> None:
+    collector = collector_module.ReplyCollector(
+        forward_to="coordinator", allowed_senders=("worker",), store=RecordingStore(), state_path=tmp_path / "collector.json", forward_action="TASK"
+    )
+    response = _response()
+    response["message"]["payload"] = "x" * 32_700
+    with pytest.raises(collector_module.CollectorDeliveryError, match="size limit"):
+        collector.handle(response, forward=lambda _payload: pytest.fail("must not forward"), acknowledge=lambda _delivery: pytest.fail("must not ack"))

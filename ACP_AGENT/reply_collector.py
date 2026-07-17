@@ -12,6 +12,9 @@ class CollectorDeliveryError(RuntimeError):
     """Raised when a response cannot be safely forwarded and acknowledged."""
 
 
+MAX_ACP_PAYLOAD_BYTES = 32_768
+
+
 class CollectorStore(Protocol):
     def get(self, key: str) -> dict[str, Any]: ...
     def put(self, key: str, record: Mapping[str, Any]) -> None: ...
@@ -97,6 +100,8 @@ class ReplyCollector:
                 sort_keys=True,
                 separators=(",", ":"),
             )
+            if len(forward_payload.encode("utf-8")) > MAX_ACP_PAYLOAD_BYTES:
+                raise CollectorDeliveryError("TASK wake payload exceeds ACP size limit; message remains retryable")
         payload = {
             "id": forwarded_id,
             "session_id": message.get("session_id"),
