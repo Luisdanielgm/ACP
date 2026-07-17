@@ -174,20 +174,20 @@
               />
               <!-- Domain role line (from the member's real name): glyph + label -->
               <g v-if="node.domainLabel" class="node-domain" :style="{ '--dom-accent': node.accent }">
-                <path :d="node.domainGlyph" :transform="`translate(${node.domIconX}, ${node.domY - 9}) scale(0.46)`" />
-                <text :x="node.domTextX" :y="node.domY" :text-anchor="node.label.anchor">{{ node.domainLabel }}</text>
+                <path :d="node.domainGlyph" :transform="`translate(${node.domIconX}, ${node.domY - 9}) scale(${0.46 * node.labelScale})`" />
+                <text :x="node.domTextX" :y="node.domY" :text-anchor="node.label.anchor" :font-size="9.5 * node.labelScale">{{ node.domainLabel }}</text>
               </g>
-              <text class="node-label" :x="node.label.nameX" :y="node.label.nameY" :text-anchor="node.label.anchor">
+              <text class="node-label" :x="node.label.nameX" :y="node.label.nameY" :text-anchor="node.label.anchor" :font-size="15 * node.labelScale">
                 <tspan :x="node.label.nameX" dy="0">{{ node.nameLines[0] }}</tspan>
-                <tspan v-if="node.nameLines[1]" :x="node.label.nameX" dy="14">{{ node.nameLines[1] }}</tspan>
+                <tspan v-if="node.nameLines[1]" :x="node.label.nameX" :dy="14 * node.labelScale">{{ node.nameLines[1] }}</tspan>
               </text>
-              <g class="node-state" :class="node.stateTone" :transform="`translate(${node.label.subX}, ${node.label.subY})`">
+              <g class="node-state" :class="node.stateTone" :transform="`translate(${node.label.subX}, ${node.label.subY}) scale(${node.labelScale})`">
                 <rect :x="node.statePillX" y="-11" :width="node.statePillW" height="16" rx="8" />
                 <text x="0" y="1" :text-anchor="node.label.anchor">{{ node.stateLabel }}</text>
               </g>
               <g class="node-hb">
-                <image :href="node.hbIconUrl" :x="node.hbIconX" :y="node.hbY - 14" width="18" height="18" />
-                <text :x="node.hbTextX" :y="node.hbY" :text-anchor="node.label.anchor">{{ node.hbLabel }}</text>
+                <image :href="node.hbIconUrl" :x="node.hbIconX" :y="node.hbY - 14 * node.labelScale" :width="18 * node.labelScale" :height="18 * node.labelScale" />
+                <text :x="node.hbTextX" :y="node.hbY" :text-anchor="node.label.anchor" :font-size="11.5 * node.labelScale">{{ node.hbLabel }}</text>
               </g>
               <g v-if="node.showQueue" class="node-queue">
                 <rect class="node-queue-track" :x="node.queueX" :y="node.queueY" :width="node.queueW" height="5" rx="2.5" />
@@ -622,6 +622,7 @@ interface MapNode {
   crownScale: number
   label: NodeLabel
   nameLines: string[]
+  labelScale: number
   stateLabel: string
   stateTone: string
   statePillW: number
@@ -745,7 +746,10 @@ const graph = computed(() => {
   // LARGE nodes (so it fills the card instead of two lost dots), a full room
   // gets the wide orbit. `scale` multiplies every node metric.
   const crowd = others.length
-  const scale = crowd <= 2 ? 1.5 : crowd <= 4 ? 1.22 : 1
+  // The ladder keeps shrinking as the room grows: label fonts follow via
+  // labelScale so a 10-agent room reorganizes instead of colliding.
+  const scale = crowd <= 2 ? 1.5 : crowd <= 4 ? 1.22 : crowd <= 6 ? 1 : crowd <= 9 ? 0.86 : 0.74
+  const labelScale = Math.min(1, scale)
   // Mid-wire message orb: large enough to READ (mockup-sized), scales with the room.
   const orbSize = Math.round(36 * scale)
   const ringRadius = crowd ? Math.max(190, Math.min(320, 130 + crowd * 24)) : 0
@@ -1078,7 +1082,10 @@ const graph = computed(() => {
     // Heartbeat line: pulse-level icon + last-seen age ("hace 10s").
     const hbLabel = timeAgo(m.last_seen_at || m.joined_at, locale.value)
     const hbTextW = hbLabel.length * 5.6
-    const hbY = subY + 21
+    // Top-zone labels live ABOVE the node, so `subY + 21` would land the
+    // heartbeat INSIDE the shell (over the presence badge). Those nodes get
+    // their pulse line under the shell instead, like every other node.
+    const hbY = isTopZone ? shellR + 20 : subY + 21
     let hbIconX: number
     let hbTextX: number
     if (lbl.anchor === 'start') {
@@ -1130,6 +1137,7 @@ const graph = computed(() => {
       crownScale: scale,
       label: { ...lbl, nameY, subY },
       nameLines,
+      labelScale,
       stateLabel,
       stateTone: opState.tone,
       statePillW,
