@@ -681,6 +681,12 @@ def _host_delivery(message: Mapping[str, Any]) -> HostDelivery:
                 preserved_payload = parsed.get("original_payload")
                 if isinstance(preserved_payload, str) and preserved_payload:
                     instructions = f"{instructions}\n\nOriginal {parsed['original_action']} payload:\n{preserved_payload}"
+                    try:
+                        preserved_json = json.loads(preserved_payload)
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        preserved_json = None
+                    if isinstance(preserved_json, dict) and isinstance(preserved_json.get("task_id"), str):
+                        task_id = preserved_json["task_id"].strip() or task_id
         elif payload.strip():
             instructions = payload.strip()
     if instructions is None:
