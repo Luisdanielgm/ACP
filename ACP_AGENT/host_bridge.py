@@ -121,8 +121,9 @@ class HostResult:
 
 @dataclass(frozen=True)
 class HostCredential:
-    username: str
-    password: str
+    username: str | None = None
+    password: str | None = None
+    bearer_token: str | None = None
 
 
 class HostAdapter(Protocol):
@@ -246,6 +247,13 @@ class _HttpSessionAdapter:
             except Exception:
                 raise HostBindingError("host credential reference cannot be resolved") from None
             if credential is None:
+                raise HostBindingError("host credential reference cannot be resolved")
+            if (
+                not isinstance(credential.username, str)
+                or not credential.username
+                or not isinstance(credential.password, str)
+                or not credential.password
+            ):
                 raise HostBindingError("host credential reference cannot be resolved")
             raw = f"{credential.username}:{credential.password}".encode()
             headers["Authorization"] = f"Basic {base64.b64encode(raw).decode()}"
@@ -404,16 +412,23 @@ class HostBridge:
         if duplicate:
             result = HostResult(outcome=str(record["outcome"]), summary=str(record["summary"]))
         else:
-            record = {
-                "status": "received",
-                "message_id": host_delivery.message_id,
-                "correlation_id": host_delivery.correlation_id,
-                "sender": host_delivery.sender,
-                "binding": binding_descriptor,
-            }
-            self.store.put(key, record)
+            retrying = bool(record)
+            if not retrying:
+                record = {
+                    "status": "received",
+                    "message_id": host_delivery.message_id,
+                    "correlation_id": host_delivery.correlation_id,
+                    "sender": host_delivery.sender,
+                    "binding": binding_descriptor,
+                }
+                self.store.put(key, record)
             try:
-                result = adapter.deliver(self.binding, host_delivery)
+                reconcile = getattr(adapter, "reconcile", None)
+                result = (
+                    reconcile(self.binding, host_delivery)
+                    if retrying and callable(reconcile)
+                    else adapter.deliver(self.binding, host_delivery)
+                )
             except (HostBindingError, HostDeliveryError):
                 record["last_error"] = "host delivery was not accepted"
                 self.store.put(key, record)
@@ -449,6 +464,15 @@ def default_registry(
     )
     registry.register(
         KiloServeAdapter(
+            request_timeout_seconds=request_timeout_seconds,
+            deadline_monotonic=deadline_monotonic,
+            credential_resolver=credential_resolver,
+        )
+    )
+    from codex_app_server_adapter import CodexAppServerAdapter
+
+    registry.register(
+        CodexAppServerAdapter(
             request_timeout_seconds=request_timeout_seconds,
             deadline_monotonic=deadline_monotonic,
             credential_resolver=credential_resolver,

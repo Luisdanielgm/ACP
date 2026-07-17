@@ -1,5 +1,14 @@
 # ACP_AGENT Changelog
 
+## 0.3.19 - 2026-07-17
+
+- EN: Added the portable `codex_app_server` Host Bridge adapter for an explicit existing Codex thread over a loopback WebSocket, using the official initialize, thread/resume, turn/start, item/completed, turn/completed, and turn/interrupt protocol.
+- ES: Se agrego el adapter portable `codex_app_server` de Host Bridge para un thread Codex existente y explicito por WebSocket loopback, usando el protocolo oficial initialize, thread/resume, turn/start, item/completed, turn/completed y turn/interrupt.
+- EN: Codex deliveries correlate through `clientUserMessageId`; retries recover a visible correlated turn or fail closed without a second turn because app-server does not promise idempotent turn/start. Internal events and credential values are never persisted in the bridge ledger.
+- ES: Las entregas Codex se correlacionan mediante `clientUserMessageId`; los reintentos recuperan un turno correlacionado visible o fallan de forma cerrada sin crear un segundo turno porque app-server no promete idempotencia de turn/start. Los eventos internos y valores de credenciales nunca se persisten en el ledger.
+- EN: A read-only local smoke proved that app-server 0.144.5 can list, read, and resume an existing Codex Desktop task with the same thread id and zero turn/start calls; live Desktop activation remains intentionally untested in this release.
+- ES: Un smoke local read-only probo que app-server 0.144.5 puede listar, leer y reanudar una tarea existente de Codex Desktop con el mismo thread id y cero llamadas turn/start; la activacion real de Desktop permanece intencionalmente sin probar en esta release.
+
 ## 0.3.18 - 2026-07-17
 
 - EN: Added explicit `host-bridge start|once` commands that lease ACP TASK messages without an idle provider/model, deliver one at a time to a bound OpenCode or Kilo session, send an idempotent correlated REPLY, and ACK only after Hub-confirmed durable progress.

@@ -534,6 +534,58 @@ def test_host_bridge_cli_exposes_explicit_safe_binding_options() -> None:
     assert args.credential_ref == "env:KILO_HOST_CREDENTIAL"
 
 
+def test_host_bridge_cli_accepts_explicit_codex_app_server_thread_binding() -> None:
+    parser = acp_cli.build_parser()
+    args = parser.parse_args(
+        [
+            "host-bridge",
+            "once",
+            "--config",
+            "ACP_AGENT/agents/bridge.json",
+            "--adapter-id",
+            "codex_app_server",
+            "--endpoint",
+            "ws://127.0.0.1:4500",
+            "--host-thread-id",
+            "thread-existing",
+            "--credential-ref",
+            "env:CODEX_APP_SERVER_CREDENTIAL",
+            "--allow-sender",
+            "chief",
+        ]
+    )
+
+    assert args.adapter_id == "codex_app_server"
+    assert args.host_session_id == "thread-existing"
+
+
+def test_codex_profile_uses_explicit_thread_id_without_cwd_override(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        host_bridge_adapter_id="codex_app_server",
+        host_bridge_endpoint="ws://127.0.0.1:4500",
+        host_bridge_thread_id="thread-existing",
+        host_bridge_session_id=None,
+    )
+    profile = acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+    assert profile["binding"].adapter_id == "codex_app_server"
+    assert dict(profile["binding"].values) == {
+        "endpoint": "ws://127.0.0.1:4500",
+        "thread_id": "thread-existing",
+    }
+
+
+def test_codex_bearer_credential_is_resolved_only_from_env(monkeypatch: Any) -> None:
+    monkeypatch.setenv("CODEX_APP_SERVER_CREDENTIAL", json.dumps({"bearer_token": "test-bearer"}))
+
+    credential = acp_cli._host_bridge_credential("env:CODEX_APP_SERVER_CREDENTIAL")
+
+    assert credential is not None
+    assert credential.bearer_token == "test-bearer"
+    assert credential.username is None
+
+
 def test_literal_credential_is_rejected_before_wait(tmp_path: Path, monkeypatch: Any) -> None:
     config_path = _write_config(tmp_path, host_bridge_credential_ref="literal-password")
     hub = FakeHub([])

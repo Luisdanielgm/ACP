@@ -569,7 +569,7 @@ def test_malformed_non_list_history_fails_before_post(fake_host: Any) -> None:
         instructions="Inspect",
     )
     state["malformed_history_message_id"] = delivery.host_message_id()
-    adapter = OpenCodeServerAdapter(request_timeout_seconds=0.01)
+    adapter = OpenCodeServerAdapter(request_timeout_seconds=1)
     binding = HostBinding(
         adapter_id=adapter.manifest.adapter_id,
         values={"endpoint": endpoint, "session_id": "malformed-history"},
@@ -735,6 +735,29 @@ def test_credential_resolver_error_is_sanitized() -> None:
         )
 
     assert secret not in str(error.value)
+
+
+def test_http_adapter_rejects_bearer_only_credential_without_request(fake_host: Any) -> None:
+    endpoint, state = fake_host
+    adapter = OpenCodeServerAdapter(
+        credential_resolver=lambda _ref: HostCredential(bearer_token="bearer-only")
+    )
+    binding = HostBinding(
+        adapter_id="opencode_server",
+        values={
+            "endpoint": endpoint,
+            "session_id": "existing-session",
+            "credential_ref": "local-host",
+        },
+    )
+
+    with pytest.raises(HostBindingError, match="credential reference"):
+        adapter.deliver(
+            binding,
+            HostDelivery(message_id="msg-1", correlation_id="msg-1", sender="chief", instructions="Inspect"),
+        )
+
+    assert state["requests"] == []
 
 
 def test_non_loopback_endpoint_fails_closed_without_ack(tmp_path: Path) -> None:

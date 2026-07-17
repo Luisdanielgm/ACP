@@ -845,9 +845,9 @@ def build_parser() -> argparse.ArgumentParser:
     for bridge_parser in (host_bridge_start_parser, host_bridge_once_parser):
         bridge_parser.add_argument("--config", default=None, help="JSON config path for the ACP member")
         bridge_parser.add_argument("--agent", default=None, help="Agent name/config stem")
-        bridge_parser.add_argument("--adapter-id", choices=("opencode_server", "kilo_serve"), default=None, help="Existing-session host adapter")
-        bridge_parser.add_argument("--endpoint", default=None, help="Explicit loopback HTTP endpoint for the existing host")
-        bridge_parser.add_argument("--host-session-id", default=None, help="Existing OpenCode/Kilo host session id")
+        bridge_parser.add_argument("--adapter-id", choices=("opencode_server", "kilo_serve", "codex_app_server"), default=None, help="Existing-session host adapter")
+        bridge_parser.add_argument("--endpoint", default=None, help="Explicit loopback endpoint for the existing host")
+        bridge_parser.add_argument("--host-session-id", "--host-thread-id", dest="host_session_id", default=None, help="Existing host session or Codex thread id")
         bridge_parser.add_argument("--directory", default=None, help="Optional host directory context")
         bridge_parser.add_argument("--credential-ref", default=None, help="Optional env:NAME reference to a JSON Basic credential")
         bridge_parser.add_argument("--allow-sender", dest="bridge_allowed_senders", action="append", default=None, help="Trusted TASK sender; repeat for multiple senders")
@@ -4439,9 +4439,16 @@ def _host_bridge_credential(reference: str) -> HostCredential | None:
         raise HostBindingError("host bridge credential reference cannot be resolved") from None
     username = payload.get("username") if isinstance(payload, dict) else None
     password = payload.get("password") if isinstance(payload, dict) else None
-    if not isinstance(username, str) or not username or not isinstance(password, str) or not password:
+    bearer_token = payload.get("bearer_token") if isinstance(payload, dict) else None
+    basic_valid = isinstance(username, str) and bool(username) and isinstance(password, str) and bool(password)
+    bearer_valid = isinstance(bearer_token, str) and bool(bearer_token)
+    if basic_valid == bearer_valid:
         raise HostBindingError("host bridge credential reference cannot be resolved")
-    return HostCredential(username=username, password=password)
+    return (
+        HostCredential(username=username, password=password)
+        if basic_valid
+        else HostCredential(bearer_token=bearer_token)
+    )
 
 
 def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
@@ -4454,11 +4461,19 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
     host_session_arg = getattr(args, "host_session_id", None)
     adapter_id = adapter_arg if adapter_arg is not None else get_config_value(config, "host_bridge_adapter_id")
     endpoint = endpoint_arg if endpoint_arg is not None else get_config_value(config, "host_bridge_endpoint")
-    host_session_id = (
-        host_session_arg if host_session_arg is not None else get_config_value(config, "host_bridge_session_id")
+    if not isinstance(adapter_id, str) or adapter_id not in {
+        "opencode_server",
+        "kilo_serve",
+        "codex_app_server",
+    }:
+        raise HostBindingError(
+            "host bridge adapter_id must be opencode_server, kilo_serve, or codex_app_server"
+        )
+    configured_host_id = get_config_value(
+        config,
+        "host_bridge_thread_id" if adapter_id == "codex_app_server" else "host_bridge_session_id",
     )
-    if not isinstance(adapter_id, str) or adapter_id not in {"opencode_server", "kilo_serve"}:
-        raise HostBindingError("host bridge adapter_id must be opencode_server or kilo_serve")
+    host_session_id = host_session_arg if host_session_arg is not None else configured_host_id
     if not isinstance(endpoint, str) or not endpoint.strip():
         raise HostBindingError("host bridge endpoint is required")
     if not isinstance(host_session_id, str) or not host_session_id.strip():
@@ -4473,6 +4488,8 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
     directory = getattr(args, "directory", None)
     if directory is None:
         directory = get_config_value(config, "host_bridge_directory")
+    if adapter_id == "codex_app_server" and isinstance(directory, str) and directory.strip():
+        raise HostBindingError("codex_app_server does not accept directory/cwd overrides")
     credential_ref = getattr(args, "credential_ref", None)
     if credential_ref is None:
         credential_ref = get_config_value(config, "host_bridge_credential_ref")
@@ -4481,7 +4498,8 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
     ):
         raise HostBindingError("host bridge credential_ref must use env:NAME")
 
-    values = {"endpoint": endpoint.strip(), "session_id": host_session_id.strip()}
+    id_key = "thread_id" if adapter_id == "codex_app_server" else "session_id"
+    values = {"endpoint": endpoint.strip(), id_key: host_session_id.strip()}
     if isinstance(directory, str) and directory.strip():
         values["directory"] = directory.strip()
     if isinstance(credential_ref, str):

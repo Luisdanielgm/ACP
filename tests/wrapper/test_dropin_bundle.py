@@ -24,6 +24,7 @@ def _copy_bundle_runtime_files(source: Path, target: Path) -> None:
     for name in (
         "acp.py",
         "host_bridge.py",
+        "codex_app_server_adapter.py",
         "config_reservation.py",
         "acp_distribution.py",
         "DISTRIBUTION.json",
@@ -55,6 +56,7 @@ def test_dropin_bundle_tracks_runtime_and_skill_sources() -> None:
     assert "websockets" in requirements
     assert Path("ACP_AGENT/update_from_release.py").exists()
     assert Path("ACP_AGENT/host_bridge.py").exists()
+    assert Path("ACP_AGENT/codex_app_server_adapter.py").exists()
     assert Path("ACP_AGENT/acp_distribution.py").exists()
     assert Path("ACP_AGENT/VERSION").read_text(encoding="utf-8").strip()
     assert "0.3.0" in Path("ACP_AGENT/CHANGELOG.md").read_text(encoding="utf-8")
@@ -70,6 +72,7 @@ def test_dropin_bundle_tracks_runtime_and_skill_sources() -> None:
     assert "connect --role auto" in bundle_skill
     assert "listen --stop-after-message --timeout-seconds 300" in bundle_skill
     assert "runner start" in bundle_skill
+    assert "host_bridge_thread_id" in bundle_skill
     if skill_source_path.exists():
         assert bundle_skill == skill_source_path.read_text(encoding="utf-8")
 
@@ -132,6 +135,7 @@ def test_dropin_installer_creates_skill_and_agent_folder(tmp_path: Path) -> None
     assert acp_path == acp_root
     assert (acp_path / "acp.py").exists()
     assert (acp_path / "host_bridge.py").exists()
+    assert (acp_path / "codex_app_server_adapter.py").exists()
     assert (acp_path / "acp_distribution.py").exists()
     assert (acp_path / "DISTRIBUTION.json").exists()
     assert (acp_path / "VERSION").exists()
