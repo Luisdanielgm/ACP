@@ -116,3 +116,92 @@ def test_mismatched_lease_fails_closed(tmp_path: Path) -> None:
     response["delivery"]["message_id"] = "other-message"
     with pytest.raises(collector_module.CollectorDeliveryError):
         collector.handle(response, forward=lambda _payload: pytest.fail("must not forward"), acknowledge=lambda _delivery: pytest.fail("must not ack"))
+
+
+@pytest.mark.parametrize("action", ["REPLY", "INFO"])
+def test_task_wakeup_wraps_collectable_message_without_losing_traceability(
+    tmp_path: Path, action: str
+) -> None:
+    collector = collector_module.ReplyCollector(
+        forward_to="coordinator",
+        allowed_senders=("worker",),
+        store=RecordingStore(),
+        state_path=tmp_path / "collector.json",
+        forward_action="TASK",
+    )
+    forwarded: list[dict[str, Any]] = []
+
+    result = collector.handle(
+        _response(action),
+        forward=lambda payload: forwarded.append(payload)
+        or {"status": "queued", "message_id": payload["id"]},
+        acknowledge=lambda delivery: {
+            "status": "acknowledged",
+            "message_id": delivery["message_id"],
+        },
+    )
+
+    wrapper = forwarded[0]
+    wrapped_payload = json.loads(wrapper["payload"])
+    assert result["status"] == "completed"
+    assert wrapper["action"] == "TASK"
+    assert wrapper["in_reply_to"] == "msg-1"
+    assert wrapped_payload["instructions"]
+    assert wrapped_payload["original_action"] == action
+    assert wrapped_payload["original_message_id"] == "msg-1"
+    assert wrapped_payload["original_payload"] == _response(action)["message"]["payload"]
+    assert wrapped_payload["original_sender"] == "worker"
+
+
+def test_task_wakeup_retry_is_deterministic_and_waits_for_acceptance_before_ack(
+    tmp_path: Path,
+) -> None:
+    collector = collector_module.ReplyCollector(
+        forward_to="coordinator",
+        allowed_senders=("worker",),
+        store=RecordingStore(),
+        state_path=tmp_path / "collector.json",
+        forward_action="TASK",
+    )
+    forwarded: list[dict[str, Any]] = []
+    acknowledgements: list[dict[str, Any]] = []
+
+    with pytest.raises(collector_module.CollectorDeliveryError, match="durably accepted"):
+        collector.handle(
+            _response(),
+            forward=lambda payload: forwarded.append(payload)
+            or {"status": "queued", "message_id": "wrong-wrapper-id"},
+            acknowledge=lambda delivery: acknowledgements.append(delivery),
+        )
+    assert acknowledgements == []
+
+    result = collector.handle(
+        _response(),
+        forward=lambda payload: forwarded.append(payload)
+        or {"status": "duplicate", "message_id": payload["id"]},
+        acknowledge=lambda delivery: acknowledgements.append(delivery)
+        or {"status": "acknowledged", "message_id": delivery["message_id"]},
+    )
+
+    assert result["status"] == "completed"
+    assert forwarded[0] == forwarded[1]
+    assert len(acknowledgements) == 1
+
+
+def test_task_wakeup_malformed_source_fails_closed(tmp_path: Path) -> None:
+    collector = collector_module.ReplyCollector(
+        forward_to="coordinator",
+        allowed_senders=("worker",),
+        store=RecordingStore(),
+        state_path=tmp_path / "collector.json",
+        forward_action="TASK",
+    )
+    response = _response()
+    response["message"]["payload"] = None
+
+    with pytest.raises(collector_module.CollectorDeliveryError, match="payload"):
+        collector.handle(
+            response,
+            forward=lambda _payload: pytest.fail("must not forward"),
+            acknowledge=lambda _delivery: pytest.fail("must not ack"),
+        )

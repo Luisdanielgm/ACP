@@ -139,6 +139,7 @@ class HostDelivery:
     sender: str
     instructions: str
     task_id: str | None = None
+    reply_to: str | None = None
 
     def host_message_id(self) -> str:
         digest = hashlib.sha256(self.message_id.encode()).hexdigest()[:24]
@@ -658,6 +659,7 @@ def _host_delivery(message: Mapping[str, Any]) -> HostDelivery:
     payload = message.get("payload")
     task_id: str | None = None
     instructions: str | None = None
+    reply_to: str | None = None
     if isinstance(payload, str):
         try:
             parsed = json.loads(payload)
@@ -668,6 +670,12 @@ def _host_delivery(message: Mapping[str, Any]) -> HostDelivery:
                 task_id = parsed["task_id"].strip() or None
             if isinstance(parsed.get("instructions"), str):
                 instructions = parsed["instructions"].strip() or None
+            if (
+                parsed.get("original_action") in {"REPLY", "INFO"}
+                and isinstance(parsed.get("original_message_id"), str)
+                and isinstance(parsed.get("original_sender"), str)
+            ):
+                reply_to = parsed["original_sender"].strip() or None
         elif payload.strip():
             instructions = payload.strip()
     if instructions is None:
@@ -679,4 +687,5 @@ def _host_delivery(message: Mapping[str, Any]) -> HostDelivery:
         sender=str(message["from"]),
         instructions=instructions,
         task_id=task_id,
+        reply_to=reply_to,
     )

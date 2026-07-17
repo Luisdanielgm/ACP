@@ -875,6 +875,7 @@ def build_parser() -> argparse.ArgumentParser:
         collector_command_parser.add_argument("--forward-to", default=None, help="Coordinator member that receives forwarded REPLY/INFO")
         collector_command_parser.add_argument("--allow-sender", action="append", dest="collector_allowed_senders", default=None, help="Trusted worker sender; repeat as needed")
         collector_command_parser.add_argument("--state-path", default=None, help="Durable collector ledger/state path")
+        collector_command_parser.add_argument("--forward-action", choices=("TASK",), default=None, help="Wrap REPLY/INFO as traceable TASK for a TASK-only coordinator")
         collector_command_parser.add_argument("--wait-timeout-seconds", type=float, default=30.0)
         collector_command_parser.add_argument("--retry-delay-seconds", type=float, default=2.0)
 
@@ -4708,7 +4709,7 @@ def _host_bridge_reply(
             "session_id": settings.session_id,
             "agent_name": settings.agent_name,
             "member_token": settings.member_token,
-            "to": delivery.sender,
+            "to": delivery.reply_to or delivery.sender,
             "action": "REPLY",
             "payload": build_reply_payload(
                 task_id=delivery.task_id,
@@ -4828,6 +4829,9 @@ def resolve_reply_collector_profile(args: argparse.Namespace) -> dict[str, Any]:
     if not allowed:
         raise ValueError("reply-collector requires at least one trusted sender")
     raw_state = getattr(args, "state_path", None) or get_config_value(config, "reply_collector_state_path")
+    forward_action = getattr(args, "forward_action", None) or get_config_value(config, "reply_collector_forward_action")
+    if forward_action is not None and str(forward_action).upper() != "TASK":
+        raise ValueError("reply-collector forward_action must be TASK when configured")
     state_path = resolve_config_path(settings.base_dir, raw_state)
     if state_path is None:
         state_path = (ACP_ROOT / "inbox" / safe_name(settings.agent_name) / "reply_collector_state.json").resolve()
@@ -4841,6 +4845,7 @@ def resolve_reply_collector_profile(args: argparse.Namespace) -> dict[str, Any]:
         "allowed_senders": allowed,
         "state_path": state_path,
         "ledger_path": state_path.with_name(state_path.stem + ".ledger.json"),
+        "forward_action": str(forward_action).upper() if forward_action is not None else None,
         "wait_timeout_seconds": wait_timeout,
         "retry_delay_seconds": retry_delay,
     }
@@ -4876,6 +4881,7 @@ def _reply_collector_once(profile: dict[str, Any]) -> dict[str, Any]:
         store=JsonBridgeStore(profile["ledger_path"]),
         state_path=profile["state_path"],
         collector_id=settings.agent_name,
+        forward_action=profile["forward_action"],
     )
     delivery = response.get("delivery") if isinstance(response.get("delivery"), dict) else {}
     def forward(payload: dict[str, Any]) -> Mapping[str, Any]:

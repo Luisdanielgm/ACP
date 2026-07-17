@@ -604,4 +604,13 @@ comandos/endpoint explícitos):
 python ACP_AGENT/acp.py host-supervisor once --config ACP_AGENT/agents/supervisor.json
 python ACP_AGENT/acp.py host-supervisor start --config ACP_AGENT/agents/supervisor.json
 python ACP_AGENT/acp.py host-supervisor stop --config ACP_AGENT/agents/supervisor.json
+python ACP_AGENT/acp.py reply-collector start --config ACP_AGENT/agents/coordinator-reply-collector.json --forward-action TASK
 ```
+
+`--forward-action TASK` es obligatorio cuando el destino es un Host Bridge
+coordinador filtrado a TASK: encapsula la acción original y su trazabilidad en
+el payload, evitando que REPLY/INFO queden fuera del wait. El collector debe
+usar una identidad ACP distinta de la identidad TASK-only, y esa identidad debe
+figurar en `host_bridge_allowed_senders` del coordinador. La respuesta del
+coordinador vuelve al `original_sender` del envelope para no crear un loop en el
+collector.

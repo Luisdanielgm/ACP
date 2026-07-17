@@ -47,6 +47,37 @@ def test_default_registry_loads_all_declared_host_adapters() -> None:
     assert {"endpoint-serialized"} <= manifests["codex_app_server"]
 
 
+def test_task_wakeup_envelope_is_accepted_by_task_only_host_bridge() -> None:
+    payload = json.dumps(
+        {
+            "instructions": "Handle this collected response using the preserved source metadata.",
+            "original_action": "REPLY",
+            "original_message_id": "reply-1",
+            "original_payload": "result",
+            "original_sender": "wiki-bridge",
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    response = {
+        "status": "message",
+        "message": {
+            "id": "wake-1",
+            "session_id": "session-1",
+            "from": "reply-collector",
+            "to": "coordinator",
+            "action": "TASK",
+            "payload": payload,
+        },
+        "delivery": {"ack_required": True, "message_id": "wake-1", "receipt_handle": "receipt-1"},
+    }
+    message, _delivery = host_bridge_module._validated_envelope(response, ("reply-collector",))
+    delivery = host_bridge_module._host_delivery(message)
+    assert delivery.instructions.startswith("Handle this collected response")
+    assert delivery.reply_to == "wiki-bridge"
+    assert json.loads(message["payload"])["original_message_id"] == "reply-1"
+
+
 def _response(message_id: str = "msg-1", *, session_id: str = "session-1") -> dict[str, Any]:
     return {
         "status": "message",

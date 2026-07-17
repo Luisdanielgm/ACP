@@ -32,14 +32,18 @@ class ReplyCollector:
         store: CollectorStore,
         state_path: Path,
         collector_id: str = "reply-collector",
+        forward_action: str | None = None,
     ) -> None:
         if not forward_to or not collector_id:
             raise ValueError("forward target and collector identity are required")
+        if forward_action is not None and forward_action.upper() != "TASK":
+            raise ValueError("forward_action must be TASK when configured")
         self.forward_to = forward_to
         self.allowed_senders = frozenset(allowed_senders)
         self.store = store
         self.state_path = Path(state_path)
         self.collector_id = collector_id
+        self.forward_action = forward_action.upper() if forward_action is not None else None
 
     def handle(
         self,
@@ -68,20 +72,38 @@ class ReplyCollector:
             raise CollectorDeliveryError("sender or message id is not authorized")
         if action not in {"REPLY", "INFO"}:
             raise CollectorDeliveryError("action is not collectable")
+        original_payload = message.get("payload")
+        if self.forward_action == "TASK" and not isinstance(original_payload, str):
+            raise CollectorDeliveryError("collectable message payload is malformed")
 
         prior = self.store.get(message_id)
         if prior.get("status") == "acked":
             return {"status": "duplicate", "message_id": message_id}
         received = {"status": "received", "message_id": message_id, "action": action, "sender": sender}
         self.store.put(message_id, received)
-        forwarded_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"acp-reply:{message_id}:{self.forward_to}"))
+        id_namespace = "acp-reply-task-wakeup" if self.forward_action == "TASK" else "acp-reply"
+        forwarded_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{id_namespace}:{message_id}:{self.forward_to}"))
+        forward_action = self.forward_action or action
+        forward_payload = original_payload
+        if self.forward_action == "TASK":
+            forward_payload = json.dumps(
+                {
+                    "instructions": "Handle this collected response using the preserved source metadata.",
+                    "original_action": action,
+                    "original_message_id": message_id,
+                    "original_payload": original_payload,
+                    "original_sender": sender,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
         payload = {
             "id": forwarded_id,
             "session_id": message.get("session_id"),
             "from": self.collector_id,
             "to": self.forward_to,
-            "action": action,
-            "payload": message.get("payload"),
+            "action": forward_action,
+            "payload": forward_payload,
             "in_reply_to": message_id,
         }
         accepted = forward(payload)
