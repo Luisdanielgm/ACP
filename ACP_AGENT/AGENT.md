@@ -580,3 +580,28 @@ Si el usuario no define nombres exactos:
 
 No pedir al humano que copie archivos manualmente dentro de otra carpeta.
 `ACP_AGENT/` ya es la carpeta operativa. El agente debe usarla directamente.
+
+## Host Bridge y supervisor
+
+`host-bridge` espera únicamente `TASK`, permanece en idle sin invocar modelos y
+despierta al recibir una entrega válida. Cada binding debe tener endpoint y
+session/thread existente explícitos; no hay autodiscovery ni creación de sesiones.
+El `reply-collector` es un miembro ACP separado: recibe `REPLY`/`INFO`, los
+reenvía de forma durable al coordinador y recién después confirma el mensaje.
+No puede compartir identidad con un Host Bridge TASK-only porque el Hub permite
+un solo wait activo por miembro.
+
+El supervisor portable se inicia explícitamente por comando y sólo administra
+los procesos declarados; hace health checks no destructivos, conserva PID/estado
+y detiene árboles limpiamente. No sobrevive un reinicio de Windows hasta que el
+humano vuelva a iniciar el comando; todavía no instala Task Scheduler ni un
+servicio del sistema.
+
+Comandos operativos (requieren un JSON local con `host_supervisor_bridges` y
+comandos/endpoint explícitos):
+
+```powershell
+python ACP_AGENT/acp.py host-supervisor once --config ACP_AGENT/agents/supervisor.json
+python ACP_AGENT/acp.py host-supervisor start --config ACP_AGENT/agents/supervisor.json
+python ACP_AGENT/acp.py host-supervisor stop --config ACP_AGENT/agents/supervisor.json
+```

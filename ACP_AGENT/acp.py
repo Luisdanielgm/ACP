@@ -20,7 +20,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 ACP_ROOT = Path(__file__).resolve().parent
@@ -28,6 +28,9 @@ if str(ACP_ROOT) not in sys.path:
     sys.path.insert(0, str(ACP_ROOT))
 
 import websockets
+
+from reply_collector import CollectorDeliveryError, ReplyCollector, next_wait_action
+from host_bridge_supervisor import BridgeSpec, HostBridgeSupervisor, SupervisorPaths
 from runner_support import (
     build_reply_payload,
     execute_provider,
@@ -858,6 +861,31 @@ def build_parser() -> argparse.ArgumentParser:
         bridge_parser.add_argument("--host-timeout-seconds", type=float, default=None, help="Host completion timeout")
         bridge_parser.add_argument("--retry-delay-seconds", type=float, default=None, help="Delay after a safe unacknowledged delivery failure")
         bridge_parser.add_argument("--wait-action", choices=("TASK",), default=None, help="Server-side wait filter (TASK only; unmatched messages remain queued)")
+
+    collector_parser = subparsers.add_parser(
+        "reply-collector",
+        help="Durably forward REPLY/INFO to a coordinator without invoking a provider",
+    )
+    collector_subparsers = collector_parser.add_subparsers(dest="reply_collector_command", required=True)
+    collector_start_parser = collector_subparsers.add_parser("start", help="Wait continuously for REPLY/INFO")
+    collector_once_parser = collector_subparsers.add_parser("once", help="Wait for at most one REPLY/INFO")
+    for collector_command_parser in (collector_start_parser, collector_once_parser):
+        collector_command_parser.add_argument("--config", default=None, help="JSON config path for the collector member")
+        collector_command_parser.add_argument("--agent", default=None, help="Collector member name/config stem")
+        collector_command_parser.add_argument("--forward-to", default=None, help="Coordinator member that receives forwarded REPLY/INFO")
+        collector_command_parser.add_argument("--allow-sender", action="append", dest="collector_allowed_senders", default=None, help="Trusted worker sender; repeat as needed")
+        collector_command_parser.add_argument("--state-path", default=None, help="Durable collector ledger/state path")
+        collector_command_parser.add_argument("--wait-timeout-seconds", type=float, default=30.0)
+        collector_command_parser.add_argument("--retry-delay-seconds", type=float, default=2.0)
+
+    supervisor_parser = subparsers.add_parser(
+        "host-supervisor",
+        help="Reconcile explicitly declared Host Bridge processes without installing a system service",
+    )
+    supervisor_parser.add_argument("action", choices=("start", "once", "status", "stop"))
+    supervisor_parser.add_argument("--config", required=True, help="JSON supervisor config with host_supervisor_bridges")
+    supervisor_parser.add_argument("--state-dir", default=None, help="Directory for PID/state/log files")
+    supervisor_parser.add_argument("--max-cycles", type=int, default=None, help="Bound start for tests/operations")
 
     runner_parser = subparsers.add_parser("runner", help="Run a headless ACP runner backed by a local provider")
     runner_subparsers = runner_parser.add_subparsers(dest="runner_command", required=True)
@@ -4785,6 +4813,180 @@ def host_bridge_start(args: argparse.Namespace, *, max_cycles: int | None = None
         return _stop_host_bridge(profile, cycles)
 
 
+def resolve_reply_collector_profile(args: argparse.Namespace) -> dict[str, Any]:
+    settings = resolve_hub_agent_settings(args)
+    if settings.session_id is None or settings.member_token is None:
+        raise ValueError("reply-collector requires session_id and member_token in the selected ACP config")
+    config = settings.config
+    forward_to = getattr(args, "forward_to", None) or get_config_value(config, "reply_collector_forward_to")
+    if not isinstance(forward_to, str) or not forward_to.strip() or forward_to.strip() == settings.agent_name:
+        raise ValueError("reply-collector requires a distinct forward_to coordinator member")
+    raw_allowed = getattr(args, "collector_allowed_senders", None)
+    if raw_allowed is None:
+        raw_allowed = get_config_value(config, "reply_collector_allowed_senders")
+    allowed = tuple(_runner_allowed_senders(raw_allowed))
+    if not allowed:
+        raise ValueError("reply-collector requires at least one trusted sender")
+    raw_state = getattr(args, "state_path", None) or get_config_value(config, "reply_collector_state_path")
+    state_path = resolve_config_path(settings.base_dir, raw_state)
+    if state_path is None:
+        state_path = (ACP_ROOT / "inbox" / safe_name(settings.agent_name) / "reply_collector_state.json").resolve()
+    wait_timeout = float(getattr(args, "wait_timeout_seconds", 30.0) or 30.0)
+    retry_delay = float(getattr(args, "retry_delay_seconds", 2.0) or 2.0)
+    if wait_timeout <= 0 or wait_timeout > 300 or retry_delay <= 0:
+        raise ValueError("reply-collector timeout and retry delay must be positive (timeout <= 300)")
+    return {
+        "settings": settings,
+        "forward_to": forward_to.strip(),
+        "allowed_senders": allowed,
+        "state_path": state_path,
+        "ledger_path": state_path.with_name(state_path.stem + ".ledger.json"),
+        "wait_timeout_seconds": wait_timeout,
+        "retry_delay_seconds": retry_delay,
+    }
+
+
+def _reply_collector_wait(profile: dict[str, Any]) -> dict[str, Any]:
+    settings: HubAgentSettings = profile["settings"]
+    action = next_wait_action(profile["state_path"])
+    return post_json(
+        hub_http=settings.hub_http,
+        route="/sessions/wait",
+        payload={
+            "session_id": settings.session_id,
+            "agent_name": settings.agent_name,
+            "member_token": settings.member_token,
+            "timeout_seconds": profile["wait_timeout_seconds"],
+            "ack_mode": "explicit",
+            "lease_seconds": HOST_BRIDGE_DELIVERY_LEASE_SECONDS,
+            "action": action,
+        },
+        token=settings.token,
+    )
+
+
+def _reply_collector_once(profile: dict[str, Any]) -> dict[str, Any]:
+    settings: HubAgentSettings = profile["settings"]
+    response = _reply_collector_wait(profile)
+    if response.get("status") != "message":
+        return {"status": response.get("status", "idle")}
+    collector = ReplyCollector(
+        forward_to=profile["forward_to"],
+        allowed_senders=profile["allowed_senders"],
+        store=JsonBridgeStore(profile["ledger_path"]),
+        state_path=profile["state_path"],
+        collector_id=settings.agent_name,
+    )
+    delivery = response.get("delivery") if isinstance(response.get("delivery"), dict) else {}
+    def forward(payload: dict[str, Any]) -> Mapping[str, Any]:
+        sent = post_json(
+            hub_http=settings.hub_http,
+            route="/sessions/send",
+            payload={
+                "id": payload["id"],
+                "session_id": settings.session_id,
+                "agent_name": settings.agent_name,
+                "member_token": settings.member_token,
+                "to": payload["to"],
+                "action": payload["action"],
+                "payload": payload.get("payload"),
+                "in_reply_to": payload.get("in_reply_to"),
+            },
+            token=settings.token,
+        )
+        return {"status": sent.get("delivery", ""), "message_id": sent.get("message_id")}
+    def acknowledge(_delivery: dict[str, Any]) -> Any:
+        return post_json(
+            hub_http=settings.hub_http,
+            route="/sessions/ack",
+            payload={
+                "session_id": settings.session_id,
+                "agent_name": settings.agent_name,
+                "member_token": settings.member_token,
+                "message_id": delivery.get("message_id"),
+                "receipt_handle": delivery.get("receipt_handle"),
+            },
+            token=settings.token,
+        )
+    return collector.handle(response, forward=forward, acknowledge=acknowledge)
+
+
+def reply_collector_once(args: argparse.Namespace) -> dict[str, Any]:
+    return _reply_collector_once(resolve_reply_collector_profile(args))
+
+
+def reply_collector_start(args: argparse.Namespace, *, max_cycles: int | None = None) -> dict[str, Any]:
+    profile = resolve_reply_collector_profile(args)
+    cycles = 0
+    try:
+        while True:
+            try:
+                result = _reply_collector_once(profile)
+            except (CollectorDeliveryError, ValueError, OSError) as exc:
+                emit_json_line({"status": "reply_collector_retry", "detail": str(exc), "acked": False})
+                time.sleep(profile["retry_delay_seconds"])
+                result = {"status": "retry"}
+            cycles += 1
+            if max_cycles is not None and cycles >= max_cycles:
+                return {"status": result.get("status", "idle"), "cycles": cycles}
+    except KeyboardInterrupt:
+        return {"status": "stopped", "reason": "interrupted", "cycles": cycles}
+
+
+def _supervisor_specs(config_path: Path) -> tuple[dict[str, Any], ...]:
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("host-supervisor config is unreadable") from exc
+    raw = config.get("host_supervisor_bridges") if isinstance(config, dict) else None
+    if not isinstance(raw, list) or not raw or not all(isinstance(item, dict) for item in raw):
+        raise ValueError("host-supervisor requires non-empty host_supervisor_bridges")
+    return tuple(raw)
+
+
+def host_supervisor_command(args: argparse.Namespace) -> dict[str, Any]:
+    config_path = Path(args.config).expanduser().resolve()
+    raw_specs = _supervisor_specs(config_path)
+    state_dir = Path(args.state_dir).expanduser().resolve() if args.state_dir else (config_path.parent / "supervisor").resolve()
+    supervisors: list[HostBridgeSupervisor] = []
+    for item in raw_specs:
+        command = item.get("command")
+        if not isinstance(command, list):
+            raise ValueError("host-supervisor commands must be explicit arrays")
+        spec = BridgeSpec(
+            name=str(item.get("name") or ""),
+            command=tuple(str(part) for part in command),
+            cwd=Path(item["cwd"]).expanduser().resolve() if item.get("cwd") else None,
+            endpoint=str(item["endpoint"]) if item.get("endpoint") else None,
+            health_url=str(item["health_url"]) if item.get("health_url") else None,
+            restart_limit=int(item.get("restart_limit", 3)),
+            backoff_seconds=float(item.get("backoff_seconds", 1.0)),
+            health_timeout_seconds=float(item.get("health_timeout_seconds", 2.0)),
+        )
+        supervisors.append(HostBridgeSupervisor(spec, SupervisorPaths.for_bridge(state_dir, spec.name)))
+    action = args.action
+    if action == "status":
+        result = []
+        for supervisor in supervisors:
+            try:
+                state = json.loads(supervisor.paths.state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                state = {"status": "stopped"}
+            if not isinstance(state, dict):
+                state = {"status": "stopped"}
+            result.append({"name": supervisor.spec.name, **state})
+        return {"status": "ok", "bridges": result}
+    if action == "stop":
+        return {"status": "stopped", "bridges": [supervisor.stop() for supervisor in supervisors]}
+    cycles = 0
+    while True:
+        bridges = [supervisor.reconcile() for supervisor in supervisors]
+        cycles += 1
+        if action == "once" or (args.max_cycles is not None and cycles >= args.max_cycles):
+            return {"status": "ok", "cycles": cycles, "bridges": bridges}
+        time.sleep(1.0)
+
+
 def _runner_allowed_senders(value: Any) -> list[str]:
     raw_items = value if isinstance(value, list) else [value]
     senders: list[str] = []
@@ -6411,6 +6613,10 @@ def main(argv: list[str] | None = None) -> int:
             resolve_runner_profile(args)
         elif args.command == "host-bridge":
             resolve_host_bridge_profile(args)
+        elif args.command == "reply-collector":
+            resolve_reply_collector_profile(args)
+        elif args.command == "host-supervisor":
+            _supervisor_specs(Path(args.config).expanduser().resolve())
         elif args.command == "chief":
             resolve_hub_agent_settings(args)
         elif args.command in {"create-session", "join-session", "start", "join", "managed-start", "managed-join", "onboard", "connect", "coordinate", "attach-session", "wait", "cancel-wait", "wait-window", "listen", "status", "heartbeat", "session-info", "leave-session", "send", "task", "reply"}:
@@ -6571,6 +6777,16 @@ def main(argv: list[str] | None = None) -> int:
             if args.host_bridge_command == "once":
                 print(json.dumps(host_bridge_once(args), ensure_ascii=True))
                 return 0
+        if args.command == "reply-collector":
+            if args.reply_collector_command == "start":
+                print(json.dumps(reply_collector_start(args), ensure_ascii=True))
+                return 0
+            if args.reply_collector_command == "once":
+                print(json.dumps(reply_collector_once(args), ensure_ascii=True))
+                return 0
+        if args.command == "host-supervisor":
+            print(json.dumps(host_supervisor_command(args), ensure_ascii=True))
+            return 0
         if args.command == "runner":
             if args.runner_command == "start":
                 runner_start(args)

@@ -2,19 +2,14 @@
 name: acp-session-coordinator
 description: Coordinate Codex or Claude Code agents through ACP session commands. Use when an agent must create a session, join a session, wait or listen for work, send tasks or replies, update work state, or inspect the current ACP session in the active repository.
 ---
-
 # ACP Session Coordinator
-
 ACP is only the coordination layer. The agent still reasons, edits files, runs
 tools, and verifies work normally. Prefer the canned commands below; do not
 rebuild token/session flows by hand.
-
 All examples are prefixed with `python ACP_AGENT/acp.py`. After a command binds a
 session, later commands auto-load `session_id` and `member_token` from the agent
 config. Add `--agent <name>` only when more than one config exists.
-
 ## 1. Choose the right entrypoint
-
 | Situation | Command |
 | --- | --- |
 | Managed worker, discover room and wait for one message | `coordinate --agent <agent> --agent-token <TOKEN> --hub-http <HUB> --project <project> --capabilities backend,python` |
@@ -23,14 +18,11 @@ config. Add `--agent <name>` only when more than one config exists.
 | Managed session id handed to you | `managed-join --agent <agent> --agent-token <TOKEN> --session-id <ID> --no-listen` |
 | Core session with join code | `join-session --agent <agent> --code <CODE>` |
 | Already have session id + member token | `attach-session --agent <agent> --session-id <ID> --member-token <TOKEN> --no-listen` |
-
 `coordinate` is the 90% worker path: bootstrap/connect/onboard, announce READY,
 publish `waiting`, wait for exactly one message, then exit so the LLM can work.
 `connect` is self-describing: workers run `onboard`; chiefs get the `chief start`
 command or create/resume the managed room.
-
 ## 2. Turn-based worker loop
-
 ```powershell
 python ACP_AGENT/acp.py coordinate --agent worker-1 --agent-token TOKEN --hub-http https://HOST --project PROJECT
 # or, after credentials already exist:
@@ -39,9 +31,7 @@ python ACP_AGENT/acp.py listen --stop-after-message --timeout-seconds 300
 python ACP_AGENT/acp.py reply --to <chief> --task-id t-1 --payload-file ACP_AGENT/outbox/result.json
 python ACP_AGENT/acp.py status --state waiting --text "ready for next task"
 ```
-
 Then run `listen --stop-after-message --timeout-seconds 300` again.
-
 On joining a managed room, read the durable context BEFORE taking work: the
 join response embeds it as `room_context` (wall posts + files); re-check with
 `room-wall list` / `room-files list`, publish decisions via `room-wall post` (§9).
@@ -178,3 +168,7 @@ re-run relevant verification, report the fix with evidence, and publish
 3. Do not use persistent foreground listen in a turn-based LLM agent.
 4. Use `--payload-file` for structured payloads.
 5. Keep ACP for coordination only; code ownership and verification stay with the agent.
+## 11. Resilient host operation
+
+Run `host-bridge start` only with an explicit existing host binding. It waits for `TASK` and consumes no model tokens while idle. Run a separate `reply-collector start` member for `REPLY`/`INFO`; it forwards durably before ACK and must not reuse the TASK-only member identity. The portable supervisor can restart declared bridges after a non-destructive health failure and record PID/state/log paths, but it is not a Windows service and does not survive reboot unless the operator starts it again. Never autodiscover endpoints or sessions.
+Operational supervisor commands: `python ACP_AGENT/acp.py host-supervisor once --config ACP_AGENT/agents/supervisor.json`, then `start`/`stop` with the same explicit config.
