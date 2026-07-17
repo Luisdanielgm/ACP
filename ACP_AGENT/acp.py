@@ -40,11 +40,24 @@ from runner_support import (
 
 from acp_distribution import AgentDistribution, load_distribution
 from config_reservation import ConfigReservation, assert_reservation_owned, reserve_config
+from host_bridge import (
+    HostBinding,
+    HostBindingError,
+    HostBridge,
+    HostCredential,
+    HostDelivery,
+    HostDeliveryError,
+    HostResult,
+    JsonBridgeStore,
+    default_registry,
+)
 
 DEFAULT_BACKOFF = (0.5, 1.0, 2.0, 5.0)
 DEFAULT_POLL_MS = 800
 DEFAULT_LISTEN_TIMEOUT_SECONDS = 300.0
 DEFAULT_DELIVERY_LEASE_SECONDS = 60.0
+HOST_BRIDGE_DELIVERY_LEASE_SECONDS = 300.0
+HOST_BRIDGE_MAX_HOST_TIMEOUT_SECONDS = 240.0
 TRANSIENT_HTTP_STATUS_CODES = {502, 503, 504}
 TRANSIENT_RETRY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
 TRANSIENT_RETRY_SAFE_POST_ROUTES = {
@@ -817,6 +830,27 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser.add_argument("--agent", default=None, help="Agent stem. If omitted, ACP auto-resolves a single config.")
     doctor_parser.add_argument("--hub-http", default=None, help="Override Hub HTTP base URL")
     doctor_parser.add_argument("--token", default=None, help="Optional admin token")
+
+    host_bridge_parser = subparsers.add_parser(
+        "host-bridge",
+        help="Deliver ACP TASK messages to an explicitly bound existing host session without an idle LLM",
+    )
+    host_bridge_subparsers = host_bridge_parser.add_subparsers(dest="host_bridge_command", required=True)
+    host_bridge_start_parser = host_bridge_subparsers.add_parser("start", help="Wait continuously and process one leased TASK at a time")
+    host_bridge_once_parser = host_bridge_subparsers.add_parser("once", help="Wait for and process at most one leased TASK")
+    for bridge_parser in (host_bridge_start_parser, host_bridge_once_parser):
+        bridge_parser.add_argument("--config", default=None, help="JSON config path for the ACP member")
+        bridge_parser.add_argument("--agent", default=None, help="Agent name/config stem")
+        bridge_parser.add_argument("--adapter-id", choices=("opencode_server", "kilo_serve"), default=None, help="Existing-session host adapter")
+        bridge_parser.add_argument("--endpoint", default=None, help="Explicit loopback HTTP endpoint for the existing host")
+        bridge_parser.add_argument("--host-session-id", default=None, help="Existing OpenCode/Kilo host session id")
+        bridge_parser.add_argument("--directory", default=None, help="Optional host directory context")
+        bridge_parser.add_argument("--credential-ref", default=None, help="Optional env:NAME reference to a JSON Basic credential")
+        bridge_parser.add_argument("--allow-sender", dest="bridge_allowed_senders", action="append", default=None, help="Trusted TASK sender; repeat for multiple senders")
+        bridge_parser.add_argument("--state-path", default=None, help="Optional durable Host Bridge ledger path")
+        bridge_parser.add_argument("--wait-timeout-seconds", type=float, default=None, help="Hub long-poll timeout (max 300)")
+        bridge_parser.add_argument("--host-timeout-seconds", type=float, default=None, help="Host completion timeout")
+        bridge_parser.add_argument("--retry-delay-seconds", type=float, default=None, help="Delay after a safe unacknowledged delivery failure")
 
     runner_parser = subparsers.add_parser("runner", help="Run a headless ACP runner backed by a local provider")
     runner_subparsers = runner_parser.add_subparsers(dest="runner_command", required=True)
@@ -4333,6 +4367,238 @@ def dispatch_send(args: argparse.Namespace) -> dict[str, Any]:
     )
 
 
+def _host_bridge_credential(reference: str) -> HostCredential | None:
+    if not re.fullmatch(r"env:[A-Za-z_][A-Za-z0-9_]*", reference):
+        raise HostBindingError("host bridge credential_ref must use env:NAME")
+    raw = os.environ.get(reference[4:])
+    if not isinstance(raw, str) or not raw:
+        raise HostBindingError("host bridge credential reference cannot be resolved")
+    try:
+        payload = json.loads(raw)
+    except (ValueError, json.JSONDecodeError):
+        raise HostBindingError("host bridge credential reference cannot be resolved") from None
+    username = payload.get("username") if isinstance(payload, dict) else None
+    password = payload.get("password") if isinstance(payload, dict) else None
+    if not isinstance(username, str) or not username or not isinstance(password, str) or not password:
+        raise HostBindingError("host bridge credential reference cannot be resolved")
+    return HostCredential(username=username, password=password)
+
+
+def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
+    settings = resolve_hub_agent_settings(args)
+    if settings.session_id is None or settings.member_token is None:
+        raise ValueError("host-bridge requires session_id and member_token in the selected ACP config")
+    config = settings.config
+    adapter_arg = getattr(args, "adapter_id", None)
+    endpoint_arg = getattr(args, "endpoint", None)
+    host_session_arg = getattr(args, "host_session_id", None)
+    adapter_id = adapter_arg if adapter_arg is not None else get_config_value(config, "host_bridge_adapter_id")
+    endpoint = endpoint_arg if endpoint_arg is not None else get_config_value(config, "host_bridge_endpoint")
+    host_session_id = (
+        host_session_arg if host_session_arg is not None else get_config_value(config, "host_bridge_session_id")
+    )
+    if not isinstance(adapter_id, str) or adapter_id not in {"opencode_server", "kilo_serve"}:
+        raise HostBindingError("host bridge adapter_id must be opencode_server or kilo_serve")
+    if not isinstance(endpoint, str) or not endpoint.strip():
+        raise HostBindingError("host bridge endpoint is required")
+    if not isinstance(host_session_id, str) or not host_session_id.strip():
+        raise HostBindingError("host bridge session_id is required")
+
+    allowed_value = getattr(args, "bridge_allowed_senders", None)
+    allowed_senders = _runner_allowed_senders(
+        allowed_value if allowed_value is not None else get_config_value(config, "host_bridge_allowed_senders")
+    )
+    if not allowed_senders:
+        raise HostBindingError("host bridge requires at least one trusted sender")
+    directory = getattr(args, "directory", None)
+    if directory is None:
+        directory = get_config_value(config, "host_bridge_directory")
+    credential_ref = getattr(args, "credential_ref", None)
+    if credential_ref is None:
+        credential_ref = get_config_value(config, "host_bridge_credential_ref")
+    if credential_ref is not None and not (
+        isinstance(credential_ref, str) and re.fullmatch(r"env:[A-Za-z_][A-Za-z0-9_]*", credential_ref)
+    ):
+        raise HostBindingError("host bridge credential_ref must use env:NAME")
+
+    values = {"endpoint": endpoint.strip(), "session_id": host_session_id.strip()}
+    if isinstance(directory, str) and directory.strip():
+        values["directory"] = directory.strip()
+    if isinstance(credential_ref, str):
+        values["credential_ref"] = credential_ref
+    binding = HostBinding(adapter_id=adapter_id, values=values)
+
+    wait_arg = getattr(args, "wait_timeout_seconds", None)
+    wait_value = wait_arg if wait_arg is not None else get_config_value(config, "host_bridge_wait_timeout_seconds")
+    wait_timeout = float(wait_value if wait_value is not None else 120.0)
+    host_arg = getattr(args, "host_timeout_seconds", None)
+    host_value = host_arg if host_arg is not None else get_config_value(config, "host_bridge_host_timeout_seconds")
+    host_timeout = float(host_value if host_value is not None else HOST_BRIDGE_MAX_HOST_TIMEOUT_SECONDS)
+    retry_arg = getattr(args, "retry_delay_seconds", None)
+    retry_value = retry_arg if retry_arg is not None else get_config_value(config, "host_bridge_retry_delay_seconds")
+    retry_delay = float(retry_value if retry_value is not None else 2.0)
+    if wait_timeout <= 0 or wait_timeout > 300:
+        raise ValueError("host bridge wait_timeout_seconds must be between 0 and 300")
+    if host_timeout <= 0 or host_timeout > HOST_BRIDGE_MAX_HOST_TIMEOUT_SECONDS:
+        raise ValueError(
+            f"host bridge host_timeout_seconds must be between 0 and {HOST_BRIDGE_MAX_HOST_TIMEOUT_SECONDS:g}"
+        )
+    if retry_delay <= 0:
+        raise ValueError("host bridge retry_delay_seconds must be > 0")
+
+    state_arg = getattr(args, "state_path", None)
+    raw_state_path = state_arg if state_arg is not None else get_config_value(config, "host_bridge_state_path")
+    state_path = resolve_config_path(settings.base_dir, raw_state_path)
+    if state_path is None:
+        state_path = (ACP_ROOT / "inbox" / safe_name(settings.agent_name) / "host_bridge_state.json").resolve()
+    registry = default_registry(
+        request_timeout_seconds=host_timeout,
+        credential_resolver=_host_bridge_credential,
+    )
+    registry.get(adapter_id)
+    return {
+        "settings": settings,
+        "binding": binding,
+        "allowed_senders": tuple(allowed_senders),
+        "state_path": state_path,
+        "wait_timeout_seconds": wait_timeout,
+        "retry_delay_seconds": retry_delay,
+        "registry": registry,
+    }
+
+
+def _host_bridge_wait(profile: dict[str, Any]) -> dict[str, Any]:
+    settings: HubAgentSettings = profile["settings"]
+    return post_json(
+        hub_http=settings.hub_http,
+        route="/sessions/wait",
+        payload={
+            "session_id": settings.session_id,
+            "agent_name": settings.agent_name,
+            "member_token": settings.member_token,
+            "timeout_seconds": profile["wait_timeout_seconds"],
+            "ack_mode": "explicit",
+            "lease_seconds": HOST_BRIDGE_DELIVERY_LEASE_SECONDS,
+        },
+        token=settings.token,
+    )
+
+
+def _host_bridge_ack(profile: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
+    settings: HubAgentSettings = profile["settings"]
+    delivery = response.get("delivery")
+    if not isinstance(delivery, dict):
+        raise HostDeliveryError("ACP delivery acknowledgment data is missing")
+    acknowledgment = post_json(
+        hub_http=settings.hub_http,
+        route="/sessions/ack",
+        payload={
+            "session_id": settings.session_id,
+            "agent_name": settings.agent_name,
+            "member_token": settings.member_token,
+            "message_id": delivery.get("message_id"),
+            "receipt_handle": delivery.get("receipt_handle"),
+        },
+        token=settings.token,
+    )
+    if acknowledgment.get("status") != "acknowledged" or acknowledgment.get("message_id") != delivery.get("message_id"):
+        raise HostDeliveryError("ACP ack did not confirm the leased message")
+    return acknowledgment
+
+
+def _host_bridge_reply(
+    profile: dict[str, Any],
+    delivery: HostDelivery,
+    result: HostResult,
+    reply_id: str,
+) -> dict[str, Any]:
+    settings: HubAgentSettings = profile["settings"]
+    binding: HostBinding = profile["binding"]
+    sent = post_json(
+        hub_http=settings.hub_http,
+        route="/sessions/send",
+        payload={
+            "id": reply_id,
+            "session_id": settings.session_id,
+            "agent_name": settings.agent_name,
+            "member_token": settings.member_token,
+            "to": delivery.sender,
+            "action": "REPLY",
+            "payload": build_reply_payload(
+                task_id=delivery.task_id,
+                run_id=reply_id,
+                outcome=result.outcome,
+                summary=result.summary,
+                provider=binding.adapter_id,
+                workspace_path=binding.values.get("directory", ""),
+                metadata={"delivery_mode": "host_bridge"},
+            ),
+            "in_reply_to": delivery.correlation_id,
+        },
+        token=settings.token,
+    )
+    if sent.get("message_id") != reply_id or sent.get("delivery") not in {"immediate", "queued", "duplicate"}:
+        raise HostDeliveryError("ACP reply did not confirm the correlated message")
+    return sent
+
+
+def _host_bridge_poll(profile: dict[str, Any]) -> dict[str, Any]:
+    bridge = HostBridge(
+        registry=profile["registry"],
+        binding=profile["binding"],
+        store=JsonBridgeStore(profile["state_path"]),
+        allowed_senders=profile["allowed_senders"],
+    )
+    return bridge.poll_once(
+        receive=lambda: _host_bridge_wait(profile),
+        acknowledge=lambda response: _host_bridge_ack(profile, dict(response)),
+        reply=lambda delivery, result, reply_id: _host_bridge_reply(profile, delivery, result, reply_id),
+    )
+
+
+def _stop_host_bridge(profile: dict[str, Any], cycles: int) -> dict[str, Any]:
+    settings: HubAgentSettings = profile["settings"]
+    try:
+        _cancel_wait_for_settings(settings)
+    except Exception:
+        pass
+    return {"status": "stopped", "reason": "interrupted", "cycles": cycles}
+
+
+def host_bridge_once(args: argparse.Namespace) -> dict[str, Any]:
+    profile = resolve_host_bridge_profile(args)
+    try:
+        return _host_bridge_poll(profile)
+    except KeyboardInterrupt:
+        return _stop_host_bridge(profile, 0)
+
+
+def host_bridge_start(args: argparse.Namespace, *, max_cycles: int | None = None) -> dict[str, Any]:
+    profile = resolve_host_bridge_profile(args)
+    cycles = 0
+    while True:
+        try:
+            try:
+                result = _host_bridge_poll(profile)
+            except HostBindingError:
+                raise
+            except HostDeliveryError as exc:
+                emit_json_line({"status": "host_bridge_retry", "detail": str(exc), "acked": False})
+                time.sleep(profile["retry_delay_seconds"])
+                result = {"status": "retry"}
+            except ValueError as exc:
+                if _is_fatal_session_command_error(str(exc)):
+                    raise
+                emit_json_line({"status": "host_bridge_retry", "detail": str(exc), "acked": False})
+                time.sleep(profile["retry_delay_seconds"])
+                result = {"status": "retry"}
+        except KeyboardInterrupt:
+            return _stop_host_bridge(profile, cycles)
+        cycles += 1
+        if max_cycles is not None and cycles >= max_cycles:
+            return {"status": result.get("status", "idle"), "cycles": cycles}
+
+
 def _runner_allowed_senders(value: Any) -> list[str]:
     raw_items = value if isinstance(value, list) else [value]
     senders: list[str] = []
@@ -5957,6 +6223,8 @@ def main(argv: list[str] | None = None) -> int:
             pass
         elif args.command == "runner":
             resolve_runner_profile(args)
+        elif args.command == "host-bridge":
+            resolve_host_bridge_profile(args)
         elif args.command == "chief":
             resolve_hub_agent_settings(args)
         elif args.command in {"create-session", "join-session", "start", "join", "managed-start", "managed-join", "onboard", "connect", "coordinate", "attach-session", "wait", "cancel-wait", "wait-window", "listen", "status", "heartbeat", "session-info", "leave-session", "send", "task", "reply"}:
@@ -6110,6 +6378,13 @@ def main(argv: list[str] | None = None) -> int:
             result = cmd_doctor(args)
             print(json.dumps(result, ensure_ascii=True))
             return 0 if result.get("status") == "ok" else 1
+        if args.command == "host-bridge":
+            if args.host_bridge_command == "start":
+                print(json.dumps(host_bridge_start(args), ensure_ascii=True))
+                return 0
+            if args.host_bridge_command == "once":
+                print(json.dumps(host_bridge_once(args), ensure_ascii=True))
+                return 0
         if args.command == "runner":
             if args.runner_command == "start":
                 runner_start(args)

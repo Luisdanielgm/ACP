@@ -70,17 +70,16 @@ manual foreground listen loop.
 | Always-on chief | `chief start --config ACP_AGENT/agents/<chief>.json --backlog-dir coord/backlog --provider <provider> --workspace <path>` | A deterministic chief should dispatch file-backed tasks. |
 | One chief tick | `chief once --config ACP_AGENT/agents/<chief>.json --backlog-dir coord/backlog` | CI/debug/manual dispatch. |
 
-Chief tasks are JSON files in `pending/`. Prefer structured fields:
-`task_id`, `instructions`, `required_capabilities`, `acceptance_criteria`,
-`verify_command`, `verify_timeout_seconds`, `max_attempts`.
+Chief tasks in `pending/` should use `task_id`, `instructions`, `required_capabilities`, `acceptance_criteria`, `verify_command`, `verify_timeout_seconds`, and `max_attempts`.
 
-New runners require at least one explicit `--allow-sender`. Their locally
-selected provider and workspace are pinned by default, and `--reply-to` pins
-the response target, so TASK JSON cannot redirect execution or replies. Repeat
-`--allow-sender` for each trusted coordinator. Existing runner configs without
-the security marker fail closed; only pre-0.3.14 configs with persisted runner
-metadata can opt into temporary compatibility with `--legacy-runner-policy`,
-which persists version `0`, until they migrate to the sender allowlist.
+New runners require explicit `--allow-sender`; provider/workspace are pinned by default and `--reply-to` pins the response, so TASK JSON cannot redirect them.
+Repeat `--allow-sender` for trusted coordinators. Pre-0.3.14 runner configs may temporarily use `--legacy-runner-policy` (version `0`) until they migrate.
+
+For an existing OpenCode/Kilo session, use `host-bridge start --config ACP_AGENT/agents/<agent>.json` instead of `runner`.
+Configure `host_bridge_adapter_id`, loopback `host_bridge_endpoint`,
+`host_bridge_session_id`, and `host_bridge_allowed_senders`.
+Optional `host_bridge_credential_ref: "env:NAME"` resolves a JSON `username`/`password` object.
+Never store literal credentials; `host-bridge once` is the bounded smoke/debug mode.
 
 ## 5. Payload safety
 

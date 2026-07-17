@@ -1,5 +1,12 @@
 # ACP_AGENT Changelog
 
+## 0.3.18 - 2026-07-17
+
+- EN: Added explicit `host-bridge start|once` commands that lease ACP TASK messages without an idle provider/model, deliver one at a time to a bound OpenCode or Kilo session, send an idempotent correlated REPLY, and ACK only after Hub-confirmed durable progress.
+- ES: Se agregaron los comandos explicitos `host-bridge start|once`, que reciben TASK de ACP sin proveedor/modelo en espera, entregan de a uno a una sesion OpenCode o Kilo vinculada, envian un REPLY correlacionado e idempotente y confirman ACK solo despues del progreso durable validado por el Hub.
+- EN: Host bindings are explicit and fail closed: loopback endpoint, existing host session id, trusted senders, optional directory, and optional `env:NAME` Basic credential reference; no host autodiscovery or literal credential is supported.
+- ES: Los bindings del host son explicitos y fail-closed: endpoint loopback, id de sesion existente, remitentes confiables, directorio opcional y referencia opcional `env:NAME` a credencial Basic; no se admite autodiscovery ni credencial literal.
+
 ## 0.3.17 - 2026-07-16
 
 - EN: Added the portable Host Bridge core with durable delivery state, correlated idempotent replies, and host-neutral manifests, opaque session bindings, results, and adapter registry contracts. Before POST, adapters reconcile the deterministic host message ID against session history so restart after remote acceptance cannot activate the prompt twice.

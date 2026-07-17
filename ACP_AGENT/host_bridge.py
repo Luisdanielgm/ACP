@@ -311,8 +311,13 @@ class HostBridge:
         acknowledge: Callable[[Mapping[str, Any]], Any],
         reply: Callable[[HostDelivery, HostResult, str], Any],
     ) -> dict[str, Any]:
-        if response.get("status") != "message":
+        if not isinstance(response, Mapping):
+            raise HostDeliveryError("ACP receive returned an invalid response")
+        status = response.get("status")
+        if status == "timeout":
             return {"status": "idle"}
+        if status != "message":
+            raise HostDeliveryError("ACP receive returned an invalid status")
         message, _delivery = _validated_envelope(response, self.allowed_senders)
         host_delivery = _host_delivery(message)
         key = hashlib.sha256(f"{message.get('session_id', '')}:{host_delivery.message_id}".encode()).hexdigest()
@@ -491,10 +496,12 @@ def _validated_envelope(
     if not isinstance(message, dict) or not isinstance(delivery, dict) or delivery.get("ack_required") is not True:
         raise HostDeliveryError("host bridge requires an explicit leased ACP delivery")
     message_id = message.get("id")
+    receipt_handle = delivery.get("receipt_handle")
     if (
         not isinstance(message_id, str)
         or delivery.get("message_id") != message_id
-        or not delivery.get("receipt_handle")
+        or not isinstance(receipt_handle, str)
+        or not receipt_handle.strip()
     ):
         raise HostDeliveryError("ACP delivery identity is invalid")
     if message.get("action") != "TASK" or message.get("from") not in allowed_senders:
