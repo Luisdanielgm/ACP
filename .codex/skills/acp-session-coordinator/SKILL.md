@@ -80,10 +80,7 @@ Codex requires an already-running explicit WebSocket endpoint and existing threa
 Codex app-server endpoints are single-owner resources in Host Bridge: use one explicit endpoint per bridge/thread. Two configs that point to the same endpoint are rejected by the durable endpoint reservation; use a separate loopback port for another existing thread. If a bridge restarts with a `received` delivery, it reconciles the same client message id and never submits a second prompt; it must obtain a terminal result and durable REPLY before ACK.
 Claude Code uses `host_bridge_adapter_id: "claude_code_cli"`, `host_bridge_executable` as an explicit absolute path, and an existing `host_bridge_session_id`. It starts one bounded `claude -p --resume` only after a trusted TASK, so idle ACP waiting has no Claude/model invocation. It resumes persisted Claude Code context but cannot push into an already-running terminal/IDE process; retries fail closed and Claude Desktop/Channels are not supported by this adapter.
 Optional `host_bridge_credential_ref: "env:NAME"` resolves JSON `username`/`password` for OpenCode/Kilo or `bearer_token` for Codex/Claude; host timeout is capped at 240 and shrinks to preserve REPLY/ACK before lease expiry.
-Never store literal credentials or run two bridges for one binding; `host-bridge once` is the bounded smoke/debug mode.
-Host Bridge waits are TASK-only by default: the client sends the server-side `action: TASK` filter, so coordinator
-REPLY/INFO messages remain queued for their intended consumer instead of being leased and retried. Keep the explicit
-override `--wait-action TASK` (or `host_bridge_wait_action: "TASK"`); other values fail closed.
+Never store literal credentials or run two bridges for one binding; `host-bridge once` is the bounded smoke/debug mode. Host Bridge waits default to server-side `action: TASK`; REPLY/INFO remain queued, and only `--wait-action TASK` or `host_bridge_wait_action: "TASK"` is accepted.
 
 ## 5. Payload safety
 
