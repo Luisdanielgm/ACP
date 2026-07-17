@@ -857,6 +857,7 @@ def build_parser() -> argparse.ArgumentParser:
         bridge_parser.add_argument("--wait-timeout-seconds", type=float, default=None, help="Hub long-poll timeout (max 300)")
         bridge_parser.add_argument("--host-timeout-seconds", type=float, default=None, help="Host completion timeout")
         bridge_parser.add_argument("--retry-delay-seconds", type=float, default=None, help="Delay after a safe unacknowledged delivery failure")
+        bridge_parser.add_argument("--wait-action", choices=("TASK",), default=None, help="Server-side wait filter (TASK only; unmatched messages remain queued)")
 
     runner_parser = subparsers.add_parser("runner", help="Run a headless ACP runner backed by a local provider")
     runner_subparsers = runner_parser.add_subparsers(dest="runner_command", required=True)
@@ -4528,6 +4529,11 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
     retry_arg = getattr(args, "retry_delay_seconds", None)
     retry_value = retry_arg if retry_arg is not None else get_config_value(config, "host_bridge_retry_delay_seconds")
     retry_delay = float(retry_value if retry_value is not None else 2.0)
+    wait_action_arg = getattr(args, "wait_action", None)
+    wait_action_value = wait_action_arg if wait_action_arg is not None else get_config_value(config, "host_bridge_wait_action")
+    wait_action = "TASK" if wait_action_value is None else str(wait_action_value).strip().upper()
+    if wait_action != "TASK":
+        raise HostBindingError("host bridge wait_action must be TASK")
     if wait_timeout <= 0 or wait_timeout > 300:
         raise ValueError("host bridge wait_timeout_seconds must be between 0 and 300")
     if host_timeout <= 0 or host_timeout > HOST_BRIDGE_MAX_HOST_TIMEOUT_SECONDS:
@@ -4560,6 +4566,7 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
         "wait_timeout_seconds": wait_timeout,
         "host_timeout_seconds": host_timeout,
         "retry_delay_seconds": retry_delay,
+        "wait_action": wait_action,
         "registry": registry,
     }
 
@@ -4576,6 +4583,7 @@ def _host_bridge_wait(profile: dict[str, Any]) -> dict[str, Any]:
             "timeout_seconds": profile["wait_timeout_seconds"],
             "ack_mode": "explicit",
             "lease_seconds": HOST_BRIDGE_DELIVERY_LEASE_SECONDS,
+            "action": profile["wait_action"],
         },
         token=settings.token,
     )

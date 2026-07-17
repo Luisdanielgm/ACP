@@ -114,6 +114,7 @@ _SESSION_WAIT_OPENAPI_EXTRA = {
                         "timeout_seconds": {"type": "number", "minimum": 0, "maximum": 300, "default": 30},
                         "ack_mode": {"type": "string", "enum": ["auto", "explicit"], "default": "auto"},
                         "lease_seconds": {"type": "number", "minimum": 0.1, "maximum": 300, "default": 30},
+                        "action": {"type": "string", "enum": ["TASK", "REPLY", "INFO"], "description": "Optional server-side action filter; unmatched messages remain queued."},
                     },
                 }
             }
@@ -1238,6 +1239,11 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
             lease_seconds = float(parsed.get("lease_seconds", 30.0))
             if lease_seconds < 0.1 or lease_seconds > 300:
                 raise ValueError("lease_seconds must be between 0.1 and 300.")
+            action = _normalize_optional_string(parsed.get("action"), field="action", max_length=32)
+            if action is not None:
+                action = action.upper()
+            if action not in {None, "TASK", "REPLY", "INFO"}:
+                raise ValueError("action must be TASK, REPLY, or INFO.")
         except ValueError as exc:
             reason = build_error(INVALID_FIELD, field="body", message=str(exc))
             return JSONResponse(status_code=400, content=_safe_error_payload(reason))
@@ -1250,6 +1256,7 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
                 timeout_seconds=timeout_seconds,
                 ack_mode=ack_mode,
                 lease_seconds=lease_seconds,
+                action=action,
             )
         except SessionConflictError as exc:
             details = {

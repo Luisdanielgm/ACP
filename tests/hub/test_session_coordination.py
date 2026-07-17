@@ -769,6 +769,7 @@ def test_session_rest_openapi_documents_request_bodies(api_client: Any) -> None:
     ]
     assert wait_body["content"]["application/json"]["schema"]["properties"]["member_token"]["description"]
     assert wait_body["content"]["application/json"]["schema"]["properties"]["ack_mode"]["enum"] == ["auto", "explicit"]
+    assert wait_body["content"]["application/json"]["schema"]["properties"]["action"]["enum"] == ["TASK", "REPLY", "INFO"]
     assert ack_body["content"]["application/json"]["schema"]["required"] == [
         "session_id",
         "agent_name",
@@ -777,6 +778,52 @@ def test_session_rest_openapi_documents_request_bodies(api_client: Any) -> None:
     ]
     assert join_body["content"]["application/json"]["schema"]["required"] == ["agent_name", "join_code"]
     assert "capabilities" in join_body["content"]["application/json"]["schema"]["properties"]
+
+
+def test_session_wait_action_filter_is_server_side(api_client: Any) -> None:
+    chief = _create_session(api_client, "filter-chief")
+    worker = _join_session(api_client, "filter-worker", chief["join_code"])
+    for action in ("REPLY", "INFO", "TASK"):
+        sent = api_client.post(
+            "/sessions/send",
+            json={
+                "session_id": chief["session_id"],
+                "agent_name": "filter-chief",
+                "member_token": chief["member_token"],
+                "to": "filter-worker",
+                "action": action,
+                "payload": action,
+            },
+        )
+        assert sent.status_code == 200
+
+    task = api_client.post(
+        "/sessions/wait",
+        json={
+            "session_id": chief["session_id"],
+            "agent_name": "filter-worker",
+            "member_token": worker["member_token"],
+            "timeout_seconds": 0.2,
+            "ack_mode": "explicit",
+            "action": "TASK",
+        },
+    )
+    assert task.status_code == 200
+    assert task.json()["message"]["action"] == "TASK"
+
+    reply = api_client.post(
+        "/sessions/wait",
+        json={
+            "session_id": chief["session_id"],
+            "agent_name": "filter-worker",
+            "member_token": worker["member_token"],
+            "timeout_seconds": 0.2,
+            "ack_mode": "explicit",
+            "action": "REPLY",
+        },
+    )
+    assert reply.status_code == 200
+    assert reply.json()["message"]["action"] == "REPLY"
 
 
 def test_session_status_update_requires_member_token(api_client: Any) -> None:
@@ -1304,6 +1351,90 @@ def test_cancelled_wait_does_not_lose_auto_delivered_message() -> None:
         )
         assert redelivered is not None
         assert redelivered["message"]["payload"] == "critical: rotate the credentials"
+
+    asyncio.run(scenario())
+
+
+def test_action_filtered_wait_does_not_consume_reply_or_info(tmp_path) -> None:
+    from acp.hub.coordination_service import SessionCoordinationService
+    from acp.hub.coordination_store import InMemoryCoordinationStore, SqliteCoordinationStore
+    from acp.hub.migrations import apply_sqlite_migrations
+
+    async def scenario(service: SessionCoordinationService) -> None:
+        chief = await service.create_session(owner_agent="chief")
+        worker = await service.join_session(join_code=chief["join_code"], agent_name="worker")
+
+        for action in ("REPLY", "INFO", "TASK"):
+            await service.send_message(
+                session_id=chief["session_id"],
+                agent_name="chief",
+                member_token=chief["member_token"],
+                payload={
+                    "from": "chief",
+                    "to": "worker",
+                    "action": action,
+                    "payload": action,
+                    "id": f"{action.lower()}-1",
+                },
+            )
+
+        delivered = await service.wait_for_message(
+            session_id=chief["session_id"],
+            agent_name="worker",
+            member_token=worker["member_token"],
+            timeout_seconds=0.2,
+            ack_mode="explicit",
+            action="TASK",
+        )
+        assert delivered is not None
+        assert delivered["message"]["action"] == "TASK"
+
+        # The filtered wait leased TASK only; REPLY remains available to a
+        # consumer that explicitly asks for it.
+        reply = await service.wait_for_message(
+            session_id=chief["session_id"],
+            agent_name="worker",
+            member_token=worker["member_token"],
+            timeout_seconds=0.2,
+            ack_mode="explicit",
+            action="REPLY",
+        )
+        assert reply is not None
+        assert reply["message"]["action"] == "REPLY"
+
+    apply_sqlite_migrations(sqlite_path=tmp_path / "action-filter.sqlite3")
+    for store in (InMemoryCoordinationStore(), SqliteCoordinationStore(sqlite_path=tmp_path / "action-filter.sqlite3")):
+        asyncio.run(scenario(SessionCoordinationService(store=store)))
+
+
+def test_task_filtered_wait_ignores_info_wall_wake() -> None:
+    from acp.hub.coordination_service import SessionCoordinationService
+
+    async def scenario() -> None:
+        service = SessionCoordinationService()
+        chief = await service.create_session(owner_agent="wall-chief")
+        worker = await service.join_session(join_code=chief["join_code"], agent_name="wall-worker")
+        wait_task = asyncio.create_task(
+            service.wait_for_message(
+                session_id=chief["session_id"],
+                agent_name="wall-worker",
+                member_token=worker["member_token"],
+                timeout_seconds=0.5,
+                ack_mode="explicit",
+                action="TASK",
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert (await service.notify_wall_post(session_id=chief["session_id"], author_name="wall-chief", preview="info"))["woken"] == []
+        await service.send_message(
+            session_id=chief["session_id"],
+            agent_name="wall-chief",
+            member_token=chief["member_token"],
+            payload={"from": "wall-chief", "to": "wall-worker", "action": "TASK", "payload": "work", "id": "wall-task"},
+        )
+        delivered = await wait_task
+        assert delivered is not None
+        assert delivered["message"]["action"] == "TASK"
 
     asyncio.run(scenario())
 

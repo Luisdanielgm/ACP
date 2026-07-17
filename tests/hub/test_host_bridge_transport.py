@@ -155,6 +155,7 @@ def _args(config_path: Path, *, command: str = "once") -> argparse.Namespace:
         wait_timeout_seconds=None,
         host_timeout_seconds=None,
         retry_delay_seconds=None,
+        wait_action=None,
     )
 
 
@@ -177,6 +178,31 @@ def test_empty_host_bridge_cycles_never_touch_host_or_model(tmp_path: Path, monk
     assert [route for route, _ in hub.calls] == ["/sessions/wait"] * 3
     assert adapter.deliveries == []
     assert not (tmp_path / "host-bridge-state.json").exists()
+
+
+def test_host_bridge_waits_only_for_task_action(tmp_path: Path, monkeypatch: Any) -> None:
+    config_path = _write_config(tmp_path)
+    hub = FakeHub([{"status": "timeout"}])
+    adapter = RecordingAdapter()
+    monkeypatch.setattr(acp_cli, "post_json", hub.post_json)
+    monkeypatch.setattr(acp_cli, "default_registry", lambda **_kwargs: _registry(adapter))
+
+    acp_cli.host_bridge_once(_args(config_path))
+
+    wait_payload = hub.calls[0][1]
+    assert wait_payload["action"] == "TASK"
+    assert adapter.deliveries == []
+
+
+def test_host_bridge_wait_action_is_fail_closed(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path, host_bridge_wait_action="REPLY")
+
+    with pytest.raises(HostBindingError, match="wait_action must be TASK"):
+        acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+    empty_config_path = _write_config(tmp_path, host_bridge_wait_action="")
+    with pytest.raises(HostBindingError, match="wait_action must be TASK"):
+        acp_cli.resolve_host_bridge_profile(_args(empty_config_path))
 
 
 def test_valid_delivery_uses_bound_session_then_replies_and_acks(tmp_path: Path, monkeypatch: Any) -> None:
@@ -525,6 +551,8 @@ def test_host_bridge_cli_exposes_explicit_safe_binding_options() -> None:
             "env:KILO_HOST_CREDENTIAL",
             "--allow-sender",
             "chief",
+            "--wait-action",
+            "TASK",
         ]
     )
 
@@ -533,6 +561,7 @@ def test_host_bridge_cli_exposes_explicit_safe_binding_options() -> None:
     assert args.adapter_id == "kilo_serve"
     assert args.host_session_id == "session-1"
     assert args.credential_ref == "env:KILO_HOST_CREDENTIAL"
+    assert args.wait_action == "TASK"
 
 
 def test_host_bridge_cli_accepts_explicit_codex_app_server_thread_binding() -> None:

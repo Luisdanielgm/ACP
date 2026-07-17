@@ -186,6 +186,10 @@ Si un bridge se interrumpe despues de persistir una entrega como `received`,
 reiniciarlo con el mismo binding permite reconciliar el mismo client message id.
 No se envia un segundo prompt y no se hace ACK hasta obtener resultado terminal y
 REPLY durable. Una entrega ambigua queda sin ACK para reintento seguro.
+Host Bridge espera solo `TASK` por defecto usando el filtro server-side `action: TASK`;
+`REPLY`/`INFO` permanecen encolados para el consumidor correcto. Se puede declarar
+`host_bridge_wait_action: "TASK"` o pasar `--wait-action TASK`; cualquier otro valor
+se rechaza de forma fail-closed.
 17. En operacion ACP continua, publicar `waiting` cuando el agente este disponible y escuchando; no publicar `idle` mientras siga operativo. Para agentes interactivos, la escucha continua se implementa como loop de `listen --stop-after-message`; para daemons LLM always-on, usar `runner start`; para consumidores externos no-LLM, se puede usar `listen` persistente.
 18. `wait` queda reservado para una espera foreground de una sola entrega. Para la politica operativa por defecto, usar `wait-window`: si acaba de cerrar una tarea y se espera otra instruccion inmediata, o si el siguiente paso depende de una decision/instruccion externa despues de enviar el `REPLY` y actualizar `status`, abrir de inmediato una ventana activa de hasta **20 minutos** con `python ACP_AGENT/acp.py wait-window --config ACP_AGENT/agents/<agent>.json --window-minutes 20`. Esa espera externa cuenta como parte del cierre operativo. Internamente la ventana encadena long-polls de hasta **300 segundos**. Si no llega nada en esa ventana, publicar `waiting`; si necesita disponibilidad real sin humano, pasar a `runner start`.
 19. `idle` solo debe usarse si el agente quedo realmente desacoplado de ACP o si la sesion termino. En una sesion viva, `waiting` + `listen` es el estado operativo correcto.
@@ -386,6 +390,10 @@ Ese patron `feedback -> self-fix -> re-report` queda como flujo oficial: si el f
 ## Runner headless siempre activo
 
 `runner start` mantiene un miembro ACP vivo sin consumir tokens del LLM mientras esta idle. El daemon publica `delivery_mode=runner`, heartbeat/status, espera TASK por long-poll y solo despierta el provider local cuando llega trabajo.
+
+`host-bridge start|once` usa un binding explícito a una sesión existente y espera exclusivamente `TASK` mediante el
+filtro server-side `action: TASK`; los `REPLY`/`INFO` del coordinador permanecen encolados. La configuración puede
+declarar `host_bridge_wait_action: "TASK"` o la CLI `--wait-action TASK`; cualquier otro valor se rechaza.
 
 Receta con config manual:
 

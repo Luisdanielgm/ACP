@@ -116,7 +116,7 @@ class CoordinationStore(Protocol):
         message: dict[str, Any],
     ) -> None: ...
 
-    def dequeue_next_message(self, *, session_id: str, recipient_agent_name: str) -> dict[str, Any] | None: ...
+    def dequeue_next_message(self, *, session_id: str, recipient_agent_name: str, action: str | None = None) -> dict[str, Any] | None: ...
 
     def claim_next_message(
         self,
@@ -126,6 +126,7 @@ class CoordinationStore(Protocol):
         receipt_handle: str,
         leased_until: str,
         now: str,
+        action: str | None = None,
     ) -> dict[str, Any] | None: ...
 
     def acknowledge_message(
@@ -273,7 +274,7 @@ class InMemoryCoordinationStore:
         payload["_sort_ts"] = sort_ts
         self._pending_messages.setdefault((session_id, recipient_agent_name), deque()).append(payload)
 
-    def dequeue_next_message(self, *, session_id: str, recipient_agent_name: str) -> dict[str, Any] | None:
+    def dequeue_next_message(self, *, session_id: str, recipient_agent_name: str, action: str | None = None) -> dict[str, Any] | None:
         queue = self._pending_messages.get((session_id, recipient_agent_name))
         if not queue:
             return None
@@ -281,7 +282,8 @@ class InMemoryCoordinationStore:
         available = [
             (index, message)
             for index, message in enumerate(queue)
-            if not message.get("_leased_until") or str(message["_leased_until"]) <= now
+            if (not message.get("_leased_until") or str(message["_leased_until"]) <= now)
+            and (action is None or str(message.get("action") or "").upper() == action)
         ]
         if not available:
             return None
@@ -308,6 +310,7 @@ class InMemoryCoordinationStore:
         receipt_handle: str,
         leased_until: str,
         now: str,
+        action: str | None = None,
     ) -> dict[str, Any] | None:
         queue = self._pending_messages.get((session_id, recipient_agent_name))
         if not queue:
@@ -315,7 +318,8 @@ class InMemoryCoordinationStore:
         available = [
             (index, message)
             for index, message in enumerate(queue)
-            if not message.get("_leased_until") or str(message["_leased_until"]) <= now
+            if (not message.get("_leased_until") or str(message["_leased_until"]) <= now)
+            and (action is None or str(message.get("action") or "").upper() == action)
         ]
         if not available:
             return None
@@ -769,20 +773,23 @@ class SqliteCoordinationStore:
             )
             conn.commit()
 
-    def dequeue_next_message(self, *, session_id: str, recipient_agent_name: str) -> dict[str, Any] | None:
+    def dequeue_next_message(self, *, session_id: str, recipient_agent_name: str, action: str | None = None) -> dict[str, Any] | None:
         with self._connection() as conn:
             now = datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+            action_clause = "" if action is None else " AND UPPER(json_extract(payload_json, '$.action')) = ?"
+            params: tuple[Any, ...] = (session_id, recipient_agent_name, now) if action is None else (session_id, recipient_agent_name, now, action)
             row = conn.execute(
-                """
+                f"""
                 SELECT queue_id, payload_json
                 FROM coordination_pending_messages
                 WHERE session_id = ?
                   AND recipient_agent_name = ?
                   AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+                  {action_clause}
                 ORDER BY priority_rank ASC, sort_ts ASC, queue_seq ASC
                 LIMIT 1
                 """,
-                (session_id, recipient_agent_name, now),
+                params,
             ).fetchone()
             if row is None:
                 return None
@@ -802,21 +809,25 @@ class SqliteCoordinationStore:
         receipt_handle: str,
         leased_until: str,
         now: str,
+        action: str | None = None,
     ) -> dict[str, Any] | None:
         with self._connection() as conn:
             conn.execute("BEGIN IMMEDIATE")
             try:
+                action_clause = "" if action is None else " AND UPPER(json_extract(payload_json, '$.action')) = ?"
+                params: tuple[Any, ...] = (session_id, recipient_agent_name, now) if action is None else (session_id, recipient_agent_name, now, action)
                 row = conn.execute(
-                    """
+                    f"""
                     SELECT queue_id, payload_json
                     FROM coordination_pending_messages
                     WHERE session_id = ?
                       AND recipient_agent_name = ?
                       AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+                      {action_clause}
                     ORDER BY priority_rank ASC, sort_ts ASC, queue_seq ASC
                     LIMIT 1
                     """,
-                    (session_id, recipient_agent_name, now),
+                    params,
                 ).fetchone()
                 if row is None:
                     conn.commit()

@@ -136,6 +136,10 @@ class WaitRegistration:
     expires_at: datetime
     ack_mode: str = "auto"
     lease_seconds: float = 30.0
+    action: str | None = None
+
+    def accepts_action(self, action: str) -> bool:
+        return self.action is None or self.action == action.upper()
 
     def ttl_seconds(self, *, now: datetime | None = None) -> int:
         current = now or datetime.now(timezone.utc)
@@ -360,8 +364,10 @@ class SessionCoordinationService:
                     notice=notice,
                 )
                 waiter = self._waiters.pop((session_id, member.agent_name), None)
-                if waiter is not None and not waiter.future.done():
+                if waiter is not None and waiter.action is None and not waiter.future.done():
                     waiter.future.set_result({"message": dict(notice), "delivery": None})
+                elif waiter is not None and waiter.action is not None and not waiter.future.done():
+                    self._waiters[(session_id, member.agent_name)] = waiter
             self._record_event(
                 session_id,
                 event="MESSAGES_RESET",
@@ -640,7 +646,13 @@ class SessionCoordinationService:
                     # observable duplicates (C-REL-05/06).
                     deliveries[recipient] = "duplicate"
                     continue
-                waiting = self._waiters.pop((session_id, recipient), None)
+                waiting = self._waiters.get((session_id, recipient))
+                if waiting is not None and not waiting.accepts_action(action):
+                    # Keep the waiter registered: this action is not part of its
+                    # server-side filter and must remain queued for another consumer.
+                    waiting = None
+                elif waiting is not None:
+                    self._waiters.pop((session_id, recipient), None)
                 destination_member = session.members[recipient]
                 destination_was_busy = destination_member.status == "busy"
                 previous_status_text = destination_member.status_text
@@ -665,6 +677,7 @@ class SessionCoordinationService:
                             session_id=session_id,
                             agent_name=recipient,
                             lease_seconds=waiting.lease_seconds,
+                            action=waiting.action,
                         )
                         if delivery_result is None:
                             raise RuntimeError("queued message could not be leased")
@@ -888,17 +901,29 @@ class SessionCoordinationService:
         timeout_seconds: float,
         ack_mode: str = "auto",
         lease_seconds: float = 30.0,
+        action: str | None = None,
     ) -> dict[str, Any] | None:
+        wait_action = action.upper() if isinstance(action, str) and action else None
         async with self._lock:
             notice = self._member_notice(session_id=session_id, agent_name=agent_name, member_token=member_token)
             if notice is not None:
-                if notice.get("system_event") == "MESSAGES_RESET":
+                if wait_action is not None and notice.get("system_event"):
+                    # System INFO notices are outside an action-filtered queue;
+                    # do not hand one to a TASK-only bridge.
                     self._store.clear_notice(
                         session_id=session_id,
                         agent_name=agent_name,
                         member_token=member_token,
                     )
-                return {"message": dict(notice), "delivery": None}
+                    notice = None
+                if notice is not None and notice.get("system_event") == "MESSAGES_RESET":
+                    self._store.clear_notice(
+                        session_id=session_id,
+                        agent_name=agent_name,
+                        member_token=member_token,
+                    )
+                if notice is not None:
+                    return {"message": dict(notice), "delivery": None}
             _, member = self._authorize(session_id=session_id, agent_name=agent_name, member_token=member_token)
             self._mark_member_waiting_if_available(session_id=session_id, agent_name=agent_name, member=member)
             if ack_mode == "explicit":
@@ -906,9 +931,10 @@ class SessionCoordinationService:
                     session_id=session_id,
                     agent_name=agent_name,
                     lease_seconds=lease_seconds,
+                    action=wait_action,
                 )
             else:
-                message = self._store.dequeue_next_message(session_id=session_id, recipient_agent_name=agent_name)
+                message = self._store.dequeue_next_message(session_id=session_id, recipient_agent_name=agent_name, action=wait_action)
                 delivery_result = None if message is None else {"message": message, "delivery": None}
             if delivery_result is not None:
                 message = delivery_result["message"]
@@ -962,6 +988,7 @@ class SessionCoordinationService:
                 expires_at=datetime.fromtimestamp(now_dt.timestamp() + max(timeout_seconds, 0.1), tz=timezone.utc),
                 ack_mode=ack_mode,
                 lease_seconds=lease_seconds,
+                action=wait_action,
             )
         try:
             delivery_result = await asyncio.wait_for(waiter, timeout=max(timeout_seconds, 0.1))
@@ -1076,6 +1103,10 @@ class SessionCoordinationService:
                 waiting = self._waiters.get((session_id, member_name))
                 if waiting is None or waiting.future.done():
                     continue
+                if waiting.action is not None:
+                    # Action-filtered waits are leased only from the message
+                    # queue; an INFO wall notice must not wake a TASK-only bridge.
+                    continue
                 self._waiters.pop((session_id, member_name), None)
                 waiting.future.set_result(
                     {
@@ -1133,6 +1164,7 @@ class SessionCoordinationService:
         session_id: str,
         agent_name: str,
         lease_seconds: float,
+        action: str | None = None,
     ) -> dict[str, Any] | None:
         now = datetime.now(timezone.utc)
         receipt_handle = secrets.token_urlsafe(24)
@@ -1143,6 +1175,7 @@ class SessionCoordinationService:
             receipt_handle=receipt_handle,
             leased_until=lease_expires_at.isoformat(timespec="microseconds").replace("+00:00", "Z"),
             now=now.isoformat(timespec="microseconds").replace("+00:00", "Z"),
+            action=action,
         )
         if message is None:
             return None
