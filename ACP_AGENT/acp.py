@@ -4786,6 +4786,16 @@ def _stop_host_bridge(profile: dict[str, Any], cycles: int) -> dict[str, Any]:
     return {"status": "stopped", "reason": "interrupted", "cycles": cycles}
 
 
+def _report_host_bridge_retry(profile: dict[str, Any], exc: Exception) -> None:
+    detail = f"host bridge delivery failed: {str(exc)[:240]}; retrying safely"
+    safe_update_session_status(
+        settings=profile["settings"],
+        state="waiting",
+        text=detail,
+    )
+    emit_json_line({"status": "host_bridge_retry", "detail": str(exc), "acked": False})
+
+
 def host_bridge_once(args: argparse.Namespace) -> dict[str, Any]:
     profile = resolve_host_bridge_profile(args)
     try:
@@ -4806,13 +4816,13 @@ def host_bridge_start(args: argparse.Namespace, *, max_cycles: int | None = None
                 except HostBindingError:
                     raise
                 except HostDeliveryError as exc:
-                    emit_json_line({"status": "host_bridge_retry", "detail": str(exc), "acked": False})
+                    _report_host_bridge_retry(profile, exc)
                     time.sleep(profile["retry_delay_seconds"])
                     result = {"status": "retry"}
                 except ValueError as exc:
                     if _is_fatal_session_command_error(str(exc)):
                         raise
-                    emit_json_line({"status": "host_bridge_retry", "detail": str(exc), "acked": False})
+                    _report_host_bridge_retry(profile, exc)
                     time.sleep(profile["retry_delay_seconds"])
                     result = {"status": "retry"}
                 cycles += 1

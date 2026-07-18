@@ -439,6 +439,26 @@ def test_sigint_during_retry_delay_stops_cleanly(tmp_path: Path, monkeypatch: An
     assert not any(route in {"/sessions/send", "/sessions/ack"} for route, _ in hub.calls)
 
 
+def test_delivery_failure_is_reported_as_waiting_before_retry(tmp_path: Path, monkeypatch: Any) -> None:
+    config_path = _write_config(tmp_path)
+    hub = FakeHub([_message_response(sender="intruder")])
+    adapter = RecordingAdapter()
+    statuses: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(acp_cli, "post_json", hub.post_json)
+    monkeypatch.setattr(acp_cli, "default_registry", lambda **_kwargs: _registry(adapter))
+    monkeypatch.setattr(
+        acp_cli,
+        "safe_update_session_status",
+        lambda *, settings, state, text: statuses.append((state, text)),
+    )
+    monkeypatch.setattr(acp_cli.time, "sleep", lambda _seconds: (_ for _ in ()).throw(KeyboardInterrupt()))
+
+    result = acp_cli.host_bridge_start(_args(config_path, command="start"))
+
+    assert result == {"status": "stopped", "reason": "interrupted", "cycles": 0}
+    assert statuses == [("waiting", "host bridge delivery failed: ACP delivery is not an authorized TASK; retrying safely")]
+
+
 @pytest.mark.parametrize("response", [{}, {"status": "unexpected"}, []])
 def test_malformed_wait_response_fails_closed_before_host(
     tmp_path: Path,
