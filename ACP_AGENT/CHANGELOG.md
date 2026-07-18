@@ -1,5 +1,14 @@
 # ACP_AGENT Changelog
 
+## 0.3.21 - 2026-07-17
+
+- EN: Added `codex_cli`, a portable Host Bridge adapter that resumes an existing Codex session through the official non-interactive `codex exec resume <session_id> --json` surface only after a valid ACP TASK. It correlates on the resumed thread id, requires a single terminal `turn.completed`, never starts a new session, and does not spawn Codex while the ACP inbox is idle. Retries fail closed because the CLI does not expose durable prompt-level reconciliation.
+- ES: Se agrego `codex_cli`, un adapter portable de Host Bridge que reanuda una sesion Codex existente mediante la superficie oficial no interactiva `codex exec resume <session_id> --json` solo despues de un TASK ACP valido. Correlaciona por el thread id reanudado, exige un unico `turn.completed` terminal, nunca inicia una sesion nueva y no spawnea Codex mientras el inbox ACP esta idle. Los reintentos fallan cerrados porque la CLI no expone reconciliacion durable por prompt.
+- EN: Added an explicit `claude_desktop` fail-closed contract. Claude Desktop exposes no official, stable, testable interface to bind or resume an existing conversation (MCP support does not provide chat resume, and community relays/UI automation are not supported), so any delivery is rejected with `UNSUPPORTED_PENDING_OFFICIAL_INTERFACE` and no conversation, process, or UI action is started as a fallback.
+- ES: Se agrego un contrato explicito fail-closed `claude_desktop`. Claude Desktop no expone una interfaz oficial, estable y comprobable para enlazar o reanudar una conversacion existente (MCP no ofrece resume de chat, y los relays/automatizacion de UI de terceros no estan soportados), asi que toda entrega se rechaza con `UNSUPPORTED_PENDING_OFFICIAL_INTERFACE` sin iniciar conversacion, proceso ni accion de UI como fallback.
+- EN: `codex_cli` interface details (exact resume flag ordering and JSON event schema) are pinned to current OpenAI Codex docs but remain `VERIFICATION_REQUIRED` until an authorized isolated smoke against a real installed Codex confirms them; all tests use process mocks.
+- ES: Los detalles de interfaz de `codex_cli` (orden exacto de flags de resume y schema de eventos JSON) estan fijados a la doc vigente de OpenAI Codex pero quedan `VERIFICATION_REQUIRED` hasta un smoke aislado autorizado contra un Codex real instalado; todas las pruebas usan mocks del proceso.
+
 ## 0.3.20 - 2026-07-17
 
 - EN: Added `claude_code_cli`, a portable Host Bridge adapter that invokes the official `claude -p --resume <session_id>` surface only after a valid ACP TASK, parses the terminal stream-json result, and does not invoke Claude while the ACP inbox is idle.

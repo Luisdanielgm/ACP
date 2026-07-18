@@ -40,11 +40,15 @@ def test_default_registry_loads_all_declared_host_adapters() -> None:
         "opencode_server",
         "kilo_serve",
         "codex_app_server",
+        "codex_cli",
         "claude_code_cli",
+        "claude_desktop",
     }
     assert {"existing-session", "http-delivery"} <= manifests["opencode_server"]
     assert {"existing-session", "cli-resume"} <= manifests["claude_code_cli"]
+    assert {"existing-session", "cli-resume", "fail-closed-retry"} <= manifests["codex_cli"]
     assert {"endpoint-serialized"} <= manifests["codex_app_server"]
+    assert manifests["claude_desktop"] == {"unsupported-pending-official-interface"}
 
 
 def test_task_wakeup_envelope_is_accepted_by_task_only_host_bridge() -> None:

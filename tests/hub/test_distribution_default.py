@@ -32,11 +32,15 @@ def test_distribution_declares_all_host_bridge_adapters_and_capabilities() -> No
         "opencode_server",
         "kilo_serve",
         "codex_app_server",
+        "codex_cli",
         "claude_code_cli",
+        "claude_desktop",
     }
     assert {"existing-session", "http-delivery"} <= declarations["opencode_server"]
     assert {"existing-session", "directory-context"} <= declarations["kilo_serve"]
     assert {"existing-session", "websocket-delivery", "cancellation", "endpoint-serialized"} <= declarations["codex_app_server"]
+    assert {"existing-session", "cli-resume", "fail-closed-retry"} <= declarations["codex_cli"]
     assert {"existing-session", "cli-resume", "fail-closed-retry"} <= declarations["claude_code_cli"]
+    assert declarations["claude_desktop"] == {"unsupported-pending-official-interface"}
     registered = {manifest.adapter_id: set(manifest.capabilities) for manifest in default_registry().manifests()}
     assert registered == declarations

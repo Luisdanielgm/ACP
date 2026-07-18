@@ -182,6 +182,18 @@ dos configs que apunten al mismo endpoint se rechazan aunque usen threads distin
 Usar otro puerto loopback para otra thread existente; no autodetectar procesos ni
 crear threads.
 
+Para `codex_cli`, el binding es un ejecutable Codex absoluto explicito, un
+`session_id` existente y un `directory` absoluto opcional; sin endpoint. El wake
+reanuda exactamente esa sesion con `codex exec resume <session_id> --json` y nunca
+inicia una sesion nueva. En idle no se spawnea Codex. Los reintentos fallan
+cerrados: la CLI no expone reconciliacion durable por prompt.
+
+Para `claude_desktop` no existe todavia una interfaz oficial, estable y
+comprobable para enlazar o reanudar una conversacion existente (MCP no ofrece
+resume de chat; relays/automatizacion de UI de terceros no estan soportados).
+Por eso `claude_desktop` es un contrato explicito fail-closed que rechaza toda
+entrega con `UNSUPPORTED_PENDING_OFFICIAL_INTERFACE` y no arranca ningun bridge.
+
 Si un bridge se interrumpe despues de persistir una entrega como `received`,
 reiniciarlo con el mismo binding permite reconciliar el mismo client message id.
 No se envia un segundo prompt y no se hace ACK hasta obtener resultado terminal y

@@ -682,6 +682,46 @@ def test_claude_cli_profile_uses_explicit_executable_and_existing_session(tmp_pa
     }
 
 
+def test_codex_cli_profile_uses_explicit_executable_and_existing_session(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        host_bridge_adapter_id="codex_cli",
+        host_bridge_endpoint=None,
+        host_bridge_executable=r"C:\\Tools\\codex.exe",
+        host_bridge_session_id="019f58d8-b3e2-7570-a416-4d2ee9140e90",
+    )
+    profile = acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+    assert profile["binding"].adapter_id == "codex_cli"
+    assert dict(profile["binding"].values) == {
+        "executable": r"C:\\Tools\\codex.exe",
+        "session_id": "019f58d8-b3e2-7570-a416-4d2ee9140e90",
+    }
+
+
+def test_codex_cli_profile_rejects_endpoint(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        host_bridge_adapter_id="codex_cli",
+        host_bridge_executable=r"C:\\Tools\\codex.exe",
+        host_bridge_session_id="codex-existing",
+    )
+
+    with pytest.raises(HostBindingError, match="does not accept an endpoint"):
+        acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+
+def test_claude_desktop_profile_is_rejected_as_unsupported(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        host_bridge_adapter_id="claude_desktop",
+        host_bridge_endpoint=None,
+    )
+
+    with pytest.raises(HostBindingError, match="UNSUPPORTED_PENDING_OFFICIAL_INTERFACE"):
+        acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+
 def test_host_bridge_cli_accepts_explicit_claude_executable() -> None:
     parser = acp_cli.build_parser()
     args = parser.parse_args(

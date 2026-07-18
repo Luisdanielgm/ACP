@@ -27,6 +27,14 @@ class HostDeliveryError(RuntimeError):
     """Raised when a host did not durably accept a delivery."""
 
 
+class HostUnsupportedError(HostBindingError):
+    """Raised when a host has no official interface to bind or resume a conversation.
+
+    Subclasses HostBindingError so the bridge fails closed on it exactly like any
+    other unsafe/incomplete binding: no ACK, no REPLY, no fallback conversation.
+    """
+
+
 def _request_bytes_with_deadline(
     request: urllib.request.Request,
     *,
@@ -507,7 +515,9 @@ def default_registry(
         )
     )
     from codex_app_server_adapter import CodexAppServerAdapter
+    from codex_cli_adapter import CodexCliAdapter
     from claude_code_cli_adapter import ClaudeCodeCliAdapter
+    from claude_desktop_adapter import ClaudeDesktopAdapter
 
     registry.register(
         CodexAppServerAdapter(
@@ -517,7 +527,21 @@ def default_registry(
         )
     )
     registry.register(
+        CodexCliAdapter(
+            request_timeout_seconds=request_timeout_seconds,
+            deadline_monotonic=deadline_monotonic,
+            credential_resolver=credential_resolver,
+        )
+    )
+    registry.register(
         ClaudeCodeCliAdapter(
+            request_timeout_seconds=request_timeout_seconds,
+            deadline_monotonic=deadline_monotonic,
+            credential_resolver=credential_resolver,
+        )
+    )
+    registry.register(
+        ClaudeDesktopAdapter(
             request_timeout_seconds=request_timeout_seconds,
             deadline_monotonic=deadline_monotonic,
             credential_resolver=credential_resolver,
