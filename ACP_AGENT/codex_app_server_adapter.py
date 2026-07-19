@@ -18,7 +18,9 @@ from host_bridge import (
     HostDeliveryError,
     HostManifest,
     HostNotAcceptedError,
+    HostQuarantineError,
     HostResult,
+    HostTerminalFailureError,
 )
 
 
@@ -112,9 +114,15 @@ class CodexAppServerAdapter:
                     turn_id, status, summary = recovered
                     if status == "completed":
                         return HostResult(outcome="success", summary=summary or "Codex completed without a text response")
-                    if status != "inProgress":
-                        raise HostDeliveryError("Codex correlated turn did not complete successfully")
-                    return self._wait_for_terminal(connection, thread_id, turn_id, pending, deadline)
+                    if status == "inProgress":
+                        return self._wait_for_terminal(connection, thread_id, turn_id, pending, deadline)
+                    # The correlated turn exists but reached a terminal non-success
+                    # state (failed/interrupted). This is proof no retry can recover
+                    # or duplicate it, so quarantine instead of retrying forever.
+                    raise HostTerminalFailureError(
+                        "Codex correlated turn reached a terminal non-success state; refusing duplicate turn",
+                        reason=f"codex_turn_{status}",
+                    )
                 if reconcile_only:
                     # The thread resumed and its durable history has no turn for
                     # this client message id: the delivery was provably never
@@ -140,6 +148,10 @@ class CodexAppServerAdapter:
                     raise HostDeliveryError("Codex turn/start returned an invalid turn")
                 return self._wait_for_terminal(connection, thread_id, turn_id, pending, deadline)
         except HostBindingError:
+            raise
+        except HostQuarantineError:
+            # Proven terminal state: no in-flight turn of ours to interrupt, and
+            # any correlated turn already reached a terminal state on the host.
             raise
         except HostDeliveryError:
             self._interrupt_best_effort(connection, thread_id, turn_id, deadline)

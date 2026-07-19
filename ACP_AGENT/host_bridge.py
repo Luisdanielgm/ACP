@@ -27,15 +27,48 @@ class HostDeliveryError(RuntimeError):
     """Raised when a host did not durably accept a delivery."""
 
 
-class HostNotAcceptedError(HostDeliveryError):
-    """Raised when a host provably never accepted a persisted delivery.
+class HostQuarantineError(HostDeliveryError):
+    """A host provably reached a terminal, non-recoverable state for a delivery.
 
-    Unlike a plain HostDeliveryError (transient/ambiguous), this is positive
-    proof — the host session was resumed and its durable history shows the
-    delivery's correlated turn was never started.  It is therefore safe to move
-    the delivery to a terminal quarantine state and let the queue continue,
-    because resubmitting cannot duplicate an accepted turn.
+    Unlike a plain HostDeliveryError (transient/ambiguous, which must keep
+    failing closed and retrying), this is positive proof that no further attempt
+    can succeed or duplicate work.  It is therefore safe to move the delivery to
+    a terminal quarantine state and let the queue continue.
+
+    ``reason`` is a stable, secret-free machine label persisted in the durable
+    ledger for traceability; ``summary`` is the operator-facing REPLY text.
     """
+
+    reason = "host_quarantined"
+    summary = "Host delivery reached a terminal state; quarantined for safe queue progress"
+
+    def __init__(self, message: str, *, reason: str | None = None, summary: str | None = None) -> None:
+        super().__init__(message)
+        if reason is not None:
+            self.reason = reason
+        if summary is not None:
+            self.summary = summary
+
+
+class HostNotAcceptedError(HostQuarantineError):
+    """Proven non-acceptance: the host session was resumed and its durable
+    history shows the delivery's correlated turn was never started.  Resubmitting
+    cannot duplicate an accepted turn, so the delivery is safe to quarantine.
+    """
+
+    reason = "host_never_accepted"
+    summary = "Host never accepted this delivery; quarantined for safe queue progress"
+
+
+class HostTerminalFailureError(HostQuarantineError):
+    """Proven terminal failure: the host session was resumed and the delivery's
+    correlated turn exists but reached a terminal non-success state (failed or
+    interrupted).  Resubmitting would duplicate an already-attempted turn, so the
+    delivery is safe to quarantine instead of retrying forever.
+    """
+
+    reason = "host_turn_terminal_failure"
+    summary = "Host turn reached a terminal failure; quarantined for safe queue progress"
 
 
 class HostUnsupportedError(HostBindingError):
@@ -489,17 +522,16 @@ class HostBridge:
                     if retrying and callable(reconcile)
                     else adapter.deliver(self.binding, host_delivery)
                 )
-            except HostNotAcceptedError:
-                # Proven non-acceptance: quarantine so the queue continues without
-                # resubmitting (no duplicate turn) and without silent work loss.
-                result = HostResult(
-                    outcome="failed",
-                    summary="Host never accepted this delivery; quarantined for safe queue progress",
-                )
+            except HostQuarantineError as quarantine:
+                # Proven terminal state (never accepted, or turn failed/interrupted):
+                # quarantine so the queue continues without resubmitting (no
+                # duplicate turn) and without silent work loss. The exception
+                # carries a stable, secret-free reason and operator summary.
+                result = HostResult(outcome="failed", summary=quarantine.summary)
                 record.update(
                     {
                         "status": "quarantined",
-                        "reason": "host_never_accepted",
+                        "reason": quarantine.reason,
                         "outcome": result.outcome,
                         "summary": result.summary,
                     }

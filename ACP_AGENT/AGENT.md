@@ -206,10 +206,13 @@ reiniciarlo con el mismo binding permite reconciliar el mismo client message id.
 No se envia un segundo prompt y no se hace ACK hasta obtener resultado terminal y
 REPLY durable. Una entrega ambigua queda sin ACK para reintento seguro.
 Si en cambio la reconciliacion prueba que el host nunca acepto la entrega (la
-sesion reanuda y su historial durable no tiene el turno correlacionado), el
-delivery pasa a un estado terminal `quarantined` (`reason: host_never_accepted`),
-se envia un unico REPLY de fallo correlacionado y se hace ACK para que la cola
-siga sin reenviar un `turn/start` duplicado ni perder trabajo en silencio.
+sesion reanuda y su historial durable no tiene el turno correlacionado) o que el
+turno correlacionado alcanzo un estado terminal `failed`/`interrupted`, el
+delivery pasa a un estado terminal `quarantined` (`reason: host_never_accepted`,
+`codex_turn_failed` o `codex_turn_interrupted`), se envia un unico REPLY de fallo
+correlacionado y se hace ACK para que la cola siga sin reenviar un `turn/start`
+duplicado ni perder trabajo en silencio. Los casos `inProgress`/desconexion/ambiguos
+siguen fail-closed y reintentan.
 Para enrutar respuestas, `host_bridge_reply_to` (o `--reply-to`) fija el
 destino de los REPLY ante un `TASK` plano, por ejemplo el miembro
 `codex-pilot-reply-collector`, que reenvia envuelto como `TASK` al coordinador
@@ -625,6 +628,24 @@ los procesos declarados; hace health checks no destructivos, conserva PID/estado
 y detiene árboles limpiamente. No sobrevive un reinicio de Windows hasta que el
 humano vuelva a iniciar el comando; todavía no instala Task Scheduler ni un
 servicio del sistema.
+
+Bootstrap prearmado de perfiles (idempotente, sin llamada al host ni sesión
+nueva; escribe atómicamente, sella `host_profile_schema_version` y migra perfiles
+antiguos). El rol `worker` fija `host_bridge_reply_to = codex-pilot-reply-collector`
+y autoriza a su coordinador; el rol `coordinator` autoriza al collector y nunca
+enruta respuestas de vuelta a él. Usar `--check` para el modo doctor sin escritura:
+
+```powershell
+python ACP_AGENT/acp.py host-bridge configure --config ACP_AGENT/agents/codex-task-code.json --role worker --adapter-id codex_app_server_stdio --host-thread-id <thread-id> --host-executable "C:\ruta\codex.exe" --coordinator codex-chief
+python ACP_AGENT/acp.py host-bridge configure --config ACP_AGENT/agents/codex-chief.json --role coordinator --adapter-id codex_app_server_stdio --host-thread-id <thread-id> --host-executable "C:\ruta\codex.exe"
+```
+
+Generar la config del supervisor para todos los componentes configurados
+(reutiliza el supervisor no-modelo; `autostart: not_installed`, no instala nada):
+
+```powershell
+python ACP_AGENT/acp.py host-supervisor generate --output ACP_AGENT/agents/supervisor.json --coordinator codex-chief --worker codex-task-code --worker codex-task-wiki --reply-collector codex-pilot-reply-collector
+```
 
 Comandos operativos (requieren un JSON local con `host_supervisor_bridges` y
 comandos/endpoint explícitos):

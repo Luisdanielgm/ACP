@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from collections import deque
@@ -23,6 +24,7 @@ from host_bridge import (  # noqa: E402
     HostDelivery,
     HostDeliveryError,
     HostNotAcceptedError,
+    HostTerminalFailureError,
     JsonBridgeStore,
     binding_lock_fingerprint,
 )
@@ -362,6 +364,85 @@ def test_codex_retry_without_visible_client_id_quarantines_without_duplicate_tur
     quarantined = next(iter(json.loads(state_path.read_text(encoding="utf-8"))["deliveries"].values()))
     assert quarantined["status"] == "quarantined"
     assert quarantined["reason"] == "host_never_accepted"
+
+
+def _terminal_turn(status: str) -> list[dict[str, Any]]:
+    message_id = _delivery().host_message_id()
+    return [
+        {
+            "id": "turn-existing",
+            "status": status,
+            "items": [
+                {
+                    "id": "user-1",
+                    "type": "userMessage",
+                    "clientId": message_id,
+                    "content": [{"type": "text", "text": "Inspect the change"}],
+                },
+                {"id": "agent-1", "type": "agentMessage", "text": "partial", "phase": "in_progress"},
+            ],
+        }
+    ]
+
+
+@pytest.mark.parametrize("status", ["failed", "interrupted"])
+def test_codex_reconcile_quarantines_terminal_turn_without_duplicate(status: str) -> None:
+    connection = FakeCodexConnection(turns=_terminal_turn(status))
+    adapter = CodexAppServerAdapter(request_timeout_seconds=1, connect=FakeConnect(connection))
+
+    with pytest.raises(HostTerminalFailureError) as excinfo:
+        adapter.reconcile(_binding(), _delivery())
+
+    assert excinfo.value.reason == f"codex_turn_{status}"
+    assert connection.started_turns == 0
+    # Proven-terminal state never issues a spurious interrupt.
+    assert "turn/interrupt" not in [message["method"] for message in connection.sent]
+
+
+@pytest.mark.parametrize("status", ["failed", "interrupted"])
+def test_codex_terminal_turn_quarantines_with_reply_and_ack_and_unblocks_queue(
+    status: str, tmp_path: Path
+) -> None:
+    connection = FakeCodexConnection(turns=_terminal_turn(status))
+    adapter = CodexAppServerAdapter(request_timeout_seconds=1, connect=FakeConnect(connection))
+    registry = AdapterRegistry()
+    registry.register(adapter)
+    state_path = tmp_path / "state.json"
+    store = JsonBridgeStore(state_path)
+    # Seed a prior received attempt so handle() reconciles instead of delivering.
+    ledger_key = hashlib.sha256(b"acp-session:msg-1").hexdigest()
+    store.put(
+        ledger_key,
+        {
+            "status": "received",
+            "message_id": "msg-1",
+            "correlation_id": "msg-1",
+            "sender": "chief",
+            "binding": _binding().safe_descriptor(),
+        },
+    )
+    bridge = HostBridge(
+        registry=registry,
+        binding=_binding(),
+        store=store,
+        allowed_senders=("chief",),
+    )
+    acknowledgments: list[str] = []
+    replies: list[str] = []
+
+    result = bridge.handle(
+        _response(),
+        acknowledge=lambda _: acknowledgments.append("ack"),
+        reply=lambda _d, res, _id: replies.append(res.outcome),
+    )
+
+    assert result == {"status": "quarantined", "outcome": "failed"}
+    assert acknowledgments == ["ack"]
+    assert replies == ["failed"]
+    assert connection.started_turns == 0
+    quarantined = next(iter(json.loads(state_path.read_text(encoding="utf-8"))["deliveries"].values()))
+    assert quarantined["status"] == "quarantined"
+    assert quarantined["reason"] == f"codex_turn_{status}"
 
 
 def test_codex_reconcile_recovers_completed_turn_without_new_start() -> None:
