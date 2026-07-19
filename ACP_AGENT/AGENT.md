@@ -182,6 +182,13 @@ dos configs que apunten al mismo endpoint se rechazan aunque usen threads distin
 Usar otro puerto loopback para otra thread existente; no autodetectar procesos ni
 crear threads.
 
+Cuando el host no permite bind loopback, usar `codex_app_server_stdio` con
+`host_bridge_executable` absoluto y `host_bridge_thread_id` existente, sin
+endpoint. El bridge sigue esperando ACP sin iniciar Codex; solo ante un `TASK`
+valido crea un proceso `codex app-server --stdio`, reanuda esa misma thread y
+espera su resultado terminal. Usa el login local de Codex y no acepta secretos
+ni credenciales dentro del binding.
+
 Para `codex_cli`, el binding es un ejecutable Codex absoluto explicito, un
 `session_id` existente y un `directory` absoluto opcional; sin endpoint. El wake
 reanuda exactamente esa sesion con `codex exec resume <session_id> --json` y nunca

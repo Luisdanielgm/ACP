@@ -13,6 +13,7 @@ repo_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(repo_root / "ACP_AGENT"))
 
 from codex_app_server_adapter import CodexAppServerAdapter  # noqa: E402
+from codex_app_server_stdio_adapter import CodexAppServerStdioAdapter  # noqa: E402
 from host_bridge import (  # noqa: E402
     AdapterRegistry,
     HostBinding,
@@ -134,6 +135,13 @@ def _binding() -> HostBinding:
     )
 
 
+def _stdio_binding() -> HostBinding:
+    return HostBinding(
+        adapter_id="codex_app_server_stdio",
+        values={"executable": "C:/tools/codex.exe", "thread_id": THREAD_ID},
+    )
+
+
 def _success_events(*, secret: str = "must-not-leak") -> list[dict[str, Any]]:
     return [
         {"method": "configWarning", "params": {"details": secret}},
@@ -180,6 +188,38 @@ def test_codex_adapter_resumes_same_thread_and_starts_exactly_one_turn() -> None
         "clientUserMessageId": _delivery().host_message_id(),
         "input": [{"type": "text", "text": "Inspect the change"}],
     }
+
+
+def test_codex_stdio_adapter_starts_only_after_delivery_and_resumes_same_thread() -> None:
+    connection = FakeCodexConnection(events=_success_events())
+    started: list[str] = []
+    adapter = CodexAppServerStdioAdapter(
+        request_timeout_seconds=1,
+        connection_factory=lambda executable: started.append(executable) or connection,
+    )
+
+    result = adapter.deliver(_stdio_binding(), _delivery())
+
+    assert result.summary == "Finished safely"
+    assert started == ["C:/tools/codex.exe"]
+    assert [message["method"] for message in connection.sent] == [
+        "initialize",
+        "initialized",
+        "thread/resume",
+        "turn/start",
+    ]
+
+
+def test_codex_stdio_adapter_rejects_loopback_endpoint() -> None:
+    adapter = CodexAppServerStdioAdapter(connection_factory=lambda _executable: FakeCodexConnection())
+    with pytest.raises(HostBindingError, match="does not accept an endpoint"):
+        adapter.deliver(
+            HostBinding(
+                adapter_id="codex_app_server_stdio",
+                values={"executable": "C:/tools/codex.exe", "thread_id": THREAD_ID, "endpoint": "ws://127.0.0.1:4500"},
+            ),
+            _delivery(),
+        )
 
 
 def test_codex_adapter_ignores_partial_events_until_terminal_completion() -> None:

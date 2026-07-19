@@ -40,6 +40,7 @@ def test_default_registry_loads_all_declared_host_adapters() -> None:
         "opencode_server",
         "kilo_serve",
         "codex_app_server",
+        "codex_app_server_stdio",
         "codex_cli",
         "claude_code_cli",
         "claude_desktop",
@@ -48,6 +49,7 @@ def test_default_registry_loads_all_declared_host_adapters() -> None:
     assert {"existing-session", "cli-resume"} <= manifests["claude_code_cli"]
     assert {"existing-session", "cli-resume", "fail-closed-retry"} <= manifests["codex_cli"]
     assert {"endpoint-serialized"} <= manifests["codex_app_server"]
+    assert {"stdio-delivery", "spawn-on-task"} <= manifests["codex_app_server_stdio"]
     assert manifests["claude_desktop"] == {"unsupported-pending-official-interface"}
 
 

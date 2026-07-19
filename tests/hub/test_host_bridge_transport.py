@@ -626,6 +626,24 @@ def test_codex_profile_uses_explicit_thread_id_without_cwd_override(tmp_path: Pa
     }
 
 
+def test_codex_stdio_profile_uses_explicit_executable_and_existing_thread(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        host_bridge_adapter_id="codex_app_server_stdio",
+        host_bridge_endpoint=None,
+        host_bridge_executable=r"C:\\Tools\\codex.exe",
+        host_bridge_thread_id="thread-existing",
+        host_bridge_session_id=None,
+    )
+    profile = acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+    assert profile["binding"].adapter_id == "codex_app_server_stdio"
+    assert dict(profile["binding"].values) == {
+        "executable": r"C:\\Tools\\codex.exe",
+        "thread_id": "thread-existing",
+    }
+
+
 def test_codex_profiles_share_endpoint_reservation_across_threads(tmp_path: Path) -> None:
     (tmp_path / "first").mkdir()
     (tmp_path / "second").mkdir()

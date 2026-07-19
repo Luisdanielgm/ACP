@@ -849,7 +849,7 @@ def build_parser() -> argparse.ArgumentParser:
     for bridge_parser in (host_bridge_start_parser, host_bridge_once_parser):
         bridge_parser.add_argument("--config", default=None, help="JSON config path for the ACP member")
         bridge_parser.add_argument("--agent", default=None, help="Agent name/config stem")
-        bridge_parser.add_argument("--adapter-id", choices=("opencode_server", "kilo_serve", "codex_app_server", "codex_cli", "claude_code_cli", "claude_desktop"), default=None, help="Existing-session host adapter")
+        bridge_parser.add_argument("--adapter-id", choices=("opencode_server", "kilo_serve", "codex_app_server", "codex_app_server_stdio", "codex_cli", "claude_code_cli", "claude_desktop"), default=None, help="Existing-session host adapter")
         bridge_parser.add_argument("--endpoint", default=None, help="Explicit loopback endpoint for the existing host")
         bridge_parser.add_argument("--host-executable", default=None, help="Explicit absolute executable path for a CLI host")
         bridge_parser.add_argument("--host-session-id", "--host-thread-id", dest="host_session_id", default=None, help="Existing host session or Codex thread id")
@@ -4503,17 +4503,19 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
         "opencode_server",
         "kilo_serve",
         "codex_app_server",
+        "codex_app_server_stdio",
         "codex_cli",
         "claude_code_cli",
     }:
         raise HostBindingError(
-            "host bridge adapter_id must be opencode_server, kilo_serve, codex_app_server, "
+            "host bridge adapter_id must be opencode_server, kilo_serve, codex_app_server, codex_app_server_stdio, "
             "codex_cli, or claude_code_cli"
         )
-    is_cli_adapter = adapter_id in {"codex_cli", "claude_code_cli"}
+    is_cli_adapter = adapter_id in {"codex_cli", "claude_code_cli", "codex_app_server_stdio"}
+    is_codex_app_server = adapter_id in {"codex_app_server", "codex_app_server_stdio"}
     configured_host_id = get_config_value(
         config,
-        "host_bridge_thread_id" if adapter_id == "codex_app_server" else "host_bridge_session_id",
+        "host_bridge_thread_id" if is_codex_app_server else "host_bridge_session_id",
     )
     host_session_id = host_session_arg if host_session_arg is not None else configured_host_id
     if is_cli_adapter:
@@ -4536,8 +4538,8 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
     directory = getattr(args, "directory", None)
     if directory is None:
         directory = get_config_value(config, "host_bridge_directory")
-    if adapter_id == "codex_app_server" and isinstance(directory, str) and directory.strip():
-        raise HostBindingError("codex_app_server does not accept directory/cwd overrides")
+    if is_codex_app_server and isinstance(directory, str) and directory.strip():
+        raise HostBindingError(f"{adapter_id} does not accept directory/cwd overrides")
     credential_ref = getattr(args, "credential_ref", None)
     if credential_ref is None:
         credential_ref = get_config_value(config, "host_bridge_credential_ref")
@@ -4546,7 +4548,7 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
     ):
         raise HostBindingError("host bridge credential_ref must use env:NAME")
 
-    id_key = "thread_id" if adapter_id == "codex_app_server" else "session_id"
+    id_key = "thread_id" if is_codex_app_server else "session_id"
     values = (
         {"executable": executable.strip(), id_key: host_session_id.strip()}
         if is_cli_adapter

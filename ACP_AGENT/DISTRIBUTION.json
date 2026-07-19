@@ -10,6 +10,7 @@
     {"adapter_id": "opencode_server", "capabilities": ["existing-session", "http-delivery", "correlated-result"]},
     {"adapter_id": "kilo_serve", "capabilities": ["existing-session", "http-delivery", "correlated-result", "directory-context"]},
     {"adapter_id": "codex_app_server", "capabilities": ["existing-session", "websocket-delivery", "client-message-correlation", "streaming-terminal-result", "cancellation", "endpoint-serialized"]},
+    {"adapter_id": "codex_app_server_stdio", "capabilities": ["existing-session", "stdio-delivery", "spawn-on-task", "client-message-correlation", "streaming-terminal-result", "cancellation"]},
     {"adapter_id": "codex_cli", "capabilities": ["existing-session", "cli-resume", "streaming-terminal-result", "fail-closed-retry"]},
     {"adapter_id": "claude_code_cli", "capabilities": ["existing-session", "cli-resume", "streaming-terminal-result", "cancellation", "fail-closed-retry"]},
     {"adapter_id": "claude_desktop", "capabilities": ["unsupported-pending-official-interface"]}
