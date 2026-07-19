@@ -855,6 +855,7 @@ def build_parser() -> argparse.ArgumentParser:
         bridge_parser.add_argument("--host-session-id", "--host-thread-id", dest="host_session_id", default=None, help="Existing host session or Codex thread id")
         bridge_parser.add_argument("--directory", default=None, help="Optional host directory context")
         bridge_parser.add_argument("--credential-ref", default=None, help="Optional env:NAME reference to a JSON Basic credential")
+        bridge_parser.add_argument("--reply-to", dest="reply_to", default=None, help="Optional ACP member that plain-TASK replies target (e.g. a reply collector)")
         bridge_parser.add_argument("--allow-sender", dest="bridge_allowed_senders", action="append", default=None, help="Trusted TASK sender; repeat for multiple senders")
         bridge_parser.add_argument("--state-path", default=None, help="Optional durable Host Bridge ledger path")
         bridge_parser.add_argument("--wait-timeout-seconds", type=float, default=None, help="Hub long-poll timeout (max 300)")
@@ -4548,6 +4549,15 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
     ):
         raise HostBindingError("host bridge credential_ref must use env:NAME")
 
+    reply_to_arg = getattr(args, "reply_to", None)
+    reply_to = reply_to_arg if reply_to_arg is not None else get_config_value(config, "host_bridge_reply_to")
+    if reply_to is not None:
+        if not isinstance(reply_to, str) or not reply_to.strip():
+            raise HostBindingError("host bridge reply_to must be a non-empty member name")
+        reply_to = reply_to.strip()
+        if reply_to == settings.agent_name:
+            raise HostBindingError("host bridge reply_to must differ from the bridge member identity")
+
     id_key = "thread_id" if is_codex_app_server else "session_id"
     values = (
         {"executable": executable.strip(), id_key: host_session_id.strip()}
@@ -4601,6 +4611,7 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
         "binding": binding,
         "lock_target": lock_target,
         "allowed_senders": tuple(allowed_senders),
+        "reply_to": reply_to,
         "state_path": state_path,
         "wait_timeout_seconds": wait_timeout,
         "host_timeout_seconds": host_timeout,
@@ -4698,6 +4709,21 @@ def _host_bridge_ack(profile: dict[str, Any], response: dict[str, Any]) -> dict[
     return acknowledgment
 
 
+def _host_bridge_reply_target(delivery: HostDelivery, configured_reply_to: str | None) -> str:
+    """Resolve where a HostBridge REPLY goes.
+
+    A wrapped REPLY/INFO (delivery.reply_to set) always answers the original
+    worker, so a TASK-only coordinator never loops back into the collector. A
+    plain TASK uses the locally configured reply target (e.g. the reply
+    collector) when present, otherwise it answers the original sender.
+    """
+    if delivery.reply_to:
+        return delivery.reply_to
+    if configured_reply_to:
+        return configured_reply_to
+    return delivery.sender
+
+
 def _host_bridge_reply(
     profile: dict[str, Any],
     delivery: HostDelivery,
@@ -4719,7 +4745,7 @@ def _host_bridge_reply(
             "session_id": settings.session_id,
             "agent_name": settings.agent_name,
             "member_token": settings.member_token,
-            "to": delivery.reply_to or delivery.sender,
+            "to": _host_bridge_reply_target(delivery, profile.get("reply_to")),
             "action": "REPLY",
             "payload": build_reply_payload(
                 task_id=delivery.task_id,

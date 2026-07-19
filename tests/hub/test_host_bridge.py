@@ -24,6 +24,7 @@ from host_bridge import (  # noqa: E402
     HostDelivery,
     HostDeliveryError,
     HostManifest,
+    HostNotAcceptedError,
     HostResult,
     JsonBridgeStore,
     KiloServeAdapter,
@@ -833,3 +834,88 @@ def test_non_loopback_endpoint_fails_closed_without_ack(tmp_path: Path) -> None:
         bridge.handle(_response(), acknowledge=lambda _: acknowledgments.append("ack"), reply=lambda *_: None)
 
     assert acknowledgments == []
+
+
+class _PoisonAdapter:
+    """First delivery is ambiguous; a retry proves the host never accepted it."""
+
+    manifest = HostManifest(
+        adapter_id="opencode_server",
+        display_name="Poison delivery adapter",
+        capabilities=("existing-session",),
+    )
+
+    def __init__(self) -> None:
+        self.deliver_calls = 0
+        self.reconcile_calls = 0
+
+    def deliver(self, binding: Any, delivery: Any) -> HostResult:
+        self.deliver_calls += 1
+        raise HostDeliveryError("host disconnected before terminal completion")
+
+    def reconcile(self, binding: Any, delivery: Any) -> HostResult:
+        self.reconcile_calls += 1
+        raise HostNotAcceptedError("host resumed but never accepted this delivery")
+
+
+def _poison_bridge(tmp_path: Path) -> tuple[HostBridge, _PoisonAdapter, Path]:
+    adapter = _PoisonAdapter()
+    registry = AdapterRegistry()
+    registry.register(adapter)
+    state_path = tmp_path / "state.json"
+    binding = HostBinding(adapter_id="opencode_server", values={"endpoint": "http://127.0.0.1:4096", "session_id": "s"})
+    bridge = HostBridge(
+        registry=registry,
+        binding=binding,
+        store=JsonBridgeStore(state_path),
+        allowed_senders=("chief",),
+    )
+    return bridge, adapter, state_path
+
+
+def test_proven_non_acceptance_is_quarantined_and_unblocks_queue(tmp_path: Path) -> None:
+    bridge, adapter, state_path = _poison_bridge(tmp_path)
+    acks: list[str] = []
+    replies: list[HostResult] = []
+
+    # First attempt is ambiguous: fail closed, no ACK, no REPLY.
+    with pytest.raises(HostDeliveryError):
+        bridge.handle(_response(), acknowledge=lambda _: acks.append("ack"), reply=lambda *_: replies.append("early"))
+    assert acks == [] and replies == []
+
+    # Retry proves non-acceptance: quarantine with a correlated failure REPLY + ACK.
+    result = bridge.handle(
+        _response(),
+        acknowledge=lambda _: acks.append("ack"),
+        reply=lambda _d, res, _id: replies.append(res),
+    )
+
+    assert result == {"status": "quarantined", "outcome": "failed"}
+    assert len(acks) == 1 and len(replies) == 1
+    assert replies[0].outcome == "failed"
+    record = next(iter(json.loads(state_path.read_text(encoding="utf-8"))["deliveries"].values()))
+    assert record["status"] == "quarantined"
+    assert record["reason"] == "host_never_accepted"
+    assert record["message_id"] == "msg-1"
+    assert record["sender"] == "chief"
+
+
+def test_quarantined_redelivery_is_idempotent_without_touching_host(tmp_path: Path) -> None:
+    bridge, adapter, _state_path = _poison_bridge(tmp_path)
+    with pytest.raises(HostDeliveryError):
+        bridge.handle(_response(), acknowledge=lambda _: None, reply=lambda *_: None)
+    bridge.handle(_response(), acknowledge=lambda _: None, reply=lambda *_: None)
+
+    acks: list[str] = []
+    replies: list[str] = []
+    result = bridge.handle(
+        _response(),
+        acknowledge=lambda _: acks.append("ack"),
+        reply=lambda *_: replies.append("reply"),
+    )
+
+    assert result == {"status": "quarantined", "outcome": "failed"}
+    # Already replied + acked: no repeat side effects and no further host calls.
+    assert acks == [] and replies == []
+    assert adapter.deliver_calls == 1
+    assert adapter.reconcile_calls == 1

@@ -22,6 +22,7 @@ from host_bridge import (  # noqa: E402
     HostCredential,
     HostDelivery,
     HostDeliveryError,
+    HostNotAcceptedError,
     JsonBridgeStore,
     binding_lock_fingerprint,
 )
@@ -307,7 +308,17 @@ def test_codex_adapter_rejects_unknown_thread_without_starting_or_acking(tmp_pat
     assert acknowledgments == []
 
 
-def test_codex_retry_without_visible_client_id_fails_closed_without_duplicate_turn(tmp_path: Path) -> None:
+def test_codex_reconcile_proves_non_acceptance_and_signals_quarantine() -> None:
+    connection = FakeCodexConnection(turns=[])
+    adapter = CodexAppServerAdapter(request_timeout_seconds=1, connect=FakeConnect(connection))
+
+    with pytest.raises(HostNotAcceptedError, match="never accepted"):
+        adapter.reconcile(_binding(), _delivery())
+
+    assert connection.started_turns == 0
+
+
+def test_codex_retry_without_visible_client_id_quarantines_without_duplicate_turn(tmp_path: Path) -> None:
     first_connection = FakeCodexConnection(disconnect_after_start=True)
     first_adapter = CodexAppServerAdapter(request_timeout_seconds=1, connect=FakeConnect(first_connection))
     registry = AdapterRegistry()
@@ -333,16 +344,24 @@ def test_codex_retry_without_visible_client_id_fails_closed_without_duplicate_tu
         store=JsonBridgeStore(state_path),
         allowed_senders=("chief",),
     )
+    acknowledgments: list[str] = []
+    replies: list[str] = []
 
-    with pytest.raises(HostDeliveryError, match="refusing duplicate"):
-        restarted.handle(
-            _response(),
-            acknowledge=lambda _: pytest.fail("ambiguous delivery must not ACK"),
-            reply=lambda *_: pytest.fail("ambiguous delivery must not REPLY"),
-        )
+    result = restarted.handle(
+        _response(),
+        acknowledge=lambda _: acknowledgments.append("ack"),
+        reply=lambda _d, res, _id: replies.append(res.outcome),
+    )
 
+    assert result == {"status": "quarantined", "outcome": "failed"}
+    assert acknowledgments == ["ack"]
+    assert replies == ["failed"]
     assert first_connection.started_turns == 1
     assert retry_connection.started_turns == 0
+
+    quarantined = next(iter(json.loads(state_path.read_text(encoding="utf-8"))["deliveries"].values()))
+    assert quarantined["status"] == "quarantined"
+    assert quarantined["reason"] == "host_never_accepted"
 
 
 def test_codex_reconcile_recovers_completed_turn_without_new_start() -> None:

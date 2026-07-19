@@ -205,6 +205,16 @@ Si un bridge se interrumpe despues de persistir una entrega como `received`,
 reiniciarlo con el mismo binding permite reconciliar el mismo client message id.
 No se envia un segundo prompt y no se hace ACK hasta obtener resultado terminal y
 REPLY durable. Una entrega ambigua queda sin ACK para reintento seguro.
+Si en cambio la reconciliacion prueba que el host nunca acepto la entrega (la
+sesion reanuda y su historial durable no tiene el turno correlacionado), el
+delivery pasa a un estado terminal `quarantined` (`reason: host_never_accepted`),
+se envia un unico REPLY de fallo correlacionado y se hace ACK para que la cola
+siga sin reenviar un `turn/start` duplicado ni perder trabajo en silencio.
+Para enrutar respuestas, `host_bridge_reply_to` (o `--reply-to`) fija el
+destino de los REPLY ante un `TASK` plano, por ejemplo el miembro
+`codex-pilot-reply-collector`, que reenvia envuelto como `TASK` al coordinador
+TASK-only. Un REPLY/INFO ya envuelto responde siempre al worker original, asi el
+coordinador no crea un loop de vuelta al collector.
 Host Bridge espera solo `TASK` por defecto usando el filtro server-side `action: TASK`;
 `REPLY`/`INFO` permanecen encolados para el consumidor correcto. Se puede declarar
 `host_bridge_wait_action: "TASK"` o pasar `--wait-action TASK`; cualquier otro valor

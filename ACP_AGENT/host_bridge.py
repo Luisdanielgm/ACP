@@ -27,6 +27,17 @@ class HostDeliveryError(RuntimeError):
     """Raised when a host did not durably accept a delivery."""
 
 
+class HostNotAcceptedError(HostDeliveryError):
+    """Raised when a host provably never accepted a persisted delivery.
+
+    Unlike a plain HostDeliveryError (transient/ambiguous), this is positive
+    proof — the host session was resumed and its durable history shows the
+    delivery's correlated turn was never started.  It is therefore safe to move
+    the delivery to a terminal quarantine state and let the queue continue,
+    because resubmitting cannot duplicate an accepted turn.
+    """
+
+
 class HostUnsupportedError(HostBindingError):
     """Raised when a host has no official interface to bind or resume a conversation.
 
@@ -453,9 +464,13 @@ class HostBridge:
         if record and record.get("binding") != binding_descriptor:
             raise HostBindingError("durable delivery binding changed")
         adapter = self.registry.get(self.binding.adapter_id)
-        duplicate = record.get("status") == "completed"
-        if duplicate:
+        prior_status = record.get("status")
+        if prior_status == "completed":
             result = HostResult(outcome=str(record["outcome"]), summary=str(record["summary"]))
+            outcome_status = "duplicate"
+        elif prior_status == "quarantined":
+            result = HostResult(outcome=str(record.get("outcome", "failed")), summary=str(record.get("summary", "")))
+            outcome_status = "quarantined"
         else:
             retrying = bool(record)
             if not retrying:
@@ -474,12 +489,31 @@ class HostBridge:
                     if retrying and callable(reconcile)
                     else adapter.deliver(self.binding, host_delivery)
                 )
+            except HostNotAcceptedError:
+                # Proven non-acceptance: quarantine so the queue continues without
+                # resubmitting (no duplicate turn) and without silent work loss.
+                result = HostResult(
+                    outcome="failed",
+                    summary="Host never accepted this delivery; quarantined for safe queue progress",
+                )
+                record.update(
+                    {
+                        "status": "quarantined",
+                        "reason": "host_never_accepted",
+                        "outcome": result.outcome,
+                        "summary": result.summary,
+                    }
+                )
+                self.store.put(key, record)
+                outcome_status = "quarantined"
             except (HostBindingError, HostDeliveryError):
                 record["last_error"] = "host delivery was not accepted"
                 self.store.put(key, record)
                 raise
-            record.update({"status": "completed", "outcome": result.outcome, "summary": result.summary})
-            self.store.put(key, record)
+            else:
+                record.update({"status": "completed", "outcome": result.outcome, "summary": result.summary})
+                self.store.put(key, record)
+                outcome_status = "completed"
 
         reply_id = str(uuid5(NAMESPACE_URL, f"acp-host-bridge-reply:{host_delivery.correlation_id}"))
         if not record.get("replied"):
@@ -490,7 +524,7 @@ class HostBridge:
             acknowledge(response)
             record["acked"] = True
             self.store.put(key, record)
-        return {"status": "duplicate" if duplicate else "completed", "outcome": result.outcome}
+        return {"status": outcome_status, "outcome": result.outcome}
 
 
 def default_registry(

@@ -25,6 +25,7 @@ _ACP_SPEC.loader.exec_module(acp_cli)
 from host_bridge import (  # noqa: E402
     AdapterRegistry,
     HostBindingError,
+    HostDelivery,
     HostDeliveryError,
     HostManifest,
     HostResult,
@@ -758,6 +759,47 @@ def test_claude_desktop_profile_is_rejected_as_unsupported(tmp_path: Path) -> No
 
     with pytest.raises(HostBindingError, match="UNSUPPORTED_PENDING_OFFICIAL_INTERFACE"):
         acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+
+def _delivery(*, sender: str = "coordinator", reply_to: str | None = None) -> HostDelivery:
+    return HostDelivery(
+        message_id="m1",
+        correlation_id="m1",
+        sender=sender,
+        instructions="do work",
+        task_id="t1",
+        reply_to=reply_to,
+    )
+
+
+def test_reply_target_prefers_wrapper_then_config_then_sender() -> None:
+    # Wrapped REPLY/INFO always answers the original worker (no collector loop).
+    assert acp_cli._host_bridge_reply_target(_delivery(reply_to="worker-1"), "codex-pilot-reply-collector") == "worker-1"
+    # Plain TASK with a configured reply target routes to the collector.
+    assert acp_cli._host_bridge_reply_target(_delivery(), "codex-pilot-reply-collector") == "codex-pilot-reply-collector"
+    # No configuration falls back to the original sender.
+    assert acp_cli._host_bridge_reply_target(_delivery(sender="coordinator"), None) == "coordinator"
+
+
+def test_host_bridge_profile_reads_reply_to_from_config(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path, host_bridge_reply_to="codex-pilot-reply-collector")
+    profile = acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+    assert profile["reply_to"] == "codex-pilot-reply-collector"
+
+
+def test_host_bridge_reply_to_cannot_equal_bridge_identity(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path, host_bridge_reply_to="bridge-agent")
+
+    with pytest.raises(HostBindingError, match="reply_to"):
+        acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+
+def test_host_bridge_profile_reply_to_defaults_to_none(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path)
+    profile = acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+    assert profile["reply_to"] is None
 
 
 def test_host_bridge_cli_accepts_explicit_claude_executable() -> None:

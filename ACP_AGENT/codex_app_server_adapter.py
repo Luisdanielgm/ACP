@@ -17,6 +17,7 @@ from host_bridge import (
     HostDelivery,
     HostDeliveryError,
     HostManifest,
+    HostNotAcceptedError,
     HostResult,
 )
 
@@ -115,7 +116,12 @@ class CodexAppServerAdapter:
                         raise HostDeliveryError("Codex correlated turn did not complete successfully")
                     return self._wait_for_terminal(connection, thread_id, turn_id, pending, deadline)
                 if reconcile_only:
-                    raise HostDeliveryError("previous Codex acceptance is not visible; refusing duplicate turn")
+                    # The thread resumed and its durable history has no turn for
+                    # this client message id: the delivery was provably never
+                    # accepted, so signal quarantine instead of retrying forever.
+                    raise HostNotAcceptedError(
+                        "Codex thread resumed but never accepted this delivery; refusing duplicate turn"
+                    )
 
                 started, pending = self._request(
                     connection,
