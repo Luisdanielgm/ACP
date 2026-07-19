@@ -5042,7 +5042,9 @@ def _host_bridge_poll(profile: dict[str, Any]) -> dict[str, Any]:
     # their historical outer-loop semantics.
     delivery_lock = (
         reserve_config(profile["lock_target"])
-        if profile.get("lock_scope") == "process" and response.get("status") == "message"
+        if profile.get("lock_scope") == "process"
+        and isinstance(response, dict)
+        and response.get("status") == "message"
         else nullcontext()
     )
     with delivery_lock:
