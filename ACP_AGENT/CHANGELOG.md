@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.24 - 2026-07-19
+
+- EN: Serialized Codex app-server stdio deliveries by normalized executable and added bounded graceful process shutdown so chained turns cannot overlap an unfinished stdio runtime.
+- ES: Se serializaron las entregas stdio de Codex app-server por ejecutable normalizado y se agrego un cierre graceful acotado para evitar solapamientos con un runtime stdio aun finalizando.
+
 ## 0.3.23 - 2026-07-19
 
 - EN: Completed the poison-delivery fix for terminally failed turns. When a retried delivery's correlated Codex turn exists but reached a terminal non-success state (`failed`/`interrupted`), the bridge now raises `HostTerminalFailureError`, quarantines with a specific secret-free reason (`codex_turn_failed` / `codex_turn_interrupted`), sends one correlated failure REPLY, and ACKs so the queue continues — with no duplicate `turn/start` and no spurious interrupt. Ambiguous/`inProgress`/disconnect cases still fail closed and retry; Claude CLI stays fail-closed when it cannot prove a durable result. Applies to `codex_app_server` and `codex_app_server_stdio`.

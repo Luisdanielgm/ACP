@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from contextlib import nullcontext
 import json
 import mimetypes
 import os
@@ -4833,7 +4834,12 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
         credential_resolver=_host_bridge_credential,
     )
     adapter = registry.get(adapter_id)
-    lock_scope = "endpoint" if "endpoint-serialized" in adapter.manifest.capabilities else "binding"
+    if "process-serialized" in adapter.manifest.capabilities:
+        lock_scope = "process"
+    elif "endpoint-serialized" in adapter.manifest.capabilities:
+        lock_scope = "endpoint"
+    else:
+        lock_scope = "binding"
     lock_target = (
         ACP_ROOT / "inbox" / "host_bridge_locks" / f"{binding_lock_fingerprint(binding, scope=lock_scope)}.runtime"
     ).resolve()
@@ -4849,6 +4855,7 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
         "retry_delay_seconds": retry_delay,
         "wait_action": wait_action,
         "registry": registry,
+        "lock_scope": lock_scope,
     }
 
 
@@ -5029,11 +5036,21 @@ def _host_bridge_poll(profile: dict[str, Any]) -> dict[str, Any]:
         store=JsonBridgeStore(profile["state_path"]),
         allowed_senders=profile["allowed_senders"],
     )
-    return bridge.handle(
-        response,
-        acknowledge=lambda response: _host_bridge_ack(profile, dict(response)),
-        reply=lambda delivery, result, reply_id: _host_bridge_reply(profile, delivery, result, reply_id),
+    # A process-serialized stdio lock covers only the leased host delivery;
+    # keeping it across /sessions/wait would starve another bridge on the same
+    # executable while the first bridge is idle. Endpoint/binding locks retain
+    # their historical outer-loop semantics.
+    delivery_lock = (
+        reserve_config(profile["lock_target"])
+        if profile.get("lock_scope") == "process"
+        else nullcontext()
     )
+    with delivery_lock:
+        return bridge.handle(
+            response,
+            acknowledge=lambda response: _host_bridge_ack(profile, dict(response)),
+            reply=lambda delivery, result, reply_id: _host_bridge_reply(profile, delivery, result, reply_id),
+        )
 
 
 def _stop_host_bridge(profile: dict[str, Any], cycles: int) -> dict[str, Any]:
@@ -5058,7 +5075,12 @@ def _report_host_bridge_retry(profile: dict[str, Any], exc: Exception) -> None:
 def host_bridge_once(args: argparse.Namespace) -> dict[str, Any]:
     profile = resolve_host_bridge_profile(args)
     try:
-        with reserve_config(profile["lock_target"]):
+        loop_lock = (
+            reserve_config(profile["lock_target"])
+            if profile.get("lock_scope") != "process"
+            else nullcontext()
+        )
+        with loop_lock:
             return _host_bridge_poll(profile)
     except KeyboardInterrupt:
         return _stop_host_bridge(profile, 0)
@@ -5068,7 +5090,12 @@ def host_bridge_start(args: argparse.Namespace, *, max_cycles: int | None = None
     profile = resolve_host_bridge_profile(args)
     cycles = 0
     try:
-        with reserve_config(profile["lock_target"]):
+        loop_lock = (
+            reserve_config(profile["lock_target"])
+            if profile.get("lock_scope") != "process"
+            else nullcontext()
+        )
+        with loop_lock:
             while True:
                 try:
                     result = _host_bridge_poll(profile)

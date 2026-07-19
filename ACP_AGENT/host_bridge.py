@@ -6,6 +6,7 @@ import base64
 import hashlib
 import json
 import math
+import os
 import tempfile
 import threading
 import time
@@ -160,6 +161,18 @@ def binding_lock_fingerprint(binding: HostBinding, *, scope: str = "binding") ->
     """
     if scope == "binding":
         return binding.fingerprint()
+    if scope == "process":
+        executable = binding.values.get("executable")
+        if not isinstance(executable, str) or not executable.strip():
+            raise HostBindingError("process lock scope requires an executable")
+        normalized = os.path.normcase(os.path.normpath(str(Path(executable).expanduser().resolve(strict=False))))
+        encoded = json.dumps(
+            {"adapter_id": binding.adapter_id, "executable": normalized},
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        return hashlib.sha256(encoded).hexdigest()
     if scope != "endpoint":
         raise ValueError("unsupported host binding lock scope")
     endpoint = binding.values.get("endpoint")

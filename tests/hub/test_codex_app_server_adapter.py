@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import queue
+import subprocess
 import sys
 from collections import deque
 from pathlib import Path
@@ -14,7 +16,7 @@ repo_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(repo_root / "ACP_AGENT"))
 
 from codex_app_server_adapter import CodexAppServerAdapter  # noqa: E402
-from codex_app_server_stdio_adapter import CodexAppServerStdioAdapter  # noqa: E402
+from codex_app_server_stdio_adapter import CodexAppServerStdioAdapter, _StdioConnection  # noqa: E402
 from host_bridge import (  # noqa: E402
     AdapterRegistry,
     HostBinding,
@@ -251,6 +253,112 @@ def test_codex_bindings_share_endpoint_lock_scope_but_not_delivery_identity() ->
 
     assert first.fingerprint() != second.fingerprint()
     assert binding_lock_fingerprint(first, scope="endpoint") == binding_lock_fingerprint(second, scope="endpoint")
+
+
+def test_codex_stdio_bindings_share_process_lock_scope_across_threads() -> None:
+    first = _stdio_binding()
+    second = HostBinding(
+        adapter_id="codex_app_server_stdio",
+        values={"executable": "C:/tools/../tools/codex.exe", "thread_id": "thread-2"},
+    )
+
+    assert first.fingerprint() != second.fingerprint()
+    assert binding_lock_fingerprint(first, scope="process") == binding_lock_fingerprint(second, scope="process")
+
+
+def test_codex_stdio_bindings_on_different_executables_have_isolated_process_scope() -> None:
+    first = _stdio_binding()
+    second = HostBinding(
+        adapter_id="codex_app_server_stdio",
+        values={"executable": "C:/tools/codex-alt.exe", "thread_id": THREAD_ID},
+    )
+
+    assert binding_lock_fingerprint(first, scope="process") != binding_lock_fingerprint(second, scope="process")
+
+
+def test_shared_codex_stdio_process_reservation_rejects_second_bridge(tmp_path: Path) -> None:
+    lock_target = tmp_path / f"{binding_lock_fingerprint(_stdio_binding(), scope='process')}.runtime"
+    with reserve_config(lock_target):
+        with pytest.raises(ValueError, match="reserved by another process"):
+            with reserve_config(lock_target):
+                pass
+
+
+class _FakeStdin:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def write(self, _value: str) -> None:
+        return None
+
+    def flush(self) -> None:
+        return None
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _FakeProcess:
+    def __init__(self, *, timeout: bool = False) -> None:
+        self.stdin = _FakeStdin()
+        self.stdout = []
+        self._exited = False
+        self._timeout = timeout
+        self.terminated = False
+        self.killed = False
+
+    def poll(self) -> int | None:
+        return 0 if self._exited else None
+
+    def wait(self, *, timeout: float | None = None) -> int:
+        if self._timeout and not self.terminated:
+            raise subprocess.TimeoutExpired("codex", timeout)
+        self._exited = True
+        return 0
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self._exited = True
+
+    def kill(self) -> None:
+        self.killed = True
+        self._exited = True
+
+
+def test_stdio_close_closes_stdin_before_waiting_for_process_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    process = _FakeProcess()
+    monkeypatch.setattr("codex_app_server_stdio_adapter.subprocess.Popen", lambda *_args, **_kwargs: process)
+
+    connection = _StdioConnection("C:/tools/codex.exe")
+    connection.close(timeout=0.1)
+
+    assert process.stdin.closed is True
+    assert process.terminated is False
+    assert process.killed is False
+
+
+def test_stdio_close_uses_bounded_forceful_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    process = _FakeProcess(timeout=True)
+    monkeypatch.setattr("codex_app_server_stdio_adapter.subprocess.Popen", lambda *_args, **_kwargs: process)
+
+    connection = _StdioConnection("C:/tools/codex.exe")
+    connection.close(timeout=0.1)
+
+    assert process.stdin.closed is True
+    assert process.terminated is True
+
+
+def test_stdio_close_drains_late_stdout_notifications() -> None:
+    connection = object.__new__(_StdioConnection)
+    connection._process = _FakeProcess()
+    connection._input = connection._process.stdin
+    connection._messages = queue.Queue()
+    connection._messages.put('late terminal event')
+    connection._messages.put(None)
+
+    connection.close(timeout=0.1)
+
+    assert connection._messages.empty()
 
 
 def test_codex_loopback_aliases_share_endpoint_lock_scope() -> None:
