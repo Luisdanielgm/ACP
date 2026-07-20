@@ -1,5 +1,12 @@
 # ACP_AGENT Changelog
 
+## 0.3.26 - 2026-07-20
+
+- EN: Wired the durable `CoordinatorPlan` into `reply-collector`: a correlated terminal `REPLY`/`INFO` now records its result, emits exactly one dependency-ready `TASK` with a deterministic id, marks it sent only after Hub acceptance, and ACKs the source only after both durable transitions. Restart after any crash window reuses the same TASK id; unrelated INFO keeps the legacy forwarding path.
+- ES: Se conectó el `CoordinatorPlan` durable con `reply-collector`: un `REPLY`/`INFO` terminal correlacionado ahora registra su resultado, emite exactamente un `TASK` listo por dependencias con ID determinista, lo marca enviado sólo después de la aceptación del Hub y confirma el origen únicamente tras ambas transiciones durables. Un reinicio en cualquier ventana de crash reutiliza el mismo ID; los INFO ajenos al plan conservan el forwarding anterior.
+- EN: Added explicit plan definition/state configuration, task-owner result correlation, declarative risk levels, mandatory approval gates for high/sensitive tasks, and fake end-to-end conformance proving the planned TASK binds to the same existing Codex Desktop thread while idle waits make zero host/model calls.
+- ES: Se agregó configuración explícita de definición/estado del plan, correlación del resultado con el owner, niveles de riesgo declarativos, gates obligatorios para tareas high/sensitive y conformidad fake extremo a extremo que prueba que el TASK planificado usa el mismo thread existente de Codex Desktop mientras el idle hace cero llamadas al host/modelo.
+
 ## 0.3.25 - 2026-07-20
 
 - EN: Added the portable `CoordinatorPlan` core: durable result correlation, dependency-aware next-safe-action selection, explicit approval gates, deterministic TASK delivery ids, restart-safe pending emissions, and fail-closed validation. This is the non-model foundation for autonomous coordinator continuation; transport wiring and Codex Desktop wake remain separate acceptance slices.

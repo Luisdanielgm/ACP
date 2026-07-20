@@ -29,6 +29,26 @@ class RecordingStore:
         self.records[key] = dict(record)
 
 
+class RecordingPlanner:
+    def __init__(self) -> None:
+        self.prepared: list[dict[str, Any]] = []
+        self.forwarded: list[dict[str, Any]] = []
+
+    def prepare(self, message: dict[str, Any]) -> dict[str, Any]:
+        self.prepared.append(dict(message))
+        return {
+            "status": "ready",
+            "message_id": "plan-task-1",
+            "task_id": "next-safe",
+            "to": "coordinator",
+            "action": "TASK",
+            "payload": json.dumps({"task_id": "next-safe", "instructions": "Continue safely"}),
+        }
+
+    def mark_forwarded(self, emission: dict[str, Any]) -> None:
+        self.forwarded.append(dict(emission))
+
+
 def _response(action: str = "REPLY") -> dict[str, Any]:
     return {
         "status": "message",
@@ -215,3 +235,45 @@ def test_task_wakeup_oversized_payload_stays_retryable(tmp_path: Path) -> None:
     response["message"]["payload"] = "x" * 32_700
     with pytest.raises(collector_module.CollectorDeliveryError, match="size limit"):
         collector.handle(response, forward=lambda _payload: pytest.fail("must not forward"), acknowledge=lambda _delivery: pytest.fail("must not ack"))
+
+
+def test_planned_task_replaces_wrapper_and_is_marked_before_source_ack(tmp_path: Path) -> None:
+    planner = RecordingPlanner()
+    collector = collector_module.ReplyCollector(
+        forward_to="coordinator",
+        allowed_senders=("worker",),
+        store=RecordingStore(),
+        state_path=tmp_path / "collector.json",
+        forward_action="TASK",
+        planner=planner,
+    )
+    order: list[str] = []
+    forwarded: list[dict[str, Any]] = []
+
+    result = collector.handle(
+        _response(),
+        forward=lambda payload: forwarded.append(payload) or order.append("forward") or {"status": "queued", "message_id": payload["id"]},
+        acknowledge=lambda delivery: order.append("ack") or {"status": "acknowledged", "message_id": delivery["message_id"]},
+    )
+
+    assert result["status"] == "completed"
+    assert forwarded[0]["id"] == "plan-task-1"
+    assert forwarded[0]["action"] == "TASK"
+    assert json.loads(forwarded[0]["payload"])["task_id"] == "next-safe"
+    assert planner.prepared[0]["id"] == "msg-1"
+    assert planner.forwarded[0]["message_id"] == "plan-task-1"
+    assert order == ["forward", "ack"]
+
+
+def test_planned_task_failure_never_marks_or_acks(tmp_path: Path) -> None:
+    planner = RecordingPlanner()
+    collector = collector_module.ReplyCollector(
+        forward_to="coordinator", allowed_senders=("worker",), store=RecordingStore(), state_path=tmp_path / "collector.json", planner=planner
+    )
+    with pytest.raises(collector_module.CollectorDeliveryError, match="durably accepted"):
+        collector.handle(
+            _response(),
+            forward=lambda _payload: {"status": "error", "message_id": "plan-task-1"},
+            acknowledge=lambda _delivery: pytest.fail("must not ack"),
+        )
+    assert planner.forwarded == []

@@ -23,7 +23,7 @@ def _plan() -> dict[str, object]:
         "tasks": [
             {
                 "task_id": "inspect",
-                "owner": "coordinator",
+                "owner": "worker",
                 "instructions": "Inspect the worker result.",
                 "status": "dispatched",
             },
@@ -88,6 +88,7 @@ def test_restart_reuses_the_same_durable_task_delivery_id(tmp_path: Path) -> Non
     assert restarted.next_safe_action() == emitted
     restarted.mark_sent(message_id=emitted["message_id"])
     assert restarted.next_safe_action() is None
+    assert restarted.action_for_receipt("reply-1") == {**emitted, "delivery_status": "sent"}
 
 
 def test_failure_or_quarantine_blocks_dependents_without_emitting(tmp_path: Path) -> None:
@@ -102,6 +103,20 @@ def test_failure_or_quarantine_blocks_dependents_without_emitting(tmp_path: Path
         assert plan.next_safe_action() is None
 
 
+def test_quarantine_blocks_dependents_but_advances_independent_work(tmp_path: Path) -> None:
+    definition = _plan()
+    definition["tasks"].append(
+        {"task_id": "independent", "owner": "coordinator", "instructions": "Continue independent audit", "depends_on": []}
+    )
+    plan = plan_module.CoordinatorPlan(tmp_path / "plan.json", definition)
+
+    result = plan.record_result(message_id="reply-1", sender="worker", action="REPLY", payload=_result(outcome="quarantined"))
+
+    assert result["status"] == "ready"
+    assert result["task_id"] == "independent"
+    assert plan.snapshot()["tasks"]["next-safe"]["status"] == "blocked_dependency"
+
+
 def test_fail_closed_for_unknown_task_malformed_payload_or_unauthorized_action(tmp_path: Path) -> None:
     plan = plan_module.CoordinatorPlan(tmp_path / "plan.json", _plan())
 
@@ -113,6 +128,42 @@ def test_fail_closed_for_unknown_task_malformed_payload_or_unauthorized_action(t
         plan.record_result(message_id="reply-3", sender="worker", action="TASK", payload=_result())
 
 
+def test_result_sender_must_match_dispatched_task_owner(tmp_path: Path) -> None:
+    plan = plan_module.CoordinatorPlan(tmp_path / "plan.json", _plan())
+
+    with pytest.raises(plan_module.PlanError, match="task owner"):
+        plan.record_result(message_id="reply-1", sender="other-worker", action="REPLY", payload=_result())
+
+    assert plan.snapshot()["tasks"]["inspect"]["status"] == "dispatched"
+
+
+def test_sensitive_risk_requires_explicit_approval_gate(tmp_path: Path) -> None:
+    definition = _plan()
+    definition["tasks"].append(
+        {
+            "task_id": "unsafe",
+            "owner": "worker",
+            "instructions": "Perform a sensitive mutation",
+            "risk": "sensitive",
+            "depends_on": [],
+        }
+    )
+
+    with pytest.raises(plan_module.PlanError, match="sensitive risk requires explicit approval"):
+        plan_module.CoordinatorPlan(tmp_path / "plan.json", definition)
+
+
+def test_risk_is_declarative_and_preserved_in_emitted_task(tmp_path: Path) -> None:
+    definition = _plan()
+    definition["tasks"][1]["risk"] = "read_only"
+    plan = plan_module.CoordinatorPlan(tmp_path / "plan.json", definition)
+
+    action = plan.record_result(message_id="reply-1", sender="worker", action="REPLY", payload=_result())
+
+    assert plan.snapshot()["tasks"]["next-safe"]["risk"] == "read_only"
+    assert json.loads(action["payload"])["risk"] == "read_only"
+
+
 def test_approval_gate_can_only_be_released_explicitly(tmp_path: Path) -> None:
     plan = plan_module.CoordinatorPlan(tmp_path / "plan.json", _plan())
     plan.record_result(message_id="reply-1", sender="worker", action="REPLY", payload=_result())
@@ -121,3 +172,16 @@ def test_approval_gate_can_only_be_released_explicitly(tmp_path: Path) -> None:
         plan.release_approval("approval-gated", approved=False)
     plan.release_approval("approval-gated", approved=True)
     assert plan.snapshot()["tasks"]["approval-gated"]["status"] == "pending"
+
+
+def test_collector_planner_reuses_delivery_after_crash_and_marks_it_sent(tmp_path: Path) -> None:
+    plan = plan_module.CoordinatorPlan(tmp_path / "plan.json", _plan())
+    planner = plan_module.CoordinatorPlanCollector(plan)
+    message = {"id": "reply-1", "from": "worker", "action": "REPLY", "payload": _result()}
+
+    first = planner.prepare(message)
+    assert first is not None
+    assert planner.prepare(message) == first
+    planner.mark_forwarded(first)
+    assert plan.next_safe_action() is None
+    assert planner.prepare(message) == first

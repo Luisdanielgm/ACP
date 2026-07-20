@@ -30,6 +30,7 @@ if str(ACP_ROOT) not in sys.path:
 
 import websockets
 
+from coordinator_plan import CoordinatorPlan, CoordinatorPlanCollector, PlanError
 from reply_collector import CollectorDeliveryError, ReplyCollector, next_wait_action
 from host_bridge_supervisor import BridgeSpec, HostBridgeSupervisor, SupervisorPaths
 from runner_support import (
@@ -907,6 +908,8 @@ def build_parser() -> argparse.ArgumentParser:
         collector_command_parser.add_argument("--allow-sender", action="append", dest="collector_allowed_senders", default=None, help="Trusted worker sender; repeat as needed")
         collector_command_parser.add_argument("--state-path", default=None, help="Durable collector ledger/state path")
         collector_command_parser.add_argument("--forward-action", choices=("TASK",), default=None, help="Wrap REPLY/INFO as traceable TASK for a TASK-only coordinator")
+        collector_command_parser.add_argument("--plan-definition", default=None, help="Explicit product-owned coordinator plan definition JSON")
+        collector_command_parser.add_argument("--plan-state", default=None, help="Durable mutable coordinator plan state JSON")
         collector_command_parser.add_argument("--wait-timeout-seconds", type=float, default=30.0)
         collector_command_parser.add_argument("--retry-delay-seconds", type=float, default=2.0)
 
@@ -5145,6 +5148,14 @@ def resolve_reply_collector_profile(args: argparse.Namespace) -> dict[str, Any]:
     retry_delay = float(getattr(args, "retry_delay_seconds", 2.0) or 2.0)
     if wait_timeout <= 0 or wait_timeout > 300 or retry_delay <= 0:
         raise ValueError("reply-collector timeout and retry delay must be positive (timeout <= 300)")
+    raw_plan_definition = getattr(args, "plan_definition", None) or get_config_value(config, "coordinator_plan_definition_path")
+    raw_plan_state = getattr(args, "plan_state", None) or get_config_value(config, "coordinator_plan_state_path")
+    if bool(raw_plan_definition) != bool(raw_plan_state):
+        raise ValueError("reply-collector coordinator plan requires both definition and state paths")
+    plan_definition_path = resolve_config_path(settings.base_dir, raw_plan_definition)
+    plan_state_path = resolve_config_path(settings.base_dir, raw_plan_state)
+    if plan_definition_path is not None and plan_definition_path == plan_state_path:
+        raise ValueError("coordinator plan definition and state paths must be distinct")
     return {
         "settings": settings,
         "forward_to": forward_to.strip(),
@@ -5154,6 +5165,8 @@ def resolve_reply_collector_profile(args: argparse.Namespace) -> dict[str, Any]:
         "forward_action": str(forward_action).upper() if forward_action is not None else None,
         "wait_timeout_seconds": wait_timeout,
         "retry_delay_seconds": retry_delay,
+        "plan_definition_path": plan_definition_path,
+        "plan_state_path": plan_state_path,
     }
 
 
@@ -5181,6 +5194,16 @@ def _reply_collector_once(profile: dict[str, Any]) -> dict[str, Any]:
     response = _reply_collector_wait(profile)
     if response.get("status") != "message":
         return {"status": response.get("status", "idle")}
+    planner = None
+    if profile.get("plan_definition_path") is not None:
+        try:
+            definition = json.loads(Path(profile["plan_definition_path"]).read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise CollectorDeliveryError("coordinator plan definition is unreadable") from exc
+        try:
+            planner = CoordinatorPlanCollector(CoordinatorPlan(Path(profile["plan_state_path"]), definition))
+        except PlanError as exc:
+            raise CollectorDeliveryError(str(exc)) from exc
     collector = ReplyCollector(
         forward_to=profile["forward_to"],
         allowed_senders=profile["allowed_senders"],
@@ -5188,6 +5211,7 @@ def _reply_collector_once(profile: dict[str, Any]) -> dict[str, Any]:
         state_path=profile["state_path"],
         collector_id=settings.agent_name,
         forward_action=profile["forward_action"],
+        planner=planner,
     )
     delivery = response.get("delivery") if isinstance(response.get("delivery"), dict) else {}
     def forward(payload: dict[str, Any]) -> Mapping[str, Any]:

@@ -20,6 +20,11 @@ class CollectorStore(Protocol):
     def put(self, key: str, record: Mapping[str, Any]) -> None: ...
 
 
+class CollectorPlanner(Protocol):
+    def prepare(self, message: Mapping[str, Any]) -> Mapping[str, Any] | None: ...
+    def mark_forwarded(self, emission: Mapping[str, Any]) -> None: ...
+
+
 class ReplyCollector:
     """Forward REPLY/INFO durably before acknowledging the leased message.
 
@@ -36,6 +41,7 @@ class ReplyCollector:
         state_path: Path,
         collector_id: str = "reply-collector",
         forward_action: str | None = None,
+        planner: CollectorPlanner | None = None,
     ) -> None:
         if not forward_to or not collector_id:
             raise ValueError("forward target and collector identity are required")
@@ -47,6 +53,7 @@ class ReplyCollector:
         self.state_path = Path(state_path)
         self.collector_id = collector_id
         self.forward_action = forward_action.upper() if forward_action is not None else None
+        self.planner = planner
 
     def handle(
         self,
@@ -84,11 +91,21 @@ class ReplyCollector:
             return {"status": "duplicate", "message_id": message_id}
         received = {"status": "received", "message_id": message_id, "action": action, "sender": sender}
         self.store.put(message_id, received)
-        id_namespace = "acp-reply-task-wakeup" if self.forward_action == "TASK" else "acp-reply"
-        forwarded_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{id_namespace}:{message_id}:{self.forward_to}"))
-        forward_action = self.forward_action or action
-        forward_payload = original_payload
-        if self.forward_action == "TASK":
+        planned = self.planner.prepare(message) if self.planner is not None else None
+        if planned is not None:
+            forwarded_id = str(planned.get("message_id") or "")
+            forward_to = str(planned.get("to") or "")
+            forward_action = str(planned.get("action") or "").upper()
+            forward_payload = planned.get("payload")
+            if not forwarded_id or not forward_to or forward_action != "TASK" or not isinstance(forward_payload, str):
+                raise CollectorDeliveryError("planned task is malformed")
+        else:
+            id_namespace = "acp-reply-task-wakeup" if self.forward_action == "TASK" else "acp-reply"
+            forwarded_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{id_namespace}:{message_id}:{self.forward_to}"))
+            forward_to = self.forward_to
+            forward_action = self.forward_action or action
+            forward_payload = original_payload
+        if planned is None and self.forward_action == "TASK":
             forward_payload = json.dumps(
                 {
                     "instructions": "Handle this collected response using the preserved source metadata.",
@@ -106,7 +123,7 @@ class ReplyCollector:
             "id": forwarded_id,
             "session_id": message.get("session_id"),
             "from": self.collector_id,
-            "to": self.forward_to,
+            "to": forward_to,
             "action": forward_action,
             "payload": forward_payload,
             "in_reply_to": message_id,
@@ -118,6 +135,8 @@ class ReplyCollector:
             or accepted.get("message_id") != forwarded_id
         ):
             raise CollectorDeliveryError("forward was not durably accepted")
+        if planned is not None and self.planner is not None:
+            self.planner.mark_forwarded(planned)
         self.store.put(message_id, {**received, "status": "forwarded", "forwarded_id": forwarded_id})
         ack_result = acknowledge(dict(delivery))
         if (

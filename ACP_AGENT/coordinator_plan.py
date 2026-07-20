@@ -21,6 +21,8 @@ class PlanError(ValueError):
 _SUCCESS = {"success", "succeeded", "completed", "done", "ok", "passed"}
 _TERMINAL_FAILURE = {"failed", "error", "quarantined", "interrupted"}
 _INITIAL_STATUSES = {"pending", "dispatched"}
+_RISKS = {"read_only", "low", "medium", "high", "sensitive"}
+_APPROVAL_RISKS = {"high", "sensitive"}
 
 
 class CoordinatorPlan:
@@ -60,6 +62,8 @@ class CoordinatorPlan:
             raise PlanError("result references an unknown task")
         if task["status"] != "dispatched":
             raise PlanError("result does not match a dispatched task")
+        if sender != task["owner"]:
+            raise PlanError("result sender does not match task owner")
         outcome = self._normalize_outcome(result["outcome"])
         task["status"] = outcome
         next_action: dict[str, Any] | None = None
@@ -67,12 +71,14 @@ class CoordinatorPlan:
             next_action = self._prepare_next_safe_action()
         else:
             self._refresh_blocked_dependencies()
+            next_action = self._prepare_next_safe_action()
         self._state["receipts"][message_id] = {
             "task_id": task_id,
             "sender": sender,
             "action": str(action).upper(),
             "outcome": outcome,
             "next_task_id": next_action.get("task_id") if next_action else None,
+            "next_message_id": next_action.get("message_id") if next_action else None,
         }
         self._save()
         if next_action is not None:
@@ -84,6 +90,18 @@ class CoordinatorPlan:
             if isinstance(emission, dict) and emission.get("status") == "pending":
                 return self._public_emission(emission)
         return None
+
+    def action_for_receipt(self, message_id: str) -> dict[str, Any] | None:
+        receipt = self._state["receipts"].get(message_id)
+        if not isinstance(receipt, dict):
+            raise PlanError("unknown result receipt")
+        delivery_id = receipt.get("next_message_id")
+        if not isinstance(delivery_id, str) or not delivery_id:
+            return None
+        emission = self._state["emissions"].get(delivery_id)
+        if not isinstance(emission, dict):
+            raise PlanError("result receipt references an unknown delivery")
+        return {**self._public_emission(emission), "delivery_status": emission["status"]}
 
     def mark_sent(self, *, message_id: str) -> None:
         emission = self._state["emissions"].get(message_id)
@@ -136,6 +154,9 @@ class CoordinatorPlan:
             raise PlanError("plan task set does not match durable state")
         if not isinstance(loaded.get("receipts"), dict) or not isinstance(loaded.get("emissions"), dict):
             raise PlanError("plan state has an invalid format")
+        for task_id, task in tasks.items():
+            if isinstance(task, dict):
+                task.setdefault("risk", self.definition["tasks"][task_id]["risk"])
         return loaded
 
     def _save(self) -> None:
@@ -162,6 +183,8 @@ class CoordinatorPlan:
             instructions = raw_task.get("instructions")
             dependencies = raw_task.get("depends_on") or []
             status = raw_task.get("status", "pending")
+            risk = raw_task.get("risk", "low")
+            approval_required = bool(raw_task.get("approval_required", False))
             if (
                 not isinstance(task_id, str)
                 or not task_id.strip()
@@ -172,15 +195,19 @@ class CoordinatorPlan:
                 or not isinstance(dependencies, list)
                 or not all(isinstance(dep, str) and dep.strip() for dep in dependencies)
                 or status not in _INITIAL_STATUSES
+                or risk not in _RISKS
                 or task_id in tasks
             ):
                 raise PlanError("plan task is invalid")
+            if risk in _APPROVAL_RISKS and not approval_required:
+                raise PlanError(f"{risk} risk requires explicit approval")
             tasks[task_id] = {
                 "task_id": task_id,
                 "owner": owner,
                 "instructions": instructions,
                 "depends_on": list(dependencies),
-                "approval_required": bool(raw_task.get("approval_required", False)),
+                "approval_required": approval_required,
+                "risk": risk,
                 "status": status,
             }
         for task in tasks.values():
@@ -229,7 +256,12 @@ class CoordinatorPlan:
                 "to": task["owner"],
                 "action": "TASK",
                 "payload": json.dumps(
-                    {"task_id": task_id, "instructions": task["instructions"], "plan_id": self._state["plan_id"]},
+                    {
+                        "task_id": task_id,
+                        "instructions": task["instructions"],
+                        "plan_id": self._state["plan_id"],
+                        "risk": task["risk"],
+                    },
                     sort_keys=True,
                     separators=(",", ":"),
                 ),
@@ -265,3 +297,37 @@ class CoordinatorPlan:
             "action": emission["action"],
             "payload": emission["payload"],
         }
+
+
+class CoordinatorPlanCollector:
+    """Adapt a CoordinatorPlan to ReplyCollector's durable planner contract."""
+
+    def __init__(self, plan: CoordinatorPlan) -> None:
+        self.plan = plan
+
+    def prepare(self, message: Mapping[str, Any]) -> dict[str, Any] | None:
+        message_id = str(message.get("id") or "")
+        try:
+            candidate = json.loads(message.get("payload"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return None
+        if (
+            not isinstance(candidate, dict)
+            or not isinstance(candidate.get("task_id"), str)
+            or not isinstance(candidate.get("outcome"), str)
+        ):
+            return None
+        self.plan.record_result(
+            message_id=message_id,
+            sender=str(message.get("from") or ""),
+            action=str(message.get("action") or ""),
+            payload=message.get("payload"),
+        )
+        action = self.plan.action_for_receipt(message_id)
+        if action is None:
+            return None
+        action.pop("delivery_status", None)
+        return action
+
+    def mark_forwarded(self, emission: Mapping[str, Any]) -> None:
+        self.plan.mark_sent(message_id=str(emission.get("message_id") or ""))

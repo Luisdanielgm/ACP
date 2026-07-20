@@ -657,6 +657,32 @@ python ACP_AGENT/acp.py host-supervisor stop --config ACP_AGENT/agents/superviso
 python ACP_AGENT/acp.py reply-collector start --config ACP_AGENT/agents/coordinator-reply-collector.json --forward-action TASK
 ```
 
+Para continuidad determinista por roadmap, el producto —no ACP— declara un
+JSON de plan y un archivo distinto para estado mutable. Configurar ambos en el
+miembro collector (o pasarlos por CLI):
+
+```json
+{
+  "coordinator_plan_definition_path": "plans/roadmap.json",
+  "coordinator_plan_state_path": "inbox/reply-collector/roadmap.state.json"
+}
+```
+
+```powershell
+python ACP_AGENT/acp.py reply-collector start --config ACP_AGENT/agents/coordinator-reply-collector.json --forward-action TASK --plan-definition plans/roadmap.json --plan-state inbox/reply-collector/roadmap.state.json
+```
+
+Cada tarea declara `task_id`, `owner`, `instructions`, `depends_on`, `risk` y
+`approval_required`. Un resultado sólo avanza si su sender coincide con el
+owner de la tarea despachada. `risk: high` o `risk: sensitive` exige
+`approval_required: true` y nunca se libera implícitamente. El collector
+espera primero; con inbox vacío no carga el plan ni llama al host/modelo.
+Después de un resultado terminal, persiste el resultado y la emisión, envía el
+único TASK dependency-ready con ID determinista, marca `sent` tras aceptación
+durable del Hub y sólo entonces ACKea el REPLY/INFO original. Los INFO que no
+declaran `task_id` + `outcome` siguen por el wrapper compatible y no envenenan
+el plan.
+
 `--forward-action TASK` es obligatorio cuando el destino es un Host Bridge
 coordinador filtrado a TASK: encapsula la acción original y su trazabilidad en
 el payload, evitando que REPLY/INFO queden fuera del wait. El collector debe
