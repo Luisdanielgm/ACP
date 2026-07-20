@@ -60,7 +60,8 @@ def test_discover_downloads_dir_falls_back_to_process_cwd(monkeypatch, tmp_path:
 def test_canonical_bundle_contains_all_host_bridge_components() -> None:
     bundle_path = ensure_bundle_archive()
     required = {
-        "host_bridge.py",
+"host_bridge.py",
+"coordinator_plan.py",
         "acp.py",
         "acp_distribution.py",
         "DISTRIBUTION.json",
@@ -82,7 +83,8 @@ def test_canonical_bundle_members_match_source_hashes() -> None:
     members = {
         "acp.py",
         "acp_distribution.py",
-        "host_bridge.py",
+"host_bridge.py",
+"coordinator_plan.py",
         "codex_app_server_adapter.py",
         "claude_code_cli_adapter.py",
         "install_from_bundle.py",

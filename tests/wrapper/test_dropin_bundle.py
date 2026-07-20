@@ -23,7 +23,8 @@ def _load_module(module_name: str, path: Path) -> object:
 def _copy_bundle_runtime_files(source: Path, target: Path) -> None:
     for name in (
         "acp.py",
-        "host_bridge.py",
+    "host_bridge.py",
+    "coordinator_plan.py",
         "codex_app_server_adapter.py",
         "claude_code_cli_adapter.py",
         "config_reservation.py",
@@ -57,6 +58,7 @@ def test_dropin_bundle_tracks_runtime_and_skill_sources() -> None:
     assert "websockets" in requirements
     assert Path("ACP_AGENT/update_from_release.py").exists()
     assert Path("ACP_AGENT/host_bridge.py").exists()
+    assert Path("ACP_AGENT/coordinator_plan.py").exists()
     assert Path("ACP_AGENT/codex_app_server_adapter.py").exists()
     assert Path("ACP_AGENT/claude_code_cli_adapter.py").exists()
     assert Path("ACP_AGENT/acp_distribution.py").exists()
@@ -139,6 +141,7 @@ def test_dropin_installer_creates_skill_and_agent_folder(tmp_path: Path) -> None
     assert acp_path == acp_root
     assert (acp_path / "acp.py").exists()
     assert (acp_path / "host_bridge.py").exists()
+    assert (acp_path / "coordinator_plan.py").exists()
     assert (acp_path / "codex_app_server_adapter.py").exists()
     assert (acp_path / "claude_code_cli_adapter.py").exists()
     assert (acp_path / "acp_distribution.py").exists()
@@ -306,7 +309,7 @@ def test_dropin_installer_main_works_in_place_without_prompting_for_optional_tok
     assert (target / "requirements.txt").exists()
     bundle_info = json.loads((target / "BUNDLE_INFO.json").read_text(encoding="utf-8"))
     assert bundle_info["installed_version"] == Path("ACP_AGENT/VERSION").read_text(encoding="utf-8").strip()
-    assert bundle_info["release_date"] == "2026-07-19"
+    assert bundle_info["release_date"] == "2026-07-20"
     assert bundle_info["installed_at"]
 
 

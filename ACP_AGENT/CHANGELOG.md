@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.25 - 2026-07-20
+
+- EN: Added the portable `CoordinatorPlan` core: durable result correlation, dependency-aware next-safe-action selection, explicit approval gates, deterministic TASK delivery ids, restart-safe pending emissions, and fail-closed validation. This is the non-model foundation for autonomous coordinator continuation; transport wiring and Codex Desktop wake remain separate acceptance slices.
+- ES: Se agrego el nucleo portable `CoordinatorPlan`: correlacion durable de resultados, seleccion de siguiente accion segura por dependencias, gates de aprobacion explicitos, IDs deterministas de entrega TASK, emisiones pendientes seguras ante reinicio y validacion fail-closed. Es la base no-LLM para la continuidad autonoma del coordinador; el cableado de transporte y el wake de Codex Desktop siguen siendo slices de aceptacion separados.
+
 ## 0.3.24 - 2026-07-19
 
 - EN: Serialized Codex app-server stdio deliveries by normalized executable and added bounded graceful process shutdown so chained turns cannot overlap an unfinished stdio runtime.

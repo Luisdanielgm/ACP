@@ -6,6 +6,7 @@
   "default_hub_http": null,
   "default_hub_ws": null,
   "default_manifest_url": null,
+  "coordination_capabilities": ["durable-plan", "dependency-aware-next-action", "explicit-approval-gates"],
   "host_adapters": [
     {"adapter_id": "opencode_server", "capabilities": ["existing-session", "http-delivery", "correlated-result"]},
     {"adapter_id": "kilo_serve", "capabilities": ["existing-session", "http-delivery", "correlated-result", "directory-context"]},
