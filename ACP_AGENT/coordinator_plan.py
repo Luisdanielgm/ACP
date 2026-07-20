@@ -348,7 +348,7 @@ class CoordinatorPlanCollector:
         )
         action = self.plan.action_for_receipt(message_id)
         if action is None:
-            return None
+            return {"status": "handled"}
         action.pop("delivery_status", None)
         return action
 

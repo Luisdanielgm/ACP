@@ -92,19 +92,30 @@ class ReplyCollector:
         received = {"status": "received", "message_id": message_id, "action": action, "sender": sender}
         self.store.put(message_id, received)
         planned = self.planner.prepare(message) if self.planner is not None else None
-        if planned is not None:
+        plan_handled = isinstance(planned, Mapping) and planned.get("status") == "handled"
+        if planned is not None and not plan_handled:
             forwarded_id = str(planned.get("message_id") or "")
             forward_to = str(planned.get("to") or "")
             forward_action = str(planned.get("action") or "").upper()
             forward_payload = planned.get("payload")
             if not forwarded_id or not forward_to or forward_action != "TASK" or not isinstance(forward_payload, str):
                 raise CollectorDeliveryError("planned task is malformed")
-        else:
+        elif not plan_handled:
             id_namespace = "acp-reply-task-wakeup" if self.forward_action == "TASK" else "acp-reply"
             forwarded_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{id_namespace}:{message_id}:{self.forward_to}"))
             forward_to = self.forward_to
             forward_action = self.forward_action or action
             forward_payload = original_payload
+        if plan_handled:
+            ack_result = acknowledge(dict(delivery))
+            if (
+                not isinstance(ack_result, Mapping)
+                or ack_result.get("status") != "acknowledged"
+                or ack_result.get("message_id") != str(delivery.get("message_id") or message_id)
+            ):
+                raise CollectorDeliveryError("ACP ack did not confirm the leased message")
+            self.store.put(message_id, {**received, "status": "acked", "forwarded_id": None})
+            return {"status": "completed", "message_id": message_id, "forwarded_id": None}
         if planned is None and self.forward_action == "TASK":
             forward_payload = json.dumps(
                 {

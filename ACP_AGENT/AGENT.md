@@ -684,7 +684,10 @@ durable del Hub y sólo entonces ACKea el REPLY/INFO original. Los INFO que no
 declaran `task_id` + `outcome` siguen por el wrapper compatible y no envenenan
 el plan. Un fallo/interrupción sólo crea otro intento cuando el producto lo
 declaró con `max_attempts`; cada intento tiene un ID determinista distinto,
-mientras el replay por crash del mismo intento conserva su ID.
+mientras el replay por crash del mismo intento conserva su ID. Un resultado
+estructurado ya incorporado al plan que no tiene siguiente tarea lista se ACKea
+sin crear un TASK legacy de wake; esto evita bucles al llegar a un gate o al
+final del plan.
 
 Si una tarea del plan tiene como `owner` un Host Bridge worker, ese worker debe
 incluir también la identidad del collector/plan dispatcher en

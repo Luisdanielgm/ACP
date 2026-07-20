@@ -231,6 +231,75 @@ def test_unstructured_info_keeps_legacy_wrapper_without_poisoning_plan(tmp_path:
     assert state["receipts"] == {}
 
 
+def test_terminal_plan_result_without_next_task_acks_without_wakeup_loop(tmp_path: Path, monkeypatch: Any) -> None:
+    config = _config(tmp_path)
+    config_payload = json.loads(config.read_text(encoding="utf-8"))
+    definition_path = Path(config_payload["coordinator_plan_definition_path"])
+    definition_path.write_text(
+        json.dumps(
+            {
+                "plan_id": "terminal-plan",
+                "tasks": [
+                    {
+                        "task_id": "worker-task",
+                        "owner": "worker",
+                        "instructions": "Finish the plan",
+                        "status": "dispatched",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    profile = acp_cli.resolve_reply_collector_profile(_args(config))
+    hub = FakeHub([_reply()])
+    monkeypatch.setattr(acp_cli, "post_json", hub)
+
+    result = acp_cli._reply_collector_once(profile)
+
+    assert result == {"status": "completed", "message_id": "reply-1", "forwarded_id": None}
+    assert [route for route, _ in hub.calls] == ["/sessions/wait", "/sessions/ack"]
+    state = json.loads((tmp_path / "plan-state.json").read_text(encoding="utf-8"))
+    assert state["tasks"]["worker-task"]["status"] == "completed"
+
+
+def test_terminal_plan_result_retries_ack_without_creating_wakeup(tmp_path: Path, monkeypatch: Any) -> None:
+    config = _config(tmp_path)
+    config_payload = json.loads(config.read_text(encoding="utf-8"))
+    definition_path = Path(config_payload["coordinator_plan_definition_path"])
+    definition_path.write_text(
+        json.dumps(
+            {
+                "plan_id": "terminal-plan",
+                "tasks": [
+                    {
+                        "task_id": "worker-task",
+                        "owner": "worker",
+                        "instructions": "Finish the plan",
+                        "status": "dispatched",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    profile = acp_cli.resolve_reply_collector_profile(_args(config))
+    hub = FakeHub([_reply(), _reply()])
+    hub.fail_ack_once = True
+    monkeypatch.setattr(acp_cli, "post_json", hub)
+
+    with pytest.raises(acp_cli.CollectorDeliveryError, match="did not confirm"):
+        acp_cli._reply_collector_once(profile)
+    assert acp_cli._reply_collector_once(profile)["forwarded_id"] is None
+
+    assert [route for route, _ in hub.calls] == [
+        "/sessions/wait",
+        "/sessions/ack",
+        "/sessions/wait",
+        "/sessions/ack",
+    ]
+
+
 class RecordingCodexAdapter:
     manifest = HostManifest(
         adapter_id="codex_app_server",

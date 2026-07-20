@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.29 - 2026-07-20
+
+- EN: Fixed terminal coordinator-plan results with no dependency-ready successor so Reply Collector ACKs them without generating a legacy wake TASK. ACK retries remain durable and idempotent.
+- ES: Se corrigieron los resultados terminales del plan sin sucesor listo: Reply Collector los ACKea sin generar un TASK legacy de wake. Los reintentos de ACK permanecen durables e idempotentes.
+
 ## 0.3.28 - 2026-07-20
 
 - EN: Added explicit per-task `max_attempts` to durable coordinator plans. A failed/interrupted result may emit a new deterministic attempt only when the product declared a retry budget; crash replay within an attempt keeps the same delivery ID and exhausted tasks remain blocked.
