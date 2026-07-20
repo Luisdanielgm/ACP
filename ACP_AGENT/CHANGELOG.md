@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.27 - 2026-07-20
+
+- EN: Clarified the fail-closed allowlist contract for direct plan dispatch: every worker selected as a plan owner must explicitly trust the Reply Collector/plan-dispatcher identity. ACP never spoofs the coordinator sender; a missing entry fails before host invocation and leaves the TASK unacknowledged for safe retry.
+- ES: Se aclaró el contrato fail-closed de allowlist para despacho directo del plan: cada worker seleccionado como owner debe confiar explícitamente en la identidad Reply Collector/plan dispatcher. ACP nunca suplanta al coordinador; una entrada faltante falla antes de invocar el host y deja el TASK sin ACK para reintento seguro.
+
 ## 0.3.26 - 2026-07-20
 
 - EN: Wired the durable `CoordinatorPlan` into `reply-collector`: a correlated terminal `REPLY`/`INFO` now records its result, emits exactly one dependency-ready `TASK` with a deterministic id, marks it sent only after Hub acceptance, and ACKs the source only after both durable transitions. Restart after any crash window reuses the same TASK id; unrelated INFO keeps the legacy forwarding path.

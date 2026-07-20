@@ -683,6 +683,12 @@ durable del Hub y sólo entonces ACKea el REPLY/INFO original. Los INFO que no
 declaran `task_id` + `outcome` siguen por el wrapper compatible y no envenenan
 el plan.
 
+Si una tarea del plan tiene como `owner` un Host Bridge worker, ese worker debe
+incluir también la identidad del collector/plan dispatcher en
+`host_bridge_allowed_senders`. El sender real no se suplanta como coordinador:
+la ausencia de esta allowlist falla antes de invocar el host y conserva el TASK
+sin ACK para reintento seguro.
+
 `--forward-action TASK` es obligatorio cuando el destino es un Host Bridge
 coordinador filtrado a TASK: encapsula la acción original y su trazabilidad en
 el payload, evitando que REPLY/INFO queden fuera del wait. El collector debe
