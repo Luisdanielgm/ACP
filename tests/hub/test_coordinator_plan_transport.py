@@ -137,6 +137,29 @@ def test_plan_send_failure_keeps_source_unacked_and_plan_pending(tmp_path: Path,
     assert state["tasks"]["desktop-next"]["status"] == "ready_to_send"
 
 
+def test_failed_result_with_retry_budget_dispatches_next_attempt_before_ack(tmp_path: Path, monkeypatch: Any) -> None:
+    config = _config(tmp_path)
+    config_payload = json.loads(config.read_text(encoding="utf-8"))
+    definition_path = Path(config_payload["coordinator_plan_definition_path"])
+    definition = json.loads(definition_path.read_text(encoding="utf-8"))
+    definition["tasks"][0]["max_attempts"] = 2
+    definition_path.write_text(json.dumps(definition), encoding="utf-8")
+    failed = _reply()
+    failed["message"]["payload"] = json.dumps({"task_id": "worker-task", "outcome": "failed"})
+    profile = acp_cli.resolve_reply_collector_profile(_args(config))
+    hub = FakeHub([failed])
+    monkeypatch.setattr(acp_cli, "post_json", hub)
+
+    assert acp_cli._reply_collector_once(profile)["status"] == "completed"
+
+    sent = next(payload for route, payload in hub.calls if route == "/sessions/send")
+    retry_payload = json.loads(sent["payload"])
+    assert sent["to"] == "worker"
+    assert retry_payload["task_id"] == "worker-task"
+    assert retry_payload["attempt"] == 2
+    assert [route for route, _ in hub.calls] == ["/sessions/wait", "/sessions/send", "/sessions/ack"]
+
+
 def test_empty_wait_does_not_load_plan_or_emit_task(tmp_path: Path, monkeypatch: Any) -> None:
     config = _config(tmp_path)
     config_payload = json.loads(config.read_text(encoding="utf-8"))

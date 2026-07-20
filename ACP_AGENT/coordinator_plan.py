@@ -66,11 +66,13 @@ class CoordinatorPlan:
             raise PlanError("result sender does not match task owner")
         outcome = self._normalize_outcome(result["outcome"])
         task["status"] = outcome
+        task["last_outcome"] = outcome
         next_action: dict[str, Any] | None = None
         if outcome == "completed":
             next_action = self._prepare_next_safe_action()
         else:
-            self._refresh_blocked_dependencies()
+            if task["attempt"] < task["max_attempts"]:
+                task["status"] = "pending"
             next_action = self._prepare_next_safe_action()
         self._state["receipts"][message_id] = {
             "task_id": task_id,
@@ -157,6 +159,11 @@ class CoordinatorPlan:
         for task_id, task in tasks.items():
             if isinstance(task, dict):
                 task.setdefault("risk", self.definition["tasks"][task_id]["risk"])
+                task["max_attempts"] = self.definition["tasks"][task_id]["max_attempts"]
+                task.setdefault(
+                    "attempt",
+                    0 if task.get("status") in {"pending", "blocked_dependency", "blocked_approval"} else 1,
+                )
         return loaded
 
     def _save(self) -> None:
@@ -185,6 +192,7 @@ class CoordinatorPlan:
             status = raw_task.get("status", "pending")
             risk = raw_task.get("risk", "low")
             approval_required = bool(raw_task.get("approval_required", False))
+            max_attempts = raw_task.get("max_attempts", 1)
             if (
                 not isinstance(task_id, str)
                 or not task_id.strip()
@@ -196,6 +204,9 @@ class CoordinatorPlan:
                 or not all(isinstance(dep, str) and dep.strip() for dep in dependencies)
                 or status not in _INITIAL_STATUSES
                 or risk not in _RISKS
+                or not isinstance(max_attempts, int)
+                or isinstance(max_attempts, bool)
+                or not 1 <= max_attempts <= 5
                 or task_id in tasks
             ):
                 raise PlanError("plan task is invalid")
@@ -209,6 +220,8 @@ class CoordinatorPlan:
                 "approval_required": approval_required,
                 "risk": risk,
                 "status": status,
+                "attempt": 1 if status == "dispatched" else 0,
+                "max_attempts": max_attempts,
             }
         for task in tasks.values():
             if any(dep not in tasks for dep in task["depends_on"]):
@@ -249,7 +262,15 @@ class CoordinatorPlan:
             if task["approval_required"]:
                 task["status"] = "blocked_approval"
                 continue
-            message_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"acp-plan-task:{self._state['plan_id']}:{task_id}"))
+            next_attempt = task["attempt"] + 1
+            if next_attempt > task["max_attempts"]:
+                task["status"] = "failed"
+                continue
+            task["attempt"] = next_attempt
+            identity = f"acp-plan-task:{self._state['plan_id']}:{task_id}"
+            if next_attempt > 1:
+                identity = f"{identity}:attempt:{next_attempt}"
+            message_id = str(uuid.uuid5(uuid.NAMESPACE_URL, identity))
             emission = {
                 "message_id": message_id,
                 "task_id": task_id,
@@ -261,6 +282,8 @@ class CoordinatorPlan:
                         "instructions": task["instructions"],
                         "plan_id": self._state["plan_id"],
                         "risk": task["risk"],
+                        "attempt": next_attempt,
+                        "max_attempts": task["max_attempts"],
                     },
                     sort_keys=True,
                     separators=(",", ":"),

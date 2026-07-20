@@ -672,8 +672,9 @@ miembro collector (o pasarlos por CLI):
 python ACP_AGENT/acp.py reply-collector start --config ACP_AGENT/agents/coordinator-reply-collector.json --forward-action TASK --plan-definition plans/roadmap.json --plan-state inbox/reply-collector/roadmap.state.json
 ```
 
-Cada tarea declara `task_id`, `owner`, `instructions`, `depends_on`, `risk` y
-`approval_required`. Un resultado sólo avanza si su sender coincide con el
+Cada tarea declara `task_id`, `owner`, `instructions`, `depends_on`, `risk`,
+`approval_required` y opcionalmente `max_attempts` (1 por defecto, máximo 5).
+Un resultado sólo avanza si su sender coincide con el
 owner de la tarea despachada. `risk: high` o `risk: sensitive` exige
 `approval_required: true` y nunca se libera implícitamente. El collector
 espera primero; con inbox vacío no carga el plan ni llama al host/modelo.
@@ -681,7 +682,9 @@ Después de un resultado terminal, persiste el resultado y la emisión, envía e
 único TASK dependency-ready con ID determinista, marca `sent` tras aceptación
 durable del Hub y sólo entonces ACKea el REPLY/INFO original. Los INFO que no
 declaran `task_id` + `outcome` siguen por el wrapper compatible y no envenenan
-el plan.
+el plan. Un fallo/interrupción sólo crea otro intento cuando el producto lo
+declaró con `max_attempts`; cada intento tiene un ID determinista distinto,
+mientras el replay por crash del mismo intento conserva su ID.
 
 Si una tarea del plan tiene como `owner` un Host Bridge worker, ese worker debe
 incluir también la identidad del collector/plan dispatcher en

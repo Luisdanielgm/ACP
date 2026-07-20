@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -101,6 +102,75 @@ def test_failure_or_quarantine_blocks_dependents_without_emitting(tmp_path: Path
         assert state["tasks"]["inspect"]["status"] == outcome
         assert state["tasks"]["next-safe"]["status"] == "blocked_dependency"
         assert plan.next_safe_action() is None
+
+
+def test_explicit_retry_budget_emits_a_new_attempt_without_reusing_delivery_id(tmp_path: Path) -> None:
+    definition = _plan()
+    definition["tasks"][0]["max_attempts"] = 2
+    plan = plan_module.CoordinatorPlan(tmp_path / "plan.json", definition)
+
+    retry = plan.record_result(
+        message_id="reply-failed-attempt-1",
+        sender="worker",
+        action="REPLY",
+        payload=_result(outcome="failed"),
+    )
+
+    first_attempt_id = str(uuid.uuid5(uuid.NAMESPACE_URL, "acp-plan-task:pilot-plan:inspect"))
+    assert retry["status"] == "ready"
+    assert retry["task_id"] == "inspect"
+    assert retry["message_id"] != first_attempt_id
+    assert json.loads(retry["payload"])["attempt"] == 2
+    assert plan.snapshot()["tasks"]["inspect"]["attempt"] == 2
+
+
+def test_retry_attempt_is_restart_safe_and_success_unblocks_dependencies(tmp_path: Path) -> None:
+    definition = _plan()
+    definition["tasks"][0]["max_attempts"] = 2
+    path = tmp_path / "plan.json"
+    plan = plan_module.CoordinatorPlan(path, definition)
+    retry = plan.record_result(
+        message_id="reply-failed-attempt-1",
+        sender="worker",
+        action="REPLY",
+        payload=_result(outcome="interrupted"),
+    )
+    plan.mark_sent(message_id=retry["message_id"])
+
+    restarted = plan_module.CoordinatorPlan(path, definition)
+    next_action = restarted.record_result(
+        message_id="reply-success-attempt-2",
+        sender="worker",
+        action="REPLY",
+        payload=_result(outcome="success"),
+    )
+
+    assert next_action["task_id"] == "next-safe"
+    assert restarted.snapshot()["tasks"]["inspect"]["status"] == "completed"
+    duplicate = restarted.record_result(
+        message_id="reply-failed-attempt-1",
+        sender="worker",
+        action="REPLY",
+        payload=_result(outcome="interrupted"),
+    )
+    assert duplicate["task_id"] == "inspect"
+
+
+def test_existing_state_migrates_attempt_budget_without_rewriting_task_set(tmp_path: Path) -> None:
+    definition = _plan()
+    path = tmp_path / "plan.json"
+    original = plan_module.CoordinatorPlan(path, definition)
+    legacy = original.snapshot()
+    for task in legacy["tasks"].values():
+        task.pop("attempt", None)
+        task.pop("max_attempts", None)
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+    definition["tasks"][0]["max_attempts"] = 2
+
+    migrated = plan_module.CoordinatorPlan(path, definition).snapshot()
+
+    assert migrated["tasks"]["inspect"]["attempt"] == 1
+    assert migrated["tasks"]["inspect"]["max_attempts"] == 2
 
 
 def test_quarantine_blocks_dependents_but_advances_independent_work(tmp_path: Path) -> None:

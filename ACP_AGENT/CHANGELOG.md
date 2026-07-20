@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.28 - 2026-07-20
+
+- EN: Added explicit per-task `max_attempts` to durable coordinator plans. A failed/interrupted result may emit a new deterministic attempt only when the product declared a retry budget; crash replay within an attempt keeps the same delivery ID and exhausted tasks remain blocked.
+- ES: Se agrego `max_attempts` explicito por tarea a los planes durables del coordinador. Un resultado fallido/interrumpido solo puede emitir un nuevo intento determinista cuando el producto declaro ese presupuesto; el replay por crash dentro de un intento conserva el mismo ID y las tareas agotadas permanecen bloqueadas.
+
 ## 0.3.27 - 2026-07-20
 
 - EN: Clarified the fail-closed allowlist contract for direct plan dispatch: every worker selected as a plan owner must explicitly trust the Reply Collector/plan-dispatcher identity. ACP never spoofs the coordinator sender; a missing entry fails before host invocation and leaves the TASK unacknowledged for safe retry.
