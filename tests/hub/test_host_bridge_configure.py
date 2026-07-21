@@ -360,7 +360,7 @@ def test_configure_command_persists_listener_member_token_reference_without_secr
             agent="coordinator-listener",
             member_token_ref="env:ACP_COORDINATOR_LISTENER_TOKEN",
             coordinator=None,
-            bridge_allowed_senders=["codex-pilot-coordinator"],
+            bridge_allowed_senders=["coordinator-member"],
         )
     )
 
