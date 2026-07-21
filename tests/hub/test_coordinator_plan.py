@@ -244,6 +244,75 @@ def test_definition_accepts_durable_terminal_and_blocked_statuses(tmp_path: Path
     assert state["tasks"]["next-safe"]["status"] == "blocked_dependency"
 
 
+def test_existing_state_accepts_new_pending_task_from_plan_extension(tmp_path: Path) -> None:
+    base = {
+        "plan_id": "extendable-plan",
+        "tasks": [
+            {
+                "task_id": "inspect",
+                "owner": "worker",
+                "instructions": "Inspect the worker result.",
+                "status": "dispatched",
+            }
+        ],
+    }
+    path = tmp_path / "plan.json"
+    plan_module.CoordinatorPlan(path, base).record_result(
+        message_id="reply-1",
+        sender="worker",
+        action="REPLY",
+        payload=_result(),
+    )
+
+    extended = {
+        **base,
+        "tasks": [
+            *base["tasks"],
+            {
+                "task_id": "new-safe",
+                "owner": "worker-2",
+                "instructions": "Continue the next dependency-ready audit.",
+                "depends_on": ["inspect"],
+                "risk": "read_only",
+            },
+        ],
+    }
+    restarted = plan_module.CoordinatorPlan(path, extended)
+
+    action = restarted.next_safe_action()
+    assert action is not None
+    assert action["task_id"] == "new-safe"
+    assert restarted.snapshot()["tasks"]["new-safe"]["status"] == "ready_to_send"
+
+
+def test_existing_task_contract_cannot_change_during_plan_extension(tmp_path: Path) -> None:
+    base = {
+        "plan_id": "immutable-plan",
+        "tasks": [
+            {
+                "task_id": "inspect",
+                "owner": "worker",
+                "instructions": "Inspect the worker result.",
+                "status": "dispatched",
+            }
+        ],
+    }
+    path = tmp_path / "plan.json"
+    plan_module.CoordinatorPlan(path, base)
+    changed = {
+        **base,
+        "tasks": [
+            {
+                **base["tasks"][0],
+                "instructions": "Replace the original contract.",
+            }
+        ],
+    }
+
+    with pytest.raises(plan_module.PlanError, match="existing task contract"):
+        plan_module.CoordinatorPlan(path, changed)
+
+
 def test_quarantine_blocks_dependents_but_advances_independent_work(tmp_path: Path) -> None:
     definition = _plan()
     definition["tasks"].append(

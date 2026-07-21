@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.39 - 2026-07-21
+
+- EN: Allow a product-owned coordinator plan to append dependency-ready pending tasks without invalidating durable state; existing task contracts remain immutable and fail closed on drift.
+- ES: Permite que un plan de coordinacion propiedad del producto agregue tareas pendientes listas por dependencia sin invalidar el estado durable; los contratos existentes permanecen inmutables y cualquier deriva falla de forma segura.
+
 ## 0.3.38 - 2026-07-21
 
 - EN: Allow an explicitly declared, already-authorized listener config to own the ACP wait/ACK/REPLY lease while the primary HostBridge config keeps the opaque existing host binding; no sessions or members are created.

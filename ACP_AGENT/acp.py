@@ -5220,7 +5220,58 @@ def _host_bridge_advance_plan(profile: dict[str, Any], response: dict[str, Any])
     return emission
 
 
+def _host_bridge_flush_pending_plan(profile: dict[str, Any]) -> dict[str, Any] | None:
+    """Durably deliver a plan emission left pending across a restart.
+
+    This path is transport-only: it never leases a message or invokes the
+    bound host. A deterministic emission id makes a retry after a send crash
+    safe, and the state is marked sent only after the Hub accepts the TASK.
+    """
+    definition_path = profile.get("plan_definition_path")
+    state_path = profile.get("plan_state_path")
+    if definition_path is None or state_path is None:
+        return None
+    if not Path(definition_path).is_file() or not Path(state_path).is_file():
+        return None
+    try:
+        definition = json.loads(Path(definition_path).read_text(encoding="utf-8"))
+        planner = CoordinatorPlanCollector(CoordinatorPlan(Path(state_path), definition))
+    except (OSError, ValueError, json.JSONDecodeError, PlanError) as exc:
+        raise HostDeliveryError("host bridge coordinator plan could not resume") from exc
+    emission = planner.plan.next_safe_action()
+    if emission is None:
+        return None
+    settings: HubAgentSettings = profile["settings"]
+    sent = post_json(
+        hub_http=settings.hub_http,
+        route="/sessions/send",
+        payload={
+            "id": emission["message_id"],
+            "session_id": settings.session_id,
+            "agent_name": settings.agent_name,
+            "member_token": settings.member_token,
+            "to": emission["to"],
+            "action": emission["action"],
+            "payload": emission.get("payload"),
+        },
+        token=settings.token,
+        timeout_seconds=HOST_BRIDGE_REPLY_TIMEOUT_SECONDS,
+    )
+    if sent.get("message_id") != emission["message_id"] or sent.get("delivery") not in {
+        "immediate",
+        "queued",
+        "duplicate",
+    }:
+        raise HostDeliveryError("host bridge pending plan TASK was not durably accepted")
+    try:
+        planner.mark_forwarded(emission)
+    except PlanError as exc:
+        raise HostDeliveryError("host bridge pending plan could not persist its delivery") from exc
+    return emission
+
+
 def _host_bridge_poll(profile: dict[str, Any]) -> dict[str, Any]:
+    _host_bridge_flush_pending_plan(profile)
     response = _host_bridge_wait(profile)
     if _is_host_bridge_system_notice(response):
         message = response.get("message")

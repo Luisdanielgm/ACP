@@ -14,6 +14,7 @@ import pytest
 repo_root = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(repo_root / "ACP_AGENT"))
 from host_bridge import AdapterRegistry, HostManifest, HostResult
+from coordinator_plan import CoordinatorPlan
 _SPEC = importlib.util.spec_from_file_location("acp_plan_transport", repo_root / "ACP_AGENT" / "acp.py")
 assert _SPEC is not None and _SPEC.loader is not None
 acp_cli = importlib.util.module_from_spec(_SPEC)
@@ -194,6 +195,49 @@ def test_empty_wait_does_not_load_plan_or_emit_task(tmp_path: Path, monkeypatch:
 
     assert acp_cli._reply_collector_once(profile) == {"status": "timeout"}
     assert [route for route, _ in hub.calls] == ["/sessions/wait"]
+
+
+def test_host_bridge_flushes_pending_plan_emission_after_restart(tmp_path: Path, monkeypatch: Any) -> None:
+    base_definition = {
+        "plan_id": "restart-plan",
+        "tasks": [
+            {"task_id": "inspect", "owner": "worker", "instructions": "Inspect result", "status": "dispatched"}
+        ],
+    }
+    definition_path = tmp_path / "definition.json"
+    state_path = tmp_path / "plan-state.json"
+    definition_path.write_text(json.dumps(base_definition), encoding="utf-8")
+    CoordinatorPlan(state_path, base_definition).record_result(
+        message_id="reply-1",
+        sender="worker",
+        action="REPLY",
+        payload=json.dumps({"task_id": "inspect", "outcome": "success"}),
+    )
+    extended_definition = {
+        **base_definition,
+        "tasks": [
+            *base_definition["tasks"],
+            {"task_id": "next-safe", "owner": "worker-2", "instructions": "Continue safely", "depends_on": ["inspect"]},
+        ],
+    }
+    definition_path.write_text(json.dumps(extended_definition), encoding="utf-8")
+    config = json.loads(_coordinator_config(tmp_path).read_text(encoding="utf-8"))
+    config["coordinator_plan_definition_path"] = str(definition_path)
+    config["coordinator_plan_state_path"] = str(state_path)
+    config_path = tmp_path / "coordinator-with-plan.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    profile = acp_cli.resolve_host_bridge_profile(_host_args(config_path))
+    hub = FakeHub([])
+    monkeypatch.setattr(acp_cli, "post_json", hub)
+
+    emission = acp_cli._host_bridge_flush_pending_plan(profile)
+
+    assert emission is not None
+    assert emission["task_id"] == "next-safe"
+    assert [route for route, _ in hub.calls] == ["/sessions/send"]
+    sent = hub.calls[0][1]
+    assert sent["to"] == "worker-2"
+    assert json.loads(state_path.read_text(encoding="utf-8"))["emissions"][sent["id"]]["status"] == "sent"
 
 
 def test_plan_paths_are_required_as_a_distinct_pair(tmp_path: Path) -> None:

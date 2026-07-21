@@ -193,8 +193,24 @@ class CoordinatorPlan:
         if loaded.get("plan_id") != self.definition["plan_id"]:
             raise PlanError("plan id does not match durable state")
         tasks = loaded.get("tasks")
-        if not isinstance(tasks, dict) or set(tasks) != set(self.definition["tasks"]):
+        definition_tasks = self.definition["tasks"]
+        if not isinstance(tasks, dict) or not set(tasks).issubset(set(definition_tasks)):
             raise PlanError("plan task set does not match durable state")
+        for task_id, state_task in tasks.items():
+            if not isinstance(state_task, dict):
+                raise PlanError("plan task state is invalid")
+            definition_task = definition_tasks[task_id]
+            for field in ("owner", "instructions", "depends_on", "approval_required", "risk"):
+                if state_task.get(field) != definition_task.get(field):
+                    raise PlanError("existing task contract cannot change")
+        extended = False
+        for task_id, definition_task in definition_tasks.items():
+            if task_id in tasks:
+                continue
+            if definition_task["status"] not in {"pending", "blocked_dependency", "blocked_approval"}:
+                raise PlanError("new plan tasks must start pending or blocked")
+            tasks[task_id] = dict(definition_task)
+            extended = True
         if not isinstance(loaded.get("receipts"), dict) or not isinstance(loaded.get("emissions"), dict):
             raise PlanError("plan state has an invalid format")
         for task_id, task in tasks.items():
@@ -205,6 +221,10 @@ class CoordinatorPlan:
                     "attempt",
                     0 if task.get("status") in {"pending", "blocked_dependency", "blocked_approval"} else 1,
                 )
+        self._state = loaded
+        if extended:
+            self._prepare_next_safe_action()
+            self._save()
         return loaded
 
     def _save(self) -> None:
