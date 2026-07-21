@@ -193,7 +193,9 @@ Para `codex_cli`, el binding es un ejecutable Codex absoluto explicito, un
 `session_id` existente y un `directory` absoluto opcional; sin endpoint. El wake
 reanuda exactamente esa sesion con `codex exec resume <session_id> --json` y nunca
 inicia una sesion nueva. En idle no se spawnea Codex. Los reintentos fallan
-cerrados: la CLI no expone reconciliacion durable por prompt.
+cerrados: la CLI debe devolver un evento de identidad de thread que coincida
+con el `session_id` antes de aceptar un resultado terminal y no expone
+reconciliacion durable por prompt.
 
 Para `claude_desktop` no existe todavia una interfaz oficial, estable y
 comprobable para enlazar o reanudar una conversacion existente (MCP no ofrece

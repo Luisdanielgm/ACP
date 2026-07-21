@@ -175,7 +175,9 @@ class CodexCliAdapter:
             raise HostDeliveryError("Codex CLI did not return a terminal result")
         if completed_turns > 1:
             raise HostDeliveryError("Codex CLI returned ambiguous terminal results")
-        if thread_id is not None and thread_id != session_id:
+        if thread_id is None:
+            raise HostDeliveryError("Codex CLI did not return a resumed session identity")
+        if thread_id != session_id:
             raise HostDeliveryError("Codex CLI resumed a different session")
         summary = final_text or "Codex CLI completed without a text response"
         return HostResult(outcome="success", summary=summary[:_MAX_SUMMARY_CHARS])

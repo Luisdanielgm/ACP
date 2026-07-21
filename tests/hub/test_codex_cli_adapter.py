@@ -168,6 +168,14 @@ def test_codex_cli_requires_terminal_turn_completed() -> None:
         adapter.deliver(_binding(), _delivery())
 
 
+def test_codex_cli_requires_resumed_thread_identity_before_accepting_terminal_result() -> None:
+    runner = FakeRunner(_completed(_stream({"type": "turn.completed"})))
+    adapter = CodexCliAdapter(request_timeout_seconds=1, runner=runner)
+
+    with pytest.raises(HostDeliveryError, match="session identity"):
+        adapter.deliver(_binding(), _delivery())
+
+
 def test_codex_cli_turn_failed_is_reported_as_failure() -> None:
     runner = FakeRunner(
         _completed(

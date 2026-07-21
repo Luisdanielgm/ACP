@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.44 - 2026-07-21
+
+- EN: Require Codex CLI resume output to identify the exact existing session before accepting a terminal result.
+- ES: Exige que la salida de reanudación de Codex CLI identifique la sesión existente exacta antes de aceptar un resultado terminal.
+
 ## 0.3.43 - 2026-07-21
 
 - EN: Keep the portable supervisor alive when one member config is reserved by another process; report the bridge as `reserved` and retry it without spawning duplicates.
