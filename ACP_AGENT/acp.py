@@ -4993,6 +4993,13 @@ def _host_bridge_delivery_deadline(response: dict[str, Any]) -> float:
     return time.monotonic() + remaining
 
 
+def _is_host_bridge_system_notice(response: Any) -> bool:
+    if not isinstance(response, dict):
+        return False
+    message = response.get("message")
+    return isinstance(message, dict) and isinstance(message.get("system_event"), str)
+
+
 def _host_bridge_request_budget(
     profile: dict[str, Any],
     *,
@@ -5156,6 +5163,15 @@ def _host_bridge_advance_plan(profile: dict[str, Any], response: dict[str, Any])
 
 def _host_bridge_poll(profile: dict[str, Any]) -> dict[str, Any]:
     response = _host_bridge_wait(profile)
+    if _is_host_bridge_system_notice(response):
+        message = response.get("message")
+        emit_json_line(
+            {
+                "status": "host_bridge_notice",
+                "event": message.get("system_event"),
+            }
+        )
+        return {"status": "notice", "event": message.get("system_event")}
     registry = profile["registry"]
     if isinstance(response, dict) and response.get("status") == "message":
         profile["delivery_deadline_monotonic"] = _host_bridge_delivery_deadline(response)

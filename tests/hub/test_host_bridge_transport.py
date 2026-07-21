@@ -210,6 +210,39 @@ def test_host_bridge_retries_active_wait_without_exiting_supervisor(
     assert adapter.deliveries == []
 
 
+def test_host_bridge_consumes_system_notice_without_host_call_or_ack(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    config_path = _write_config(tmp_path)
+    notice = {
+        "status": "message",
+        "message": {
+            "id": "notice-1",
+            "session_id": "coordination-session",
+            "from": "hub",
+            "to": "bridge-agent",
+            "action": "INFO",
+            "system_event": "WAIT_CANCELLED",
+            "payload": "wait cancelled by member request",
+        },
+    }
+    hub = FakeHub([notice, {"status": "timeout"}])
+    adapter = RecordingAdapter()
+    retries: list[str] = []
+    monkeypatch.setattr(acp_cli, "post_json", hub.post_json)
+    monkeypatch.setattr(acp_cli, "default_registry", lambda **_kwargs: _registry(adapter))
+    monkeypatch.setattr(acp_cli, "_report_host_bridge_retry", lambda _profile, exc: retries.append(str(exc)))
+
+    result = acp_cli.host_bridge_start(_args(config_path, command="start"), max_cycles=2)
+
+    assert result == {"status": "idle", "cycles": 2}
+    assert [route for route, _ in hub.calls if route == "/sessions/wait"] == ["/sessions/wait"] * 2
+    assert not any(route in {"/sessions/send", "/sessions/ack"} for route, _ in hub.calls)
+    assert adapter.deliveries == []
+    assert retries == []
+
+
 def test_host_bridge_default_wait_accepts_all_actions_without_server_filter(tmp_path: Path, monkeypatch: Any) -> None:
     config_path = _write_config(tmp_path)
     hub = FakeHub([{"status": "timeout"}])

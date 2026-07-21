@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.34 - 2026-07-20
+
+- EN: Consume ACP system notices without host invocation, REPLY, or ACK; cancellation/restart notices no longer masquerade as missing delivery leases and block the next wait.
+- ES: Se consumen avisos de sistema ACP sin invocar el host, emitir REPLY ni hacer ACK; los avisos de cancelacion/reinicio ya no se confunden con leases faltantes ni bloquean la siguiente espera.
+
 ## 0.3.33 - 2026-07-20
 
 - EN: Keep HostBridge processes alive while a stale Hub wait lease drains; `WAIT_ALREADY_ACTIVE` is retried safely instead of terminating the supervisor child and exhausting restart limits.
