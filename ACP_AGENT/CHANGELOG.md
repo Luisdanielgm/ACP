@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.40 - 2026-07-21
+
+- EN: Use the full safe budget of the Hub's 300-second delivery lease for host progress, retaining the reply/ack/lease reserve instead of failing at 240 seconds.
+- ES: Usa el presupuesto seguro completo del lease ACP de 300 segundos para el progreso del host, conservando la reserva de reply/ack/lease en lugar de fallar a los 240 segundos.
+
 ## 0.3.39 - 2026-07-21
 
 - EN: Allow a product-owned coordinator plan to append dependency-ready pending tasks without invalidating durable state; existing task contracts remain immutable and fail closed on drift.

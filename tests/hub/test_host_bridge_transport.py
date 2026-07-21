@@ -750,7 +750,7 @@ def test_non_string_receipt_fails_closed_before_host(tmp_path: Path, monkeypatch
 
 
 def test_host_timeout_cannot_outlive_delivery_lease(tmp_path: Path, monkeypatch: Any) -> None:
-    config_path = _write_config(tmp_path, host_bridge_host_timeout_seconds=241.0)
+    config_path = _write_config(tmp_path, host_bridge_host_timeout_seconds=256.0)
     hub = FakeHub([])
     monkeypatch.setattr(acp_cli, "post_json", hub.post_json)
 
@@ -758,6 +758,14 @@ def test_host_timeout_cannot_outlive_delivery_lease(tmp_path: Path, monkeypatch:
         acp_cli.host_bridge_once(_args(config_path))
 
     assert hub.calls == []
+
+
+def test_host_bridge_allows_full_300_second_lease_budget(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path, host_bridge_host_timeout_seconds=255.0)
+
+    profile = acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+    assert profile["host_timeout_seconds"] == 255.0
 
 
 @pytest.mark.parametrize("mode", ["once", "start"])
