@@ -109,20 +109,32 @@ def process_is_alive(pid: int) -> bool:
 
 
 def _terminate_process(pid: int) -> bool:
-    try:
-        if os.name != "nt":
+    if os.name != "nt":
+        try:
             os.kill(pid, signal.SIGTERM)
             return True
-        # Ask Windows to close the full child tree gracefully; no force flag.
-        completed = subprocess.run(
-            ["taskkill", "/PID", str(pid), "/T"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        )
-        return completed.returncode == 0
-    except OSError:
-        return False
+        except OSError:
+            return False
+
+    # First request a graceful full-tree close. Detached console processes may
+    # not accept it, so use one bounded Windows-native force fallback.
+    for force in (False, True):
+        command = ["taskkill", "/PID", str(pid), "/T"]
+        if force:
+            command.append("/F")
+        try:
+            completed = subprocess.run(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=5.0,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if completed.returncode == 0:
+            return True
+    return False
 
 
 def _probe_health(url: str, timeout: float) -> bool:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -64,6 +65,23 @@ def test_windows_pid_health_never_uses_os_kill(monkeypatch):
         supervisor_module.os, "kill", lambda *_args: pytest.fail("Windows PID health signaled a process")
     )
     assert supervisor_module.process_is_alive(42) is True
+
+
+def test_windows_termination_uses_bounded_force_fallback(monkeypatch):
+    calls: list[list[str]] = []
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 1 if len(calls) == 1 else 0)
+
+    monkeypatch.setattr(supervisor_module.os, "name", "nt")
+    monkeypatch.setattr(supervisor_module.subprocess, "run", run)
+
+    assert supervisor_module._terminate_process(55) is True
+    assert calls == [
+        ["taskkill", "/PID", "55", "/T"],
+        ["taskkill", "/PID", "55", "/T", "/F"],
+    ]
 
 
 def test_first_reconcile_starts_bridge_and_writes_atomic_state(tmp_path):

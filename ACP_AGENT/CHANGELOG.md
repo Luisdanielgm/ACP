@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.31 - 2026-07-20
+
+- EN: Fixed Windows Host Bridge supervisor shutdown for detached bridge processes. Stop/restart now requests a graceful full-tree close first, then uses one bounded native force fallback when the process cannot accept the graceful request; PID health checks remain non-signaling.
+- ES: Se corrigio el cierre del supervisor Host Bridge en Windows para procesos bridge detached. Stop/restart solicita primero un cierre graceful de todo el arbol y luego usa un unico fallback nativo forzado y acotado si el proceso no acepta el cierre; los health checks de PID siguen sin enviar senales.
+
 ## 0.3.30 - 2026-07-20
 
 - EN: Generalized HostBridge ingress so one existing host task can receive configured `TASK`, `REPLY`, and `INFO` actions through one durable wait. Empty waits still make zero host/model calls; only `TASK` emits an automatic correlated `REPLY`, preventing result loops.
