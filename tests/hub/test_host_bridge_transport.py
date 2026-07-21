@@ -220,6 +220,53 @@ def test_host_bridge_uses_distinct_listener_identity_for_wait_and_reply(tmp_path
     assert profile["binding"].values["session_id"] == "desktop-thread"
 
 
+def test_listener_member_token_can_resolve_from_explicit_environment_reference(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    monkeypatch.setenv("ACP_COORDINATOR_LISTENER_TOKEN", "listener-token-from-env")
+    listener_path = _write_listener_config(
+        tmp_path,
+        member_token=None,
+        member_token_ref="env:ACP_COORDINATOR_LISTENER_TOKEN",
+    )
+    config_path = _write_config(
+        tmp_path,
+        agent_name="visible-coordinator",
+        member_token="visible-member-token",
+        host_bridge_session_id="desktop-thread",
+        host_bridge_listener_config=str(listener_path),
+    )
+
+    profile = acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+    assert profile["settings"].member_token == "listener-token-from-env"
+
+
+def test_listener_member_token_reference_fails_closed_when_missing(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.delenv("ACP_COORDINATOR_LISTENER_TOKEN", raising=False)
+    listener_path = _write_listener_config(
+        tmp_path,
+        member_token=None,
+        member_token_ref="env:ACP_COORDINATOR_LISTENER_TOKEN",
+    )
+    config_path = _write_config(tmp_path, host_bridge_listener_config=str(listener_path))
+
+    with pytest.raises(acp_cli.HostBindingError, match="member_token_ref"):
+        acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+
+def test_listener_literal_and_member_token_reference_are_ambiguous(tmp_path: Path) -> None:
+    listener_path = _write_listener_config(
+        tmp_path,
+        member_token="literal-token",
+        member_token_ref="env:ACP_COORDINATOR_LISTENER_TOKEN",
+    )
+    config_path = _write_config(tmp_path, host_bridge_listener_config=str(listener_path))
+
+    with pytest.raises(acp_cli.HostBindingError, match="mutually exclusive"):
+        acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+
 def test_separate_listener_does_not_require_host_binding_member_credentials(tmp_path: Path) -> None:
     listener_path = _write_listener_config(tmp_path)
     config_path = _write_config(

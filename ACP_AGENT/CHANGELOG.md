@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.41 - 2026-07-21
+
+- EN: Allow an explicitly declared HostBridge listener to resolve its existing ACP member token from `member_token_ref: "env:NAME"`, keeping the token out of config files and failing closed when the reference is missing or ambiguous.
+- ES: Permite que un listener HostBridge declarado explicitamente resuelva el token de miembro ACP existente mediante `member_token_ref: "env:NAME"`, manteniendo el token fuera de los configs y fallando de forma segura si la referencia falta o es ambigua.
+
 ## 0.3.40 - 2026-07-21
 
 - EN: Use the full safe budget of the Hub's 300-second delivery lease for host progress, retaining the reply/ack/lease reserve instead of failing at 240 seconds.

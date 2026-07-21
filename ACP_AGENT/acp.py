@@ -1268,6 +1268,18 @@ def resolve_send_settings(args: argparse.Namespace) -> SendSettings:
     return SendSettings(outbox_dir=outbox_dir.resolve())
 
 
+def _resolve_env_reference(value: Any, *, field_name: str) -> str | None:
+    """Resolve an explicit env:NAME reference without accepting literals."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not re.fullmatch(r"env:[A-Za-z_][A-Za-z0-9_]*", value):
+        raise HostBindingError(f"{field_name} must use env:NAME")
+    resolved = os.environ.get(value[4:])
+    if not isinstance(resolved, str) or not resolved.strip():
+        raise HostBindingError(f"{field_name} reference cannot be resolved")
+    return resolved.strip()
+
+
 def resolve_hub_agent_settings(args: argparse.Namespace, *, require_hub_http: bool = True) -> HubAgentSettings:
     command_name = getattr(args, "command", "acp")
     if command_name == "runner":
@@ -1309,6 +1321,11 @@ def resolve_hub_agent_settings(args: argparse.Namespace, *, require_hub_http: bo
         token = get_config_value(config, "token")
     session_id = get_config_value(config, "session_id")
     member_token = get_config_value(config, "member_token")
+    member_token_ref = get_config_value(config, "member_token_ref")
+    if member_token is not None and member_token_ref is not None:
+        raise HostBindingError("member_token and member_token_ref are mutually exclusive")
+    if member_token is None:
+        member_token = _resolve_env_reference(member_token_ref, field_name="member_token_ref")
     dashboard_session_path = _normalize_dashboard_session_path(get_config_value(config, "dashboard_session_path")) or "/dashboard/session"
 
     if not isinstance(agent_name, str) or not agent_name.strip():

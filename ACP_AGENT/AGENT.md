@@ -636,6 +636,11 @@ no produce respuesta automatica; se ACKea solo despues del resultado terminal
 durable. Asi todos los miembros pueden recibir las tres acciones sin un agente
 intermediario ni un ciclo REPLY -> REPLY.
 
+Cuando el listener debe ser distinto de la tarea visible, su config puede usar
+`member_token_ref: "env:NAME"` en lugar de guardar el token literal. ACP resuelve
+esa referencia solo al iniciar el wait, exige que la variable exista y nunca
+persiste ni imprime su valor; el `session_id` sigue siendo el de la sala existente.
+
 Bootstrap generico de perfil (idempotente, sin llamada al host ni sesion nueva):
 
 ```powershell
