@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.38 - 2026-07-21
+
+- EN: Allow an explicitly declared, already-authorized listener config to own the ACP wait/ACK/REPLY lease while the primary HostBridge config keeps the opaque existing host binding; no sessions or members are created.
+- ES: Permite declarar una configuracion de listener ya autorizada para que sea dueña del lease ACP de espera/ACK/REPLY mientras la configuracion primaria conserva el binding opaco del host existente; no se crean sesiones ni miembros.
+
 ## 0.3.37 - 2026-07-21
 
 - EN: Reconcile a late successful REPLY from the task owner after a terminal host failure without emitting a duplicate turn; dependency continuation remains approval-gated.

@@ -144,6 +144,19 @@ def _write_config(tmp_path: Path, **overrides: Any) -> Path:
     return path
 
 
+def _write_listener_config(tmp_path: Path, **overrides: Any) -> Path:
+    config = {
+        "agent_name": "coordinator-listener",
+        "hub_http": "https://hub.example",
+        "session_id": "coordination-session",
+        "member_token": "listener-member-token",
+    }
+    config.update(overrides)
+    path = tmp_path / "coordinator-listener.json"
+    path.write_text(json.dumps(config), encoding="utf-8")
+    return path
+
+
 def _args(config_path: Path, *, command: str = "once") -> argparse.Namespace:
     return argparse.Namespace(
         command="host-bridge",
@@ -163,6 +176,7 @@ def _args(config_path: Path, *, command: str = "once") -> argparse.Namespace:
         retry_delay_seconds=None,
         wait_action=None,
         accepted_actions=None,
+        listener_config=None,
     )
 
 
@@ -184,7 +198,100 @@ def test_empty_host_bridge_cycles_never_touch_host_or_model(tmp_path: Path, monk
     assert result == {"status": "idle", "cycles": 3}
     assert [route for route, _ in hub.calls] == ["/sessions/wait"] * 3
     assert adapter.deliveries == []
+
+
+def test_host_bridge_uses_distinct_listener_identity_for_wait_and_reply(tmp_path: Path, monkeypatch: Any) -> None:
+    listener_path = _write_listener_config(tmp_path, agent_name="coordinator-listener")
+    config_path = _write_config(
+        tmp_path,
+        agent_name="visible-coordinator",
+        session_id="coordination-session",
+        member_token="visible-member-token",
+        host_bridge_adapter_id="opencode_server",
+        host_bridge_session_id="desktop-thread",
+        host_bridge_listener_config=str(listener_path),
+    )
+
+    profile = acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+    assert profile["settings"].agent_name == "coordinator-listener"
+    assert profile["settings"].session_id == "coordination-session"
+    assert profile["settings"].member_token == "listener-member-token"
+    assert profile["binding"].values["session_id"] == "desktop-thread"
+
+
+def test_separate_listener_does_not_require_host_binding_member_credentials(tmp_path: Path) -> None:
+    listener_path = _write_listener_config(tmp_path)
+    config_path = _write_config(
+        tmp_path,
+        session_id=None,
+        member_token=None,
+        host_bridge_listener_config=str(listener_path),
+    )
+
+    profile = acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+    assert profile["settings"].agent_name == "coordinator-listener"
+
+
+def test_wait_transport_uses_listener_identity_not_visible_host_identity(tmp_path: Path, monkeypatch: Any) -> None:
+    listener_path = _write_listener_config(tmp_path, agent_name="coordinator-listener")
+    config_path = _write_config(
+        tmp_path,
+        agent_name="visible-coordinator",
+        session_id="coordination-session",
+        member_token="visible-member-token",
+        host_bridge_listener_config=str(listener_path),
+    )
+    hub = FakeHub([{"status": "timeout"}])
+    monkeypatch.setattr(acp_cli, "post_json", hub.post_json)
+
+    result = acp_cli.host_bridge_once(_args(config_path))
+
+    assert result == {"status": "idle"}
+    wait_payload = hub.calls[0][1]
+    assert wait_payload["agent_name"] == "coordinator-listener"
+    assert wait_payload["session_id"] == "coordination-session"
+    assert wait_payload["member_token"] == "listener-member-token"
+
+
+def test_host_bridge_listener_config_must_exist_and_be_complete(tmp_path: Path) -> None:
+    config_path = _write_config(
+        tmp_path,
+        host_bridge_listener_config="missing-listener.json",
+    )
+
+    with pytest.raises(acp_cli.HostBindingError, match="listener config"):
+        acp_cli.resolve_host_bridge_profile(_args(config_path))
     assert not (tmp_path / "host-bridge-state.json").exists()
+
+
+def test_listener_config_must_share_acp_session_with_host_binding(tmp_path: Path) -> None:
+    listener_path = _write_listener_config(tmp_path, session_id="other-session")
+    config_path = _write_config(
+        tmp_path,
+        agent_name="visible-coordinator",
+        session_id="coordination-session",
+        member_token="visible-member-token",
+        host_bridge_listener_config=str(listener_path),
+    )
+
+    with pytest.raises(acp_cli.HostBindingError, match="same ACP session"):
+        acp_cli.resolve_host_bridge_profile(_args(config_path))
+
+
+def test_listener_config_must_use_distinct_member_identity(tmp_path: Path) -> None:
+    listener_path = _write_listener_config(tmp_path, agent_name="visible-coordinator")
+    config_path = _write_config(
+        tmp_path,
+        agent_name="visible-coordinator",
+        session_id="coordination-session",
+        member_token="visible-member-token",
+        host_bridge_listener_config=str(listener_path),
+    )
+
+    with pytest.raises(acp_cli.HostBindingError, match="distinct ACP member"):
+        acp_cli.resolve_host_bridge_profile(_args(config_path))
 
 
 def test_host_bridge_retries_active_wait_without_exiting_supervisor(

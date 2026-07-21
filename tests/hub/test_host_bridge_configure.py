@@ -160,6 +160,23 @@ def test_preserves_secrets_and_unknown_keys() -> None:
     assert config["custom_unknown_field"] == {"nested": "preserved"}
 
 
+def test_listener_config_is_explicit_and_kept_separate_from_host_binding() -> None:
+    config, summary = acp_cli.build_host_bridge_profile(
+        _base_config(),
+        agent_name="codex-task-code",
+        role="member",
+        adapter_id="codex_app_server_stdio",
+        host_session_id="thread-code-1",
+        executable=r"C:\Tools\codex.exe",
+        listener_config="agents/coordinator-listener.json",
+        extra_allowed_senders=("codex-chief",),
+    )
+
+    assert config["host_bridge_listener_config"] == "agents/coordinator-listener.json"
+    assert summary["listener_config"] == "agents/coordinator-listener.json"
+    assert summary["host_id"] == "thread-code-1"
+
+
 def test_configure_is_idempotent() -> None:
     kwargs = dict(
         agent_name="codex-task-code",

@@ -877,6 +877,11 @@ def build_parser() -> argparse.ArgumentParser:
         bridge_parser.add_argument("--wait-action", choices=VALID_ACTIONS, default=None, help="Deprecated single-action compatibility filter; use --accept-action")
         bridge_parser.add_argument("--plan-definition", default=None, help="Optional product-owned coordinator plan definition JSON")
         bridge_parser.add_argument("--plan-state", default=None, help="Optional durable coordinator plan state JSON")
+        bridge_parser.add_argument(
+            "--listener-config",
+            default=None,
+            help="Optional explicit ACP member config used only for wait/ACK/REPLY; host binding remains in --config",
+        )
 
     host_bridge_configure_parser = host_bridge_subparsers.add_parser(
         "configure",
@@ -899,6 +904,12 @@ def build_parser() -> argparse.ArgumentParser:
     host_bridge_configure_parser.add_argument("--state-path", dest="state_path", default=None, help="Optional durable Host Bridge ledger path")
     host_bridge_configure_parser.add_argument("--plan-definition", default=None, help="Optional product-owned coordinator plan definition JSON")
     host_bridge_configure_parser.add_argument("--plan-state", default=None, help="Optional durable coordinator plan state JSON")
+    host_bridge_configure_parser.add_argument(
+        "--listener-config",
+        dest="listener_config",
+        default=None,
+        help="Optional explicit ACP member config used only for wait/ACK/REPLY",
+    )
     host_bridge_configure_parser.add_argument("--check", action="store_true", help="Doctor mode: validate and print the wiring summary without writing")
 
     collector_parser = subparsers.add_parser(
@@ -1325,6 +1336,34 @@ def resolve_hub_agent_settings(args: argparse.Namespace, *, require_hub_http: bo
         member_token=member_token.strip() if isinstance(member_token, str) and member_token.strip() else None,
         dashboard_session_path=dashboard_session_path,
     )
+
+
+def resolve_host_bridge_listener_settings(
+    primary: HubAgentSettings,
+    listener_config: str | None,
+) -> HubAgentSettings:
+    """Resolve an optional ACP member used to wait for deliveries.
+
+    The host binding and the ACP listener are intentionally separate. This
+    permits a visible Desktop task to remain bound to a thread while a
+    different, already-authorized ACP member owns the long-poll lease. No
+    member or session is created here.
+    """
+    raw_path = listener_config or get_config_value(primary.config, "host_bridge_listener_config")
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        return primary
+    path = resolve_config_path(primary.base_dir, raw_path.strip())
+    if path is None or not path.is_file():
+        raise HostBindingError("host bridge listener config must point to an existing JSON config")
+    listener_args = argparse.Namespace(command="host-bridge", config=str(path), agent=None)
+    listener = resolve_hub_agent_settings(listener_args)
+    if listener.session_id is None or listener.member_token is None:
+        raise HostBindingError("host bridge listener config requires session_id and member_token")
+    if primary.session_id and listener.session_id != primary.session_id:
+        raise HostBindingError("host bridge listener config must use the same ACP session")
+    if listener.agent_name == primary.agent_name:
+        raise HostBindingError("host bridge listener config must use a distinct ACP member identity")
+    return listener
 
 
 def derive_hub_agent_settings(*, settings: HubAgentSettings, config: dict[str, Any]) -> HubAgentSettings:
@@ -4566,6 +4605,7 @@ def build_host_bridge_profile(
     state_path: str | None = None,
     plan_definition_path: str | None = None,
     plan_state_path: str | None = None,
+    listener_config: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return ``(new_config, safe_summary)`` for an idempotent HostBridge profile.
 
@@ -4654,6 +4694,10 @@ def build_host_bridge_profile(
         config["coordinator_plan_definition_path"] = resolved_plan_definition
         config["coordinator_plan_state_path"] = resolved_plan_state
 
+    resolved_listener_config = _first_str(listener_config, config.get("host_bridge_listener_config"))
+    if resolved_listener_config is not None:
+        config["host_bridge_listener_config"] = resolved_listener_config
+
     raw_actions: Any = accepted_actions
     if raw_actions is None:
         raw_actions = config.get("host_bridge_accepted_actions")
@@ -4723,6 +4767,7 @@ def build_host_bridge_profile(
         "state_path": config.get("host_bridge_state_path"),
         "plan_definition_path": config.get("coordinator_plan_definition_path"),
         "plan_state_path": config.get("coordinator_plan_state_path"),
+        "listener_config": config.get("host_bridge_listener_config"),
         "schema_version": HOST_PROFILE_SCHEMA_VERSION,
         "prior_schema_version": prior_version,
         "migrated": migrated,
@@ -4761,6 +4806,7 @@ def host_bridge_configure_command(args: argparse.Namespace) -> dict[str, Any]:
         state_path=getattr(args, "state_path", None),
         plan_definition_path=getattr(args, "plan_definition", None),
         plan_state_path=getattr(args, "plan_state", None),
+        listener_config=getattr(args, "listener_config", None),
     )
     check = bool(getattr(args, "check", False))
     summary["config_path"] = str(config_path)
@@ -4771,10 +4817,23 @@ def host_bridge_configure_command(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
-    settings = resolve_hub_agent_settings(args)
-    if settings.session_id is None or settings.member_token is None:
+    primary_settings = resolve_hub_agent_settings(args)
+    configured_listener = getattr(args, "listener_config", None) or get_config_value(
+        primary_settings.config,
+        "host_bridge_listener_config",
+    )
+    if (
+        (primary_settings.session_id is None or primary_settings.member_token is None)
+        and not (isinstance(configured_listener, str) and configured_listener.strip())
+    ):
         raise ValueError("host-bridge requires session_id and member_token in the selected ACP config")
-    config = settings.config
+    config = primary_settings.config
+    settings = resolve_host_bridge_listener_settings(
+        primary_settings,
+        getattr(args, "listener_config", None),
+    )
+    if settings.session_id is None or settings.member_token is None:
+        raise ValueError("host-bridge listener requires session_id and member_token")
     adapter_arg = getattr(args, "adapter_id", None)
     endpoint_arg = getattr(args, "endpoint", None)
     executable_arg = getattr(args, "host_executable", None)
