@@ -5277,13 +5277,13 @@ def host_bridge_start(args: argparse.Namespace, *, max_cycles: int | None = None
                     raise
                 except HostDeliveryError as exc:
                     _report_host_bridge_retry(profile, exc)
-                    time.sleep(profile["retry_delay_seconds"])
+                    time.sleep(_wait_retry_delay_seconds(exc, profile["retry_delay_seconds"]))
                     result = {"status": "retry"}
                 except ValueError as exc:
                     if _is_fatal_host_bridge_error(str(exc)):
                         raise
                     _report_host_bridge_retry(profile, exc)
-                    time.sleep(profile["retry_delay_seconds"])
+                    time.sleep(_wait_retry_delay_seconds(exc, profile["retry_delay_seconds"]))
                     result = {"status": "retry"}
                 cycles += 1
                 if max_cycles is not None and cycles >= max_cycles:
@@ -5429,7 +5429,7 @@ def reply_collector_start(args: argparse.Namespace, *, max_cycles: int | None = 
                 result = _reply_collector_once(profile)
             except (CollectorDeliveryError, ValueError, OSError) as exc:
                 emit_json_line({"status": "reply_collector_retry", "detail": str(exc), "acked": False})
-                time.sleep(profile["retry_delay_seconds"])
+                time.sleep(_wait_retry_delay_seconds(exc, profile["retry_delay_seconds"]))
                 result = {"status": "retry"}
             cycles += 1
             if max_cycles is not None and cycles >= max_cycles:
@@ -5896,6 +5896,24 @@ def publish_runner_idle(*, settings: HubAgentSettings, profile: dict[str, Any], 
 
 def _is_wait_already_active_error(message: str) -> bool:
     return "WAIT_ALREADY_ACTIVE" in message or "active wait" in message
+
+
+def _wait_retry_delay_seconds(exc: Exception, configured_delay: float) -> float:
+    """Honor the Hub's active-wait lease before retrying a receiver."""
+    base_delay = max(float(configured_delay), 0.0)
+    message = str(exc)
+    if not _is_wait_already_active_error(message):
+        return base_delay
+    match = re.search(r'"wait_ttl_seconds"\s*:\s*(\d+(?:\.\d+)?)', message)
+    if match is None:
+        return base_delay
+    try:
+        wait_ttl = max(float(match.group(1)), 0.0)
+    except ValueError:
+        return base_delay
+    if wait_ttl <= 0:
+        return base_delay
+    return max(base_delay, min(wait_ttl + base_delay, HOST_BRIDGE_DELIVERY_LEASE_SECONDS))
 
 
 def _is_fatal_host_bridge_error(message: str) -> bool:

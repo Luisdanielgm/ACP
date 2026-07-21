@@ -210,6 +210,39 @@ def test_host_bridge_retries_active_wait_without_exiting_supervisor(
     assert adapter.deliveries == []
 
 
+def test_host_bridge_waits_for_active_wait_lease_before_retry(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    config_path = _write_config(tmp_path, host_bridge_retry_delay_seconds=0.01)
+    hub = FakeHub(
+        [
+            ValueError(
+                'hub HTTP 409: {"code":"WAIT_ALREADY_ACTIVE",'
+                '"details":{"wait_ttl_seconds":8}}'
+            ),
+            {"status": "timeout"},
+        ]
+    )
+    adapter = RecordingAdapter()
+    sleeps: list[float] = []
+    monkeypatch.setattr(acp_cli, "post_json", hub.post_json)
+    monkeypatch.setattr(acp_cli, "default_registry", lambda **_kwargs: _registry(adapter))
+    monkeypatch.setattr(acp_cli.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    result = acp_cli.host_bridge_start(_args(config_path, command="start"), max_cycles=2)
+
+    assert result == {"status": "idle", "cycles": 2}
+    assert sleeps == [pytest.approx(8.01)]
+
+
+def test_wait_retry_delay_preserves_fallback_when_hub_omits_ttl() -> None:
+    active_wait = ValueError('hub HTTP 409: {"code":"WAIT_ALREADY_ACTIVE"}')
+
+    assert acp_cli._wait_retry_delay_seconds(active_wait, 0.01) == pytest.approx(0.01)
+    assert acp_cli._wait_retry_delay_seconds(ValueError("temporary failure"), 0.25) == pytest.approx(0.25)
+
+
 def test_host_bridge_consumes_system_notice_without_host_call_or_ack(
     tmp_path: Path,
     monkeypatch: Any,

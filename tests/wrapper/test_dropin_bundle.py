@@ -309,7 +309,7 @@ def test_dropin_installer_main_works_in_place_without_prompting_for_optional_tok
     assert (target / "requirements.txt").exists()
     bundle_info = json.loads((target / "BUNDLE_INFO.json").read_text(encoding="utf-8"))
     assert bundle_info["installed_version"] == Path("ACP_AGENT/VERSION").read_text(encoding="utf-8").strip()
-    assert bundle_info["release_date"] == "2026-07-20"
+    assert bundle_info["release_date"] == "2026-07-21"
     assert bundle_info["installed_at"]
 
 

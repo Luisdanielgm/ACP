@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.36 - 2026-07-21
+
+- EN: Honor the Hub wait lease TTL after `WAIT_ALREADY_ACTIVE` instead of busy-looping concurrent receivers; HostBridge and Reply Collector preserve the existing listener and retry only after it can expire.
+- ES: Se respeta el TTL del lease de espera del Hub después de `WAIT_ALREADY_ACTIVE` en vez de girar en busy-loop con receptores concurrentes; HostBridge y Reply Collector preservan el listener existente y reintentan solo después de su expiración.
+
 ## 0.3.35 - 2026-07-20
 
 - EN: Defer delivery and reconciliation while an explicitly resumed Codex thread has another active turn, preventing duplicate prompts and false quarantine during chained turns.
