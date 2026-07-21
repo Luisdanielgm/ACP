@@ -1,5 +1,12 @@
 # ACP_AGENT Changelog
 
+## 0.3.37 - 2026-07-21
+
+- EN: Reconcile a late successful REPLY from the task owner after a terminal host failure without emitting a duplicate turn; dependency continuation remains approval-gated.
+- ES: Se reconcilia un REPLY exitoso tardío del dueño de la tarea después de un fallo terminal del host sin emitir un turno duplicado; la continuación de dependencias mantiene sus gates de aprobación.
+- EN: Accept durable terminal and approval-blocked statuses in product-owned plan definitions so canonical snapshots remain loadable by the generic coordinator.
+- ES: Se aceptan estados terminales y bloqueados por aprobación en definiciones de plan propiedad del producto para que los snapshots canónicos sigan siendo cargables por el coordinador genérico.
+
 ## 0.3.36 - 2026-07-21
 
 - EN: Honor the Hub wait lease TTL after `WAIT_ALREADY_ACTIVE` instead of busy-looping concurrent receivers; HostBridge and Reply Collector preserve the existing listener and retry only after it can expire.

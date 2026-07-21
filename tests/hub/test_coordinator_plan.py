@@ -104,6 +104,65 @@ def test_failure_or_quarantine_blocks_dependents_without_emitting(tmp_path: Path
         assert plan.next_safe_action() is None
 
 
+def test_late_success_reconciles_terminal_failure_without_duplicate_task(tmp_path: Path) -> None:
+    definition = _plan()
+    path = tmp_path / "late-success.json"
+    plan = plan_module.CoordinatorPlan(path, definition)
+
+    failed = plan.record_result(
+        message_id="reply-failed",
+        sender="worker",
+        action="REPLY",
+        payload=_result(outcome="failed"),
+    )
+    assert failed == {"status": "blocked", "task_id": "inspect", "outcome": "failed"}
+
+    reconciled = plan.record_result(
+        message_id="reply-late-success",
+        sender="worker",
+        action="REPLY",
+        payload=_result(outcome="success"),
+    )
+
+    assert reconciled["status"] == "ready"
+    assert reconciled["task_id"] == "next-safe"
+    state = plan.snapshot()
+    assert state["tasks"]["inspect"]["status"] == "completed"
+    assert len(state["receipts"]) == 2
+
+
+def test_late_success_reconciliation_is_owner_scoped_and_idempotent(tmp_path: Path) -> None:
+    plan = plan_module.CoordinatorPlan(tmp_path / "late-success-owner.json", _plan())
+    plan.record_result(
+        message_id="reply-failed",
+        sender="worker",
+        action="REPLY",
+        payload=_result(outcome="quarantined"),
+    )
+
+    with pytest.raises(plan_module.PlanError, match="task owner"):
+        plan.record_result(
+            message_id="reply-rogue-success",
+            sender="other-worker",
+            action="REPLY",
+            payload=_result(outcome="success"),
+        )
+
+    plan.record_result(
+        message_id="reply-late-success",
+        sender="worker",
+        action="REPLY",
+        payload=_result(outcome="success"),
+    )
+    duplicate = plan.record_result(
+        message_id="reply-late-success",
+        sender="worker",
+        action="REPLY",
+        payload=_result(outcome="success"),
+    )
+    assert duplicate == {"status": "duplicate", "message_id": "reply-late-success", "task_id": "next-safe"}
+
+
 def test_explicit_retry_budget_emits_a_new_attempt_without_reusing_delivery_id(tmp_path: Path) -> None:
     definition = _plan()
     definition["tasks"][0]["max_attempts"] = 2
@@ -171,6 +230,18 @@ def test_existing_state_migrates_attempt_budget_without_rewriting_task_set(tmp_p
 
     assert migrated["tasks"]["inspect"]["attempt"] == 1
     assert migrated["tasks"]["inspect"]["max_attempts"] == 2
+
+
+def test_definition_accepts_durable_terminal_and_blocked_statuses(tmp_path: Path) -> None:
+    definition = _plan()
+    definition["tasks"][0]["status"] = "completed"
+    definition["tasks"][1]["status"] = "blocked_dependency"
+
+    plan = plan_module.CoordinatorPlan(tmp_path / "canonical-snapshot.json", definition)
+
+    state = plan.snapshot()
+    assert state["tasks"]["inspect"]["status"] == "completed"
+    assert state["tasks"]["next-safe"]["status"] == "blocked_dependency"
 
 
 def test_quarantine_blocks_dependents_but_advances_independent_work(tmp_path: Path) -> None:

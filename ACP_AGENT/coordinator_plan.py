@@ -21,6 +21,13 @@ class PlanError(ValueError):
 _SUCCESS = {"success", "succeeded", "completed", "done", "ok", "passed"}
 _TERMINAL_FAILURE = {"failed", "error", "quarantined", "interrupted"}
 _INITIAL_STATUSES = {"pending", "dispatched"}
+_DEFINITION_STATUSES = _INITIAL_STATUSES | {
+    "completed",
+    "failed",
+    "quarantined",
+    "blocked_dependency",
+    "blocked_approval",
+}
 _RISKS = {"read_only", "low", "medium", "high", "sensitive"}
 _APPROVAL_RISKS = {"high", "sensitive"}
 
@@ -63,11 +70,33 @@ class CoordinatorPlan:
         task = self._state["tasks"].get(task_id)
         if not isinstance(task, dict):
             raise PlanError("result references an unknown task")
-        if task["status"] != "dispatched":
-            raise PlanError("result does not match a dispatched task")
         if sender != task["owner"]:
             raise PlanError("result sender does not match task owner")
         outcome = self._normalize_outcome(result["outcome"])
+        if task["status"] != "dispatched":
+            if (
+                task["status"] in {"failed", "quarantined"}
+                and outcome == "completed"
+                and self._has_terminal_failure_receipt(task_id=task_id, sender=sender)
+            ):
+                previous_status = task["status"]
+                task["status"] = "completed"
+                task["last_outcome"] = "completed"
+                next_action = self._prepare_next_safe_action()
+                self._state["receipts"][message_id] = {
+                    "task_id": task_id,
+                    "sender": sender,
+                    "action": str(action).upper(),
+                    "outcome": "completed",
+                    "next_task_id": next_action.get("task_id") if next_action else None,
+                    "next_message_id": next_action.get("message_id") if next_action else None,
+                    "reconciled_from": previous_status,
+                }
+                self._save()
+                if next_action is not None:
+                    return next_action
+                return {"status": "blocked", "task_id": task_id, "outcome": "completed"}
+            raise PlanError("result does not match a dispatched task")
         task["status"] = outcome
         task["last_outcome"] = outcome
         next_action: dict[str, Any] | None = None
@@ -89,6 +118,15 @@ class CoordinatorPlan:
         if next_action is not None:
             return next_action
         return {"status": "blocked", "task_id": task_id, "outcome": outcome}
+
+    def _has_terminal_failure_receipt(self, *, task_id: str, sender: str) -> bool:
+        return any(
+            isinstance(receipt, dict)
+            and receipt.get("task_id") == task_id
+            and receipt.get("sender") == sender
+            and receipt.get("outcome") in {"failed", "quarantined"}
+            for receipt in self._state["receipts"].values()
+        )
 
     def next_safe_action(self) -> dict[str, Any] | None:
         for emission in self._state["emissions"].values():
@@ -205,7 +243,7 @@ class CoordinatorPlan:
                 or not instructions.strip()
                 or not isinstance(dependencies, list)
                 or not all(isinstance(dep, str) and dep.strip() for dep in dependencies)
-                or status not in _INITIAL_STATUSES
+                or status not in _DEFINITION_STATUSES
                 or risk not in _RISKS
                 or not isinstance(max_attempts, int)
                 or isinstance(max_attempts, bool)

@@ -160,6 +160,30 @@ def test_failed_result_with_retry_budget_dispatches_next_attempt_before_ack(tmp_
     assert [route for route, _ in hub.calls] == ["/sessions/wait", "/sessions/send", "/sessions/ack"]
 
 
+def test_late_success_reconciles_quarantined_plan_and_wakes_next_task(tmp_path: Path, monkeypatch: Any) -> None:
+    config = _config(tmp_path)
+    failed = _reply()
+    failed["message"]["payload"] = json.dumps({"task_id": "worker-task", "outcome": "failed"})
+    late = _reply()
+    late["message"]["id"] = "reply-late-success"
+    late["delivery"]["message_id"] = "reply-late-success"
+    late["message"]["payload"] = json.dumps({"task_id": "worker-task", "outcome": "success"})
+    profile = acp_cli.resolve_reply_collector_profile(_args(config))
+    hub = FakeHub([failed, late])
+    monkeypatch.setattr(acp_cli, "post_json", hub)
+
+    assert acp_cli._reply_collector_once(profile)["status"] == "completed"
+    assert acp_cli._reply_collector_once(profile)["status"] == "completed"
+
+    sent = [payload for route, payload in hub.calls if route == "/sessions/send"]
+    assert len(sent) == 1
+    assert sent[0]["id"]
+    assert json.loads(sent[0]["payload"])["task_id"] == "desktop-next"
+    assert [route for route, _ in hub.calls] == [
+        "/sessions/wait", "/sessions/ack", "/sessions/wait", "/sessions/send", "/sessions/ack"
+    ]
+
+
 def test_empty_wait_does_not_load_plan_or_emit_task(tmp_path: Path, monkeypatch: Any) -> None:
     config = _config(tmp_path)
     config_payload = json.loads(config.read_text(encoding="utf-8"))
