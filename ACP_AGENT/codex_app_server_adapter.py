@@ -123,6 +123,16 @@ class CodexAppServerAdapter:
                         "Codex correlated turn reached a terminal non-success state; refusing duplicate turn",
                         reason=f"codex_turn_{status}",
                     )
+                if any(
+                    isinstance(turn, dict) and turn.get("status") == "inProgress"
+                    for turn in turns
+                ):
+                    # A thread can be shared by a visible Desktop turn and this
+                    # bridge.  Never submit a second prompt while that turn is
+                    # active; leave the delivery retryable instead.
+                    raise HostDeliveryError(
+                        "Codex thread has an active turn; retry reconciliation later"
+                    )
                 if reconcile_only:
                     # The thread resumed and its durable history has no turn for
                     # this client message id: the delivery was provably never

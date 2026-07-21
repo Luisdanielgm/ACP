@@ -428,6 +428,35 @@ def test_codex_reconcile_proves_non_acceptance_and_signals_quarantine() -> None:
     assert connection.started_turns == 0
 
 
+def test_codex_reconcile_defers_when_same_thread_has_another_active_turn() -> None:
+    connection = FakeCodexConnection(
+        turns=[{"id": "desktop-turn", "status": "inProgress", "items": []}]
+    )
+    adapter = CodexAppServerAdapter(request_timeout_seconds=1, connect=FakeConnect(connection))
+
+    with pytest.raises(HostDeliveryError, match="active turn"):
+        adapter.reconcile(_binding(), _delivery())
+
+    assert connection.started_turns == 0
+    assert [message["method"] for message in connection.sent] == [
+        "initialize",
+        "initialized",
+        "thread/resume",
+    ]
+
+
+def test_codex_deliver_defers_before_start_when_thread_has_another_active_turn() -> None:
+    connection = FakeCodexConnection(
+        turns=[{"id": "desktop-turn", "status": "inProgress", "items": []}]
+    )
+    adapter = CodexAppServerAdapter(request_timeout_seconds=1, connect=FakeConnect(connection))
+
+    with pytest.raises(HostDeliveryError, match="active turn"):
+        adapter.deliver(_binding(), _delivery())
+
+    assert connection.started_turns == 0
+
+
 def test_codex_retry_without_visible_client_id_quarantines_without_duplicate_turn(tmp_path: Path) -> None:
     first_connection = FakeCodexConnection(disconnect_after_start=True)
     first_adapter = CodexAppServerAdapter(request_timeout_seconds=1, connect=FakeConnect(first_connection))

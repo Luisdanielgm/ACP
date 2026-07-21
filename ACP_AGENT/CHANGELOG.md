@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.35 - 2026-07-20
+
+- EN: Defer delivery and reconciliation while an explicitly resumed Codex thread has another active turn, preventing duplicate prompts and false quarantine during chained turns.
+- ES: Se difieren la entrega y reconciliacion mientras un thread Codex reanudado tiene otro turno activo, evitando prompts duplicados y cuarentenas falsas durante turnos encadenados.
+
 ## 0.3.34 - 2026-07-20
 
 - EN: Consume ACP system notices without host invocation, REPLY, or ACK; cancellation/restart notices no longer masquerade as missing delivery leases and block the next wait.
