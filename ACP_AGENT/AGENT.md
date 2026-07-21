@@ -666,6 +666,10 @@ python ACP_AGENT/acp.py host-supervisor start --config ACP_AGENT/agents/supervis
 python ACP_AGENT/acp.py host-supervisor stop --config ACP_AGENT/agents/supervisor.json
 ```
 
+Si otro proceso ya tiene reservado un config de miembro, el supervisor reporta
+ese bridge como `reserved`, mantiene los demás activos y vuelve a intentar el
+bridge reservado en el siguiente ciclo; nunca inicia un duplicado.
+
 `reply-collector` permanece solo como compatibilidad para instalaciones antiguas
 filtradas a TASK. No se agrega por defecto a perfiles ni supervisores nuevos.
 

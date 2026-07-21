@@ -5739,7 +5739,17 @@ def host_supervisor_command(args: argparse.Namespace) -> dict[str, Any]:
         return {"status": "stopped", "bridges": [supervisor.stop() for supervisor in supervisors]}
     cycles = 0
     while True:
-        bridges = [supervisor.reconcile() for supervisor in supervisors]
+        bridges: list[dict[str, Any]] = []
+        for supervisor in supervisors:
+            try:
+                bridges.append(supervisor.reconcile())
+            except ValueError as exc:
+                # A visible/other ACP process may own this member config. Keep
+                # the supervisor alive for independent bridges and retry the
+                # reserved one on the next cycle; never start a duplicate.
+                if "reserved by another process" not in str(exc).lower():
+                    raise
+                bridges.append({"status": "reserved", "reason": "config reserved by another process"})
         cycles += 1
         if action == "once" or (args.max_cycles is not None and cycles >= args.max_cycles):
             return {"status": "ok", "cycles": cycles, "bridges": bridges}

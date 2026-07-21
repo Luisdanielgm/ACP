@@ -141,3 +141,45 @@ def test_generate_rejects_duplicate_names(tmp_path: Path) -> None:
 def test_generate_requires_output_and_coordinator(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="requires --output"):
         acp_cli.host_supervisor_generate_command(_generate_args(coordinator="codex-chief"))
+
+
+def test_supervisor_once_keeps_other_bridges_alive_when_one_config_is_reserved(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    config = tmp_path / "supervisor.json"
+    config.write_text(
+        json.dumps(
+            {
+                "host_supervisor_bridges": [
+                    {"name": "coordinator", "command": ["python", "bridge.py"]},
+                    {"name": "worker", "command": ["python", "bridge.py"]},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeSupervisor:
+        def __init__(self, spec: Any, _paths: Any) -> None:
+            self.spec = spec
+
+        def reconcile(self) -> dict[str, Any]:
+            if self.spec.name == "coordinator":
+                raise ValueError("config coordinator.json is reserved by another process")
+            return {"status": "running", "pid": 42}
+
+    monkeypatch.setattr(acp_cli, "HostBridgeSupervisor", FakeSupervisor)
+    result = acp_cli.host_supervisor_command(
+        argparse.Namespace(
+            action="once",
+            config=str(config),
+            state_dir=str(tmp_path / "state"),
+            max_cycles=None,
+        )
+    )
+
+    assert result["status"] == "ok"
+    assert result["bridges"] == [
+        {"status": "reserved", "reason": "config reserved by another process"},
+        {"status": "running", "pid": 42},
+    ]

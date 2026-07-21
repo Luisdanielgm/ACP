@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.43 - 2026-07-21
+
+- EN: Keep the portable supervisor alive when one member config is reserved by another process; report the bridge as `reserved` and retry it without spawning duplicates.
+- ES: Mantiene vivo el supervisor portable cuando otro proceso reserva un config de miembro; reporta el bridge como `reserved` y lo reintenta sin duplicarlo.
+
 ## 0.3.42 - 2026-07-21
 
 - EN: Expose `--member-token-ref` in HostBridge configure so existing listener configs can be generated deterministically without persisting an ACP member token.
