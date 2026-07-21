@@ -57,6 +57,7 @@ from host_bridge import (
     JsonBridgeStore,
     binding_lock_fingerprint,
     default_registry,
+    _validated_envelope,
 )
 
 DEFAULT_BACKOFF = (0.5, 1.0, 2.0, 5.0)
@@ -68,8 +69,7 @@ HOST_BRIDGE_MAX_HOST_TIMEOUT_SECONDS = 240.0
 HOST_BRIDGE_REPLY_TIMEOUT_SECONDS = 20.0
 HOST_BRIDGE_ACK_TIMEOUT_SECONDS = 20.0
 HOST_BRIDGE_LEASE_BUFFER_SECONDS = 5.0
-HOST_PROFILE_SCHEMA_VERSION = 1
-DEFAULT_REPLY_COLLECTOR = "codex-pilot-reply-collector"
+HOST_PROFILE_SCHEMA_VERSION = 2
 HOST_BRIDGE_SUPPORTED_ADAPTERS = (
     "opencode_server",
     "kilo_serve",
@@ -853,11 +853,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     host_bridge_parser = subparsers.add_parser(
         "host-bridge",
-        help="Deliver ACP TASK messages to an explicitly bound existing host session without an idle LLM",
+        help="Deliver configured ACP actions to an explicitly bound existing host session without an idle LLM",
     )
     host_bridge_subparsers = host_bridge_parser.add_subparsers(dest="host_bridge_command", required=True)
-    host_bridge_start_parser = host_bridge_subparsers.add_parser("start", help="Wait continuously and process one leased TASK at a time")
-    host_bridge_once_parser = host_bridge_subparsers.add_parser("once", help="Wait for and process at most one leased TASK")
+    host_bridge_start_parser = host_bridge_subparsers.add_parser("start", help="Wait continuously and process one leased ACP action at a time")
+    host_bridge_once_parser = host_bridge_subparsers.add_parser("once", help="Wait for and process at most one leased ACP action")
     for bridge_parser in (host_bridge_start_parser, host_bridge_once_parser):
         bridge_parser.add_argument("--config", default=None, help="JSON config path for the ACP member")
         bridge_parser.add_argument("--agent", default=None, help="Agent name/config stem")
@@ -868,12 +868,15 @@ def build_parser() -> argparse.ArgumentParser:
         bridge_parser.add_argument("--directory", default=None, help="Optional host directory context")
         bridge_parser.add_argument("--credential-ref", default=None, help="Optional env:NAME reference to a JSON Basic credential")
         bridge_parser.add_argument("--reply-to", dest="reply_to", default=None, help="Optional ACP member that plain-TASK replies target (e.g. a reply collector)")
-        bridge_parser.add_argument("--allow-sender", dest="bridge_allowed_senders", action="append", default=None, help="Trusted TASK sender; repeat for multiple senders")
+        bridge_parser.add_argument("--allow-sender", dest="bridge_allowed_senders", action="append", default=None, help="Trusted ACP sender; repeat for multiple senders")
+        bridge_parser.add_argument("--accept-action", dest="accepted_actions", action="append", choices=VALID_ACTIONS, default=None, help="ACP action that may wake this existing host task; repeat as needed (default: TASK, REPLY, INFO)")
         bridge_parser.add_argument("--state-path", default=None, help="Optional durable Host Bridge ledger path")
         bridge_parser.add_argument("--wait-timeout-seconds", type=float, default=None, help="Hub long-poll timeout (max 300)")
         bridge_parser.add_argument("--host-timeout-seconds", type=float, default=None, help="Host completion timeout")
         bridge_parser.add_argument("--retry-delay-seconds", type=float, default=None, help="Delay after a safe unacknowledged delivery failure")
-        bridge_parser.add_argument("--wait-action", choices=("TASK",), default=None, help="Server-side wait filter (TASK only; unmatched messages remain queued)")
+        bridge_parser.add_argument("--wait-action", choices=VALID_ACTIONS, default=None, help="Deprecated single-action compatibility filter; use --accept-action")
+        bridge_parser.add_argument("--plan-definition", default=None, help="Optional product-owned coordinator plan definition JSON")
+        bridge_parser.add_argument("--plan-state", default=None, help="Optional durable coordinator plan state JSON")
 
     host_bridge_configure_parser = host_bridge_subparsers.add_parser(
         "configure",
@@ -881,17 +884,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     host_bridge_configure_parser.add_argument("--config", default=None, help="JSON config path for the ACP member")
     host_bridge_configure_parser.add_argument("--agent", default=None, help="Agent name/config stem")
-    host_bridge_configure_parser.add_argument("--role", required=True, choices=("coordinator", "worker"), help="HostBridge role to wire")
+    host_bridge_configure_parser.add_argument("--role", choices=("member", "coordinator", "worker"), default="member", help="Optional compatibility wiring role; member uses only explicit routing")
     host_bridge_configure_parser.add_argument("--adapter-id", dest="adapter_id", required=True, choices=("opencode_server", "kilo_serve", "codex_app_server", "codex_app_server_stdio", "codex_cli", "claude_code_cli"), help="Existing-session host adapter")
     host_bridge_configure_parser.add_argument("--host-session-id", "--host-thread-id", dest="host_session_id", default=None, help="Existing host session or Codex thread id (required unless already in config)")
     host_bridge_configure_parser.add_argument("--endpoint", default=None, help="Explicit loopback endpoint for the existing host")
     host_bridge_configure_parser.add_argument("--host-executable", dest="host_executable", default=None, help="Absolute executable path for a CLI/stdio host")
     host_bridge_configure_parser.add_argument("--directory", default=None, help="Optional host directory context (not for Codex app-server)")
     host_bridge_configure_parser.add_argument("--credential-ref", dest="credential_ref", default=None, help="Optional env:NAME reference to a JSON credential")
-    host_bridge_configure_parser.add_argument("--reply-collector", dest="reply_collector", default=None, help=f"Reply Collector member (default {DEFAULT_REPLY_COLLECTOR})")
+    host_bridge_configure_parser.add_argument("--reply-to", dest="reply_to", default=None, help="Optional ACP member that receives automatic TASK results")
+    host_bridge_configure_parser.add_argument("--reply-collector", dest="reply_collector", default=None, help="Deprecated legacy result-router member")
     host_bridge_configure_parser.add_argument("--coordinator", dest="coordinator", default=None, help="For --role worker: coordinator authorized to send TASKs")
-    host_bridge_configure_parser.add_argument("--allow-sender", dest="bridge_allowed_senders", action="append", default=None, help="Extra trusted TASK sender; repeat for multiple senders")
+    host_bridge_configure_parser.add_argument("--allow-sender", dest="bridge_allowed_senders", action="append", default=None, help="Trusted ACP sender; repeat for multiple senders")
+    host_bridge_configure_parser.add_argument("--accept-action", dest="accepted_actions", action="append", choices=VALID_ACTIONS, default=None, help="ACP action that may wake the host; repeat as needed (default: TASK, REPLY, INFO)")
     host_bridge_configure_parser.add_argument("--state-path", dest="state_path", default=None, help="Optional durable Host Bridge ledger path")
+    host_bridge_configure_parser.add_argument("--plan-definition", default=None, help="Optional product-owned coordinator plan definition JSON")
+    host_bridge_configure_parser.add_argument("--plan-state", default=None, help="Optional durable coordinator plan state JSON")
     host_bridge_configure_parser.add_argument("--check", action="store_true", help="Doctor mode: validate and print the wiring summary without writing")
 
     collector_parser = subparsers.add_parser(
@@ -924,7 +931,7 @@ def build_parser() -> argparse.ArgumentParser:
     supervisor_parser.add_argument("--output", default=None, help="generate: destination path for the supervisor config")
     supervisor_parser.add_argument("--coordinator", default=None, help="generate: coordinator agent name or config path")
     supervisor_parser.add_argument("--worker", dest="workers", action="append", default=None, help="generate: worker agent name or config path; repeat per worker")
-    supervisor_parser.add_argument("--reply-collector", dest="reply_collector", default=None, help=f"generate: Reply Collector agent name or config path (default {DEFAULT_REPLY_COLLECTOR})")
+    supervisor_parser.add_argument("--reply-collector", dest="reply_collector", default=None, help="generate: optional legacy result-router agent name or config path")
     supervisor_parser.add_argument("--python", dest="python_executable", default=None, help="generate: python executable for supervised commands (default current interpreter)")
     supervisor_parser.add_argument("--acp-script", dest="acp_script", default=None, help="generate: path to acp.py for supervised commands (default this script)")
     supervisor_parser.add_argument("--check", action="store_true", help="generate: print the supervisor config without writing")
@@ -4551,20 +4558,24 @@ def build_host_bridge_profile(
     executable: str | None = None,
     directory: str | None = None,
     credential_ref: str | None = None,
-    reply_collector: str = DEFAULT_REPLY_COLLECTOR,
+    reply_collector: str | None = None,
+    reply_to: str | None = None,
     coordinator: str | None = None,
     extra_allowed_senders: tuple[str, ...] = (),
+    accepted_actions: tuple[str, ...] | None = None,
     state_path: str | None = None,
+    plan_definition_path: str | None = None,
+    plan_state_path: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return ``(new_config, safe_summary)`` for an idempotent HostBridge profile.
 
-    Pure and I/O-free.  Every unknown or secret-bearing key in ``existing`` (hub,
-    room/session, identity, tokens, custom fields) is preserved verbatim; only the
-    ``host_bridge_*`` keys and ``host_profile_schema_version`` are written.  Old
-    profiles that predate the schema version are migrated in place.
+    Pure and I/O-free. Every unknown or secret-bearing key in ``existing`` (hub,
+    room/session, identity, tokens, custom fields) is preserved verbatim. Only
+    HostBridge wiring, optional coordinator-plan paths, and the profile schema
+    version are written. Old profiles are migrated in place.
     """
-    if role not in {"coordinator", "worker"}:
-        raise HostBindingError("host bridge role must be coordinator or worker")
+    if role not in {"member", "coordinator", "worker"}:
+        raise HostBindingError("host bridge role must be member, coordinator, or worker")
     if adapter_id == "claude_desktop":
         raise HostBindingError(
             "claude_desktop is UNSUPPORTED_PENDING_OFFICIAL_INTERFACE and cannot be configured"
@@ -4633,35 +4644,68 @@ def build_host_bridge_profile(
     if resolved_state is not None:
         config["host_bridge_state_path"] = resolved_state
 
-    collector = _first_str(reply_collector)
-    if not collector:
-        raise HostBindingError("reply collector name must be a non-empty member name")
+    resolved_plan_definition = _first_str(plan_definition_path, config.get("coordinator_plan_definition_path"))
+    resolved_plan_state = _first_str(plan_state_path, config.get("coordinator_plan_state_path"))
+    if bool(resolved_plan_definition) != bool(resolved_plan_state):
+        raise HostBindingError("host bridge coordinator plan requires both definition and state paths")
+    if resolved_plan_definition is not None:
+        if resolved_plan_definition == resolved_plan_state:
+            raise HostBindingError("host bridge coordinator plan definition and state paths must be distinct")
+        config["coordinator_plan_definition_path"] = resolved_plan_definition
+        config["coordinator_plan_state_path"] = resolved_plan_state
 
+    raw_actions: Any = accepted_actions
+    if raw_actions is None:
+        raw_actions = config.get("host_bridge_accepted_actions")
+    if raw_actions is None and _first_str(config.get("host_bridge_wait_action")):
+        raw_actions = (_first_str(config.get("host_bridge_wait_action")),)
+        migrated.append("moved host_bridge_wait_action -> host_bridge_accepted_actions")
+    if raw_actions is None:
+        raw_actions = VALID_ACTIONS
+    if isinstance(raw_actions, str):
+        raw_actions = (raw_actions,)
+    if not isinstance(raw_actions, (list, tuple)):
+        raise HostBindingError("host bridge accepted_actions must be a list of ACP actions")
+    normalized_actions = tuple(
+        dict.fromkeys(str(action).strip().upper() for action in raw_actions if isinstance(action, str))
+    )
+    if (
+        not normalized_actions
+        or len(normalized_actions) != len(raw_actions)
+        or any(action not in VALID_ACTIONS for action in normalized_actions)
+    ):
+        raise HostBindingError("host bridge accepted_actions must contain only TASK, REPLY, and/or INFO")
+    config["host_bridge_accepted_actions"] = list(normalized_actions)
+    config.pop("host_bridge_wait_action", None)
+
+    collector = _first_str(reply_collector)
+    explicit_reply_to = _first_str(reply_to)
+    existing_reply_to = _first_str(config.get("host_bridge_reply_to"))
     if role == "worker":
-        if collector == agent_name:
-            raise HostBindingError("host bridge reply_to must differ from the worker identity")
         coordinator_name = _first_str(coordinator)
         if not coordinator_name:
             raise HostBindingError("worker configure requires --coordinator to authorize its TASK sender")
-        config["host_bridge_reply_to"] = collector
+        target = explicit_reply_to or collector or coordinator_name
+        if target == agent_name:
+            raise HostBindingError("host bridge reply_to must differ from the bridge member identity")
+        config["host_bridge_reply_to"] = target
         required_senders = [coordinator_name]
-    else:  # coordinator
-        if collector == agent_name:
-            raise HostBindingError("reply collector must differ from the coordinator identity")
-        # The coordinator must never route its automatic replies back into the
-        # collector, or worker -> collector -> coordinator loops forever.
-        if _first_str(config.get("host_bridge_reply_to")) == collector:
+    else:
+        target = explicit_reply_to if explicit_reply_to is not None else existing_reply_to
+        if target == agent_name:
+            raise HostBindingError("host bridge reply_to must differ from the bridge member identity")
+        if target is not None:
+            config["host_bridge_reply_to"] = target
+        else:
             config.pop("host_bridge_reply_to", None)
-            migrated.append("removed reply_to that pointed at the collector")
-        surviving_reply_to = _first_str(config.get("host_bridge_reply_to"))
-        if surviving_reply_to == agent_name:
-            raise HostBindingError("host bridge reply_to must differ from the coordinator identity")
-        required_senders = [collector]
+        required_senders = [collector] if collector is not None else []
 
     config["host_bridge_allowed_senders"] = _merge_allowed_senders(
         config.get("host_bridge_allowed_senders"),
         required_senders + list(extra_allowed_senders),
     )
+    if not config["host_bridge_allowed_senders"]:
+        raise HostBindingError("host bridge configure requires at least one trusted sender")
     config["host_profile_schema_version"] = HOST_PROFILE_SCHEMA_VERSION
 
     summary = {
@@ -4673,9 +4717,12 @@ def build_host_bridge_profile(
         "executable": config.get("host_bridge_executable"),
         "reply_to": config.get("host_bridge_reply_to"),
         "allowed_senders": list(config["host_bridge_allowed_senders"]),
+        "accepted_actions": list(config["host_bridge_accepted_actions"]),
         "credential_ref": config.get("host_bridge_credential_ref"),
         "directory": config.get("host_bridge_directory"),
         "state_path": config.get("host_bridge_state_path"),
+        "plan_definition_path": config.get("coordinator_plan_definition_path"),
+        "plan_state_path": config.get("coordinator_plan_state_path"),
         "schema_version": HOST_PROFILE_SCHEMA_VERSION,
         "prior_schema_version": prior_version,
         "migrated": migrated,
@@ -4706,10 +4753,14 @@ def host_bridge_configure_command(args: argparse.Namespace) -> dict[str, Any]:
         executable=getattr(args, "host_executable", None),
         directory=getattr(args, "directory", None),
         credential_ref=getattr(args, "credential_ref", None),
-        reply_collector=getattr(args, "reply_collector", None) or DEFAULT_REPLY_COLLECTOR,
+        reply_collector=getattr(args, "reply_collector", None),
+        reply_to=getattr(args, "reply_to", None),
         coordinator=getattr(args, "coordinator", None),
         extra_allowed_senders=tuple(getattr(args, "bridge_allowed_senders", None) or ()),
+        accepted_actions=tuple(getattr(args, "accepted_actions", None) or ()) or None,
         state_path=getattr(args, "state_path", None),
+        plan_definition_path=getattr(args, "plan_definition", None),
+        plan_state_path=getattr(args, "plan_state", None),
     )
     check = bool(getattr(args, "check", False))
     summary["config_path"] = str(config_path)
@@ -4813,11 +4864,29 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
     retry_arg = getattr(args, "retry_delay_seconds", None)
     retry_value = retry_arg if retry_arg is not None else get_config_value(config, "host_bridge_retry_delay_seconds")
     retry_delay = float(retry_value if retry_value is not None else 2.0)
+    accepted_arg = getattr(args, "accepted_actions", None)
+    accepted_value = accepted_arg if accepted_arg is not None else get_config_value(config, "host_bridge_accepted_actions")
     wait_action_arg = getattr(args, "wait_action", None)
-    wait_action_value = wait_action_arg if wait_action_arg is not None else get_config_value(config, "host_bridge_wait_action")
-    wait_action = "TASK" if wait_action_value is None else str(wait_action_value).strip().upper()
-    if wait_action != "TASK":
-        raise HostBindingError("host bridge wait_action must be TASK")
+    legacy_wait_action = wait_action_arg if wait_action_arg is not None else get_config_value(config, "host_bridge_wait_action")
+    if accepted_value is not None and legacy_wait_action is not None:
+        raise HostBindingError("host bridge accepted_actions conflicts with legacy wait_action")
+    if accepted_value is None:
+        raw_actions = [legacy_wait_action] if legacy_wait_action is not None else list(VALID_ACTIONS)
+    elif isinstance(accepted_value, str):
+        raw_actions = [accepted_value]
+    elif isinstance(accepted_value, (list, tuple)):
+        raw_actions = list(accepted_value)
+    else:
+        raise HostBindingError("host bridge accepted_actions must be a list of ACP actions")
+    accepted_actions = tuple(
+        dict.fromkeys(str(action).strip().upper() for action in raw_actions if isinstance(action, str))
+    )
+    if (
+        not accepted_actions
+        or len(accepted_actions) != len(raw_actions)
+        or any(action not in VALID_ACTIONS for action in accepted_actions)
+    ):
+        raise HostBindingError("host bridge accepted_actions must contain only TASK, REPLY, and/or INFO")
     if wait_timeout <= 0 or wait_timeout > 300:
         raise ValueError("host bridge wait_timeout_seconds must be between 0 and 300")
     if host_timeout <= 0 or host_timeout > HOST_BRIDGE_MAX_HOST_TIMEOUT_SECONDS:
@@ -4832,6 +4901,14 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
     state_path = resolve_config_path(settings.base_dir, raw_state_path)
     if state_path is None:
         state_path = (ACP_ROOT / "inbox" / safe_name(settings.agent_name) / "host_bridge_state.json").resolve()
+    raw_plan_definition = getattr(args, "plan_definition", None) or get_config_value(config, "coordinator_plan_definition_path")
+    raw_plan_state = getattr(args, "plan_state", None) or get_config_value(config, "coordinator_plan_state_path")
+    if bool(raw_plan_definition) != bool(raw_plan_state):
+        raise HostBindingError("host bridge coordinator plan requires both definition and state paths")
+    plan_definition_path = resolve_config_path(settings.base_dir, raw_plan_definition)
+    plan_state_path = resolve_config_path(settings.base_dir, raw_plan_state)
+    if plan_definition_path is not None and plan_definition_path == plan_state_path:
+        raise HostBindingError("host bridge coordinator plan definition and state paths must be distinct")
     registry = default_registry(
         request_timeout_seconds=host_timeout,
         credential_resolver=_host_bridge_credential,
@@ -4853,10 +4930,13 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
         "allowed_senders": tuple(allowed_senders),
         "reply_to": reply_to,
         "state_path": state_path,
+        "plan_definition_path": plan_definition_path,
+        "plan_state_path": plan_state_path,
         "wait_timeout_seconds": wait_timeout,
         "host_timeout_seconds": host_timeout,
         "retry_delay_seconds": retry_delay,
-        "wait_action": wait_action,
+        "accepted_actions": accepted_actions,
+        "wait_action_index": 0,
         "registry": registry,
         "lock_scope": lock_scope,
     }
@@ -4864,18 +4944,26 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
 
 def _host_bridge_wait(profile: dict[str, Any]) -> dict[str, Any]:
     settings: HubAgentSettings = profile["settings"]
+    accepted_actions = tuple(profile["accepted_actions"])
+    wait_action: str | None = None
+    if set(accepted_actions) != set(VALID_ACTIONS):
+        index = int(profile.get("wait_action_index", 0)) % len(accepted_actions)
+        wait_action = accepted_actions[index]
+        profile["wait_action_index"] = (index + 1) % len(accepted_actions)
+    payload = {
+        "session_id": settings.session_id,
+        "agent_name": settings.agent_name,
+        "member_token": settings.member_token,
+        "timeout_seconds": profile["wait_timeout_seconds"],
+        "ack_mode": "explicit",
+        "lease_seconds": HOST_BRIDGE_DELIVERY_LEASE_SECONDS,
+    }
+    if wait_action is not None:
+        payload["action"] = wait_action
     return post_json(
         hub_http=settings.hub_http,
         route="/sessions/wait",
-        payload={
-            "session_id": settings.session_id,
-            "agent_name": settings.agent_name,
-            "member_token": settings.member_token,
-            "timeout_seconds": profile["wait_timeout_seconds"],
-            "ack_mode": "explicit",
-            "lease_seconds": HOST_BRIDGE_DELIVERY_LEASE_SECONDS,
-            "action": profile["wait_action"],
-        },
+        payload=payload,
         token=settings.token,
     )
 
@@ -4953,10 +5041,10 @@ def _host_bridge_ack(profile: dict[str, Any], response: dict[str, Any]) -> dict[
 def _host_bridge_reply_target(delivery: HostDelivery, configured_reply_to: str | None) -> str:
     """Resolve where a HostBridge REPLY goes.
 
-    A wrapped REPLY/INFO (delivery.reply_to set) always answers the original
-    worker, so a TASK-only coordinator never loops back into the collector. A
-    plain TASK uses the locally configured reply target (e.g. the reply
-    collector) when present, otherwise it answers the original sender.
+    A wrapped legacy REPLY/INFO (delivery.reply_to set) answers its original
+    sender. A plain TASK uses the configured result target when present,
+    otherwise it answers the original sender. Direct REPLY/INFO ingress never
+    calls this function because those actions do not emit automatic replies.
     """
     if delivery.reply_to:
         return delivery.reply_to
@@ -5008,11 +5096,75 @@ def _host_bridge_reply(
     return sent
 
 
+def _host_bridge_advance_plan(profile: dict[str, Any], response: dict[str, Any]) -> dict[str, Any] | None:
+    """Advance an optional product-owned plan before waking the same member host.
+
+    The plan definition and mutable state live outside ACP's business logic. The
+    deterministic dispatcher is idempotent: a retry reuses the same emission id,
+    and the Hub's send endpoint confirms either durable acceptance or duplicate.
+    """
+    definition_path = profile.get("plan_definition_path")
+    state_path = profile.get("plan_state_path")
+    message = response.get("message")
+    if definition_path is None or state_path is None or not isinstance(message, dict):
+        return None
+    if str(message.get("action") or "").upper() not in {"REPLY", "INFO"}:
+        return None
+    try:
+        definition = json.loads(Path(definition_path).read_text(encoding="utf-8"))
+        planner = CoordinatorPlanCollector(CoordinatorPlan(Path(state_path), definition))
+        emission = planner.prepare(message)
+    except (OSError, ValueError, json.JSONDecodeError, PlanError) as exc:
+        raise HostDeliveryError("host bridge coordinator plan could not accept the result") from exc
+    if emission is None or emission.get("status") == "handled":
+        return emission
+    settings: HubAgentSettings = profile["settings"]
+    timeout_seconds, deadline = _host_bridge_request_budget(
+        profile,
+        maximum_seconds=HOST_BRIDGE_REPLY_TIMEOUT_SECONDS,
+        reserve_seconds=HOST_BRIDGE_ACK_TIMEOUT_SECONDS + HOST_BRIDGE_LEASE_BUFFER_SECONDS,
+    )
+    sent = post_json(
+        hub_http=settings.hub_http,
+        route="/sessions/send",
+        payload={
+            "id": emission["message_id"],
+            "session_id": settings.session_id,
+            "agent_name": settings.agent_name,
+            "member_token": settings.member_token,
+            "to": emission["to"],
+            "action": emission["action"],
+            "payload": emission.get("payload"),
+            "in_reply_to": message.get("id"),
+        },
+        token=settings.token,
+        timeout_seconds=timeout_seconds,
+        deadline_monotonic=deadline,
+    )
+    if sent.get("message_id") != emission["message_id"] or sent.get("delivery") not in {
+        "immediate",
+        "queued",
+        "duplicate",
+    }:
+        raise HostDeliveryError("host bridge coordinator plan TASK was not durably accepted")
+    try:
+        planner.mark_forwarded(emission)
+    except PlanError as exc:
+        raise HostDeliveryError("host bridge coordinator plan could not persist its delivery") from exc
+    return emission
+
+
 def _host_bridge_poll(profile: dict[str, Any]) -> dict[str, Any]:
     response = _host_bridge_wait(profile)
     registry = profile["registry"]
     if isinstance(response, dict) and response.get("status") == "message":
         profile["delivery_deadline_monotonic"] = _host_bridge_delivery_deadline(response)
+        _validated_envelope(
+            response,
+            profile["allowed_senders"],
+            accepted_actions=profile["accepted_actions"],
+        )
+        _host_bridge_advance_plan(profile, response)
         host_timeout, _deadline = _host_bridge_request_budget(
             profile,
             maximum_seconds=profile["host_timeout_seconds"],
@@ -5038,6 +5190,7 @@ def _host_bridge_poll(profile: dict[str, Any]) -> dict[str, Any]:
         binding=profile["binding"],
         store=JsonBridgeStore(profile["state_path"]),
         allowed_senders=profile["allowed_senders"],
+        accepted_actions=profile["accepted_actions"],
     )
     # A process-serialized stdio lock covers only the leased host delivery;
     # keeping it across /sessions/wait would starve another bridge on the same
@@ -5289,9 +5442,9 @@ def build_supervisor_bridges(
 ) -> dict[str, Any]:
     """Build a host_supervisor_bridges config from resolved member descriptors.
 
-    Pure and I/O-free.  One supervised process per configured HostBridge and one
-    for the Reply Collector, all reusing the existing non-model supervisor — no
-    per-agent scripts, no OS service, no scheduler.
+    Pure and I/O-free. One supervised process is created per configured member.
+    Legacy reply-collector descriptors remain supported, but new deployments use
+    direct multi-action HostBridge ingress. No OS service or scheduler is added.
     """
     if not members:
         raise ValueError("host-supervisor generate requires at least one member")
@@ -5366,10 +5519,11 @@ def host_supervisor_generate_command(args: argparse.Namespace) -> dict[str, Any]
     for worker in getattr(args, "workers", None) or []:
         if _first_str(worker):
             members.append(_resolve_supervisor_member(worker, kind="host_bridge"))
-    collector = _first_str(getattr(args, "reply_collector", None)) or DEFAULT_REPLY_COLLECTOR
-    members.append(
-        _resolve_supervisor_member(collector, kind="reply_collector", forward_to=coordinator_member["name"])
-    )
+    collector = _first_str(getattr(args, "reply_collector", None))
+    if collector is not None:
+        members.append(
+            _resolve_supervisor_member(collector, kind="reply_collector", forward_to=coordinator_member["name"])
+        )
 
     config = build_supervisor_bridges(
         members, python_executable=python_executable, acp_script=acp_script

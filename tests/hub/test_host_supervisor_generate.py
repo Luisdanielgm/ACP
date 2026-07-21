@@ -47,13 +47,13 @@ def _generate_args(**overrides: Any) -> argparse.Namespace:
     return namespace
 
 
-def test_generate_builds_bridges_for_coordinator_workers_and_collector(tmp_path: Path) -> None:
+def test_generate_keeps_optional_legacy_result_router_compatible(tmp_path: Path) -> None:
     chief = _write_agent(
         tmp_path, "codex-chief",
         host_bridge_adapter_id="codex_app_server", host_bridge_endpoint="ws://127.0.0.1:4500",
     )
     code = _write_agent(tmp_path, "codex-task-code", host_bridge_adapter_id="codex_app_server_stdio")
-    collector = _write_agent(tmp_path, "codex-pilot-reply-collector")
+    collector = _write_agent(tmp_path, "result-router")
     output = tmp_path / "supervisor.json"
 
     result = acp_cli.host_supervisor_generate_command(
@@ -68,23 +68,37 @@ def test_generate_builds_bridges_for_coordinator_workers_and_collector(tmp_path:
     assert result["status"] == "generated"
     assert result["written"] is True
     assert result["autostart"] == "not_installed"
-    assert result["bridges"] == ["codex-chief", "codex-task-code", "codex-pilot-reply-collector"]
+    assert result["bridges"] == ["codex-chief", "codex-task-code", "result-router"]
 
     written = json.loads(output.read_text(encoding="utf-8"))
     bridges = {entry["name"]: entry for entry in written["host_supervisor_bridges"]}
     assert bridges["codex-chief"]["command"][2:4] == ["host-bridge", "start"]
     assert bridges["codex-chief"]["endpoint"] == "ws://127.0.0.1:4500"  # endpoint-serialized adapter
     assert "endpoint" not in bridges["codex-task-code"]  # stdio has no endpoint lock
-    collector_command = bridges["codex-pilot-reply-collector"]["command"]
+    collector_command = bridges["result-router"]["command"]
     assert collector_command[2:4] == ["reply-collector", "start"]
     assert "--forward-to" in collector_command
     assert collector_command[collector_command.index("--forward-to") + 1] == "codex-chief"
     assert collector_command[-2:] == ["--forward-action", "TASK"]
 
 
+def test_generate_defaults_to_only_generic_host_bridges(tmp_path: Path) -> None:
+    coordinator = _write_agent(tmp_path, "coordinator", host_bridge_adapter_id="codex_app_server_stdio")
+    worker = _write_agent(tmp_path, "worker-a", host_bridge_adapter_id="codex_app_server_stdio")
+    output = tmp_path / "supervisor.json"
+
+    result = acp_cli.host_supervisor_generate_command(
+        _generate_args(output=str(output), coordinator=str(coordinator), workers=[str(worker)])
+    )
+
+    assert result["bridges"] == ["coordinator", "worker-a"]
+    written = json.loads(output.read_text(encoding="utf-8"))
+    assert all(spec["command"][2:4] == ["host-bridge", "start"] for spec in written["host_supervisor_bridges"])
+
+
 def test_generate_check_mode_does_not_write(tmp_path: Path) -> None:
     chief = _write_agent(tmp_path, "codex-chief", host_bridge_adapter_id="codex_app_server_stdio")
-    collector = _write_agent(tmp_path, "codex-pilot-reply-collector")
+    collector = _write_agent(tmp_path, "result-router")
     output = tmp_path / "supervisor.json"
 
     result = acp_cli.host_supervisor_generate_command(
@@ -99,7 +113,7 @@ def test_generate_check_mode_does_not_write(tmp_path: Path) -> None:
 def test_generate_reuses_existing_supervisor_specs(tmp_path: Path) -> None:
     """The generated config is consumable by the existing _supervisor_specs parser."""
     chief = _write_agent(tmp_path, "codex-chief", host_bridge_adapter_id="codex_app_server_stdio")
-    collector = _write_agent(tmp_path, "codex-pilot-reply-collector")
+    collector = _write_agent(tmp_path, "result-router")
     output = tmp_path / "supervisor.json"
 
     acp_cli.host_supervisor_generate_command(
@@ -107,7 +121,7 @@ def test_generate_reuses_existing_supervisor_specs(tmp_path: Path) -> None:
     )
 
     specs = acp_cli._supervisor_specs(output)
-    assert tuple(spec["name"] for spec in specs) == ("codex-chief", "codex-pilot-reply-collector")
+    assert tuple(spec["name"] for spec in specs) == ("codex-chief", "result-router")
     for spec in specs:
         assert isinstance(spec["command"], list) and all(isinstance(part, str) for part in spec["command"])
 

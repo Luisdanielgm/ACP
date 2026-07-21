@@ -255,3 +255,17 @@ def test_collector_planner_reuses_delivery_after_crash_and_marks_it_sent(tmp_pat
     planner.mark_forwarded(first)
     assert plan.next_safe_action() is None
     assert planner.prepare(message) == first
+
+
+def test_planner_ignores_structured_results_owned_by_another_product_plan(tmp_path: Path) -> None:
+    plan = plan_module.CoordinatorPlan(tmp_path / "plan.json", _plan())
+    planner = plan_module.CoordinatorPlanCollector(plan)
+    message = {
+        "id": "reply-unrelated",
+        "from": "worker",
+        "action": "REPLY",
+        "payload": json.dumps({"task_id": "ad-hoc-task", "outcome": "success"}),
+    }
+
+    assert planner.prepare(message) is None
+    assert plan.snapshot()["receipts"] == {}

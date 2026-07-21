@@ -122,7 +122,12 @@ class _CountingAdapter:
         return HostResult(outcome="success", summary="Finished once")
 
 
-def _bridge(tmp_path: Path, adapter: Any) -> HostBridge:
+def _bridge(
+    tmp_path: Path,
+    adapter: Any,
+    *,
+    accepted_actions: tuple[str, ...] = ("TASK",),
+) -> HostBridge:
     registry = AdapterRegistry()
     registry.register(adapter)
     return HostBridge(
@@ -130,6 +135,7 @@ def _bridge(tmp_path: Path, adapter: Any) -> HostBridge:
         binding=HostBinding(adapter_id=adapter.manifest.adapter_id, values={"session_id": "existing"}),
         store=JsonBridgeStore(tmp_path / "bridge-state.json"),
         allowed_senders=("chief",),
+        accepted_actions=accepted_actions,
     )
 
 
@@ -167,6 +173,67 @@ def test_one_message_is_activated_replied_and_acked_once(tmp_path: Path) -> None
     assert acknowledgments == ["msg-1"]
     assert len(replies) == 1
     assert replies[0][0] == "msg-1"
+
+
+@pytest.mark.parametrize("action", ["REPLY", "INFO"])
+def test_configured_non_task_action_wakes_host_without_reply_loop(
+    tmp_path: Path,
+    action: str,
+) -> None:
+    adapter = _CountingAdapter()
+    bridge = _bridge(tmp_path, adapter, accepted_actions=("TASK", "REPLY", "INFO"))
+    response = _response(message_id=f"msg-{action.lower()}")
+    response["message"]["action"] = action
+    response["message"]["payload"] = json.dumps(
+        {"task_id": "reported-task", "outcome": "success", "summary": "Worker finished"}
+    )
+    acknowledgments: list[str] = []
+
+    result = bridge.handle(
+        response,
+        acknowledge=lambda envelope: acknowledgments.append(envelope["delivery"]["message_id"]),
+        reply=lambda *_: pytest.fail("REPLY/INFO handling must not emit an automatic REPLY"),
+    )
+
+    assert result == {"status": "completed", "outcome": "success"}
+    assert len(adapter.deliveries) == 1
+    assert adapter.deliveries[0].action == action
+    assert f"ACP {action}" in adapter.deliveries[0].instructions
+    assert "Worker finished" in adapter.deliveries[0].instructions
+    assert acknowledgments == [f"msg-{action.lower()}"]
+
+
+def test_single_reply_action_profile_does_not_require_task_reply_policy(tmp_path: Path) -> None:
+    adapter = _CountingAdapter()
+    bridge = _bridge(tmp_path, adapter, accepted_actions=("REPLY",))
+    response = _response(message_id="msg-reply-only")
+    response["message"]["action"] = "REPLY"
+    response["message"]["payload"] = "completed"
+
+    result = bridge.handle(
+        response,
+        acknowledge=lambda *_: None,
+        reply=lambda *_: pytest.fail("REPLY-only profile must not auto reply"),
+    )
+
+    assert result["status"] == "completed"
+
+
+def test_action_outside_configured_allowlist_fails_before_host_or_ack(tmp_path: Path) -> None:
+    adapter = _CountingAdapter()
+    bridge = _bridge(tmp_path, adapter, accepted_actions=("TASK",))
+    response = _response(message_id="msg-info")
+    response["message"]["action"] = "INFO"
+    response["message"]["payload"] = "status update"
+
+    with pytest.raises(HostDeliveryError, match="not authorized"):
+        bridge.handle(
+            response,
+            acknowledge=lambda *_: pytest.fail("unauthorized action must not ACK"),
+            reply=lambda *_: pytest.fail("unauthorized action must not REPLY"),
+        )
+
+    assert adapter.deliveries == []
 
 
 def test_restart_reuses_durable_result_without_duplicate_activation(tmp_path: Path) -> None:

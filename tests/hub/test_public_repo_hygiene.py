@@ -20,6 +20,7 @@ PUBLIC_EXTRACTION_SOURCES = (
     REPO_ROOT / "PUBLIC_REPO_BOUNDARY.md",
     REPO_ROOT / "README.md",
     REPO_ROOT / "protocol.md",
+    REPO_ROOT / "HANDOFF-sala-viva.md",
 )
 TEXT_SUFFIXES = {
     ".md",
@@ -38,6 +39,9 @@ TEXT_SUFFIXES = {
 }
 FORBIDDEN_MARKERS: dict[str, str] = {
     "aerocostos": "private customer brand must not appear in the public repo",
+    "luxairways": "private customer company must not appear in the public repo",
+    "c1054": "private project identifiers must not appear in the public repo",
+    "codex-pilot": "private pilot member identities must not appear in the public repo",
     "nephila": "private brand must not appear in the public repo",
     "nefila": "private brand must not appear in the public repo",
 }

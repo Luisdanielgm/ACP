@@ -40,7 +40,7 @@ def _base_config(**overrides: Any) -> dict[str, Any]:
     return config
 
 
-def test_worker_profile_routes_replies_to_collector_and_authorizes_coordinator() -> None:
+def test_worker_profile_routes_task_results_directly_to_configured_coordinator() -> None:
     config, summary = acp_cli.build_host_bridge_profile(
         _base_config(),
         agent_name="codex-task-code",
@@ -51,43 +51,48 @@ def test_worker_profile_routes_replies_to_collector_and_authorizes_coordinator()
         coordinator="codex-chief",
     )
 
-    assert config["host_bridge_reply_to"] == "codex-pilot-reply-collector"
+    assert config["host_bridge_reply_to"] == "codex-chief"
     assert config["host_bridge_allowed_senders"] == ["codex-chief"]
+    assert config["host_bridge_accepted_actions"] == ["TASK", "REPLY", "INFO"]
     assert config["host_bridge_thread_id"] == "thread-code-1"
     assert config["host_bridge_adapter_id"] == "codex_app_server_stdio"
     assert config["host_bridge_executable"] == r"C:\Tools\codex.exe"
     assert config["host_profile_schema_version"] == acp_cli.HOST_PROFILE_SCHEMA_VERSION
-    assert summary["reply_to"] == "codex-pilot-reply-collector"
+    assert summary["reply_to"] == "codex-chief"
     assert summary["role"] == "worker"
 
 
-def test_coordinator_profile_authorizes_collector_without_reply_to() -> None:
+def test_generic_member_profile_uses_explicit_senders_without_named_topology() -> None:
     config, summary = acp_cli.build_host_bridge_profile(
         _base_config(agent_name="codex-chief"),
         agent_name="codex-chief",
-        role="coordinator",
+        role="member",
         adapter_id="codex_app_server_stdio",
         host_session_id="thread-chief-1",
         executable=r"C:\Tools\codex.exe",
+        extra_allowed_senders=("worker-a", "worker-b"),
     )
 
-    assert config["host_bridge_allowed_senders"] == ["codex-pilot-reply-collector"]
-    assert "host_bridge_reply_to" not in config  # never route replies back into the collector
+    assert config["host_bridge_allowed_senders"] == ["worker-a", "worker-b"]
+    assert config["host_bridge_accepted_actions"] == ["TASK", "REPLY", "INFO"]
+    assert "host_bridge_reply_to" not in config
     assert summary["reply_to"] is None
 
 
-def test_coordinator_drops_reply_to_that_would_loop_into_collector() -> None:
+def test_member_profile_preserves_an_explicit_generic_reply_target() -> None:
     config, summary = acp_cli.build_host_bridge_profile(
-        _base_config(agent_name="codex-chief", host_bridge_reply_to="codex-pilot-reply-collector"),
-        agent_name="codex-chief",
-        role="coordinator",
+        _base_config(agent_name="agent-a"),
+        agent_name="agent-a",
+        role="member",
         adapter_id="codex_app_server_stdio",
         host_session_id="thread-chief-1",
         executable=r"C:\Tools\codex.exe",
+        reply_to="agent-b",
+        extra_allowed_senders=("agent-b",),
     )
 
-    assert "host_bridge_reply_to" not in config
-    assert any("collector" in note for note in summary["migrated"])
+    assert config["host_bridge_reply_to"] == "agent-b"
+    assert summary["reply_to"] == "agent-b"
 
 
 def test_migrates_legacy_codex_session_id_to_thread_id_and_stamps_version() -> None:
@@ -112,6 +117,30 @@ def test_migrates_legacy_codex_session_id_to_thread_id_and_stamps_version() -> N
     assert config["host_profile_schema_version"] == acp_cli.HOST_PROFILE_SCHEMA_VERSION
     assert summary["prior_schema_version"] is None
     assert any("host_bridge_session_id -> host_bridge_thread_id" in note for note in summary["migrated"])
+
+
+def test_migrates_task_only_worker_to_direct_multi_action_ingress() -> None:
+    legacy = _base_config(
+        host_bridge_wait_action="TASK",
+        host_bridge_reply_to="old-result-router",
+        host_bridge_allowed_senders=["coordinator"],
+    )
+
+    config, summary = acp_cli.build_host_bridge_profile(
+        legacy,
+        agent_name="worker-a",
+        role="worker",
+        adapter_id="codex_app_server_stdio",
+        host_session_id="thread-worker-a",
+        executable=r"C:\Tools\codex.exe",
+        coordinator="coordinator",
+        accepted_actions=("TASK", "REPLY", "INFO"),
+    )
+
+    assert "host_bridge_wait_action" not in config
+    assert config["host_bridge_accepted_actions"] == ["TASK", "REPLY", "INFO"]
+    assert config["host_bridge_reply_to"] == "coordinator"
+    assert summary["schema_version"] == 2
 
 
 def test_preserves_secrets_and_unknown_keys() -> None:
@@ -163,16 +192,17 @@ def test_extra_allow_senders_merge_without_duplicates() -> None:
     assert config["host_bridge_allowed_senders"] == ["codex-chief", "auditor", "reviewer"]
 
 
-def test_worker_reply_to_cannot_equal_own_identity() -> None:
-    with pytest.raises(HostBindingError, match="differ from the worker identity"):
+def test_member_reply_to_cannot_equal_own_identity() -> None:
+    with pytest.raises(HostBindingError, match="differ from the bridge member identity"):
         acp_cli.build_host_bridge_profile(
-            _base_config(agent_name="codex-pilot-reply-collector"),
-            agent_name="codex-pilot-reply-collector",
-            role="worker",
+            _base_config(agent_name="agent-a"),
+            agent_name="agent-a",
+            role="member",
             adapter_id="codex_app_server_stdio",
             host_session_id="thread-1",
             executable=r"C:\Tools\codex.exe",
-            coordinator="codex-chief",
+            reply_to="agent-a",
+            extra_allowed_senders=("agent-b",),
         )
 
 
@@ -227,9 +257,7 @@ def test_codex_app_server_rejects_directory() -> None:
         )
 
 
-def test_worker_collector_coordinator_flow_has_no_loop() -> None:
-    """End-to-end: worker replies to collector; coordinator answers the original
-    worker (via the wrapped reply_to), never back into the collector."""
+def test_worker_coordinator_flow_has_no_collector_or_reply_loop() -> None:
     worker_cfg, _ = acp_cli.build_host_bridge_profile(
         _base_config(agent_name="codex-task-code"),
         agent_name="codex-task-code",
@@ -246,22 +274,17 @@ def test_worker_collector_coordinator_flow_has_no_loop() -> None:
         adapter_id="codex_app_server_stdio",
         host_session_id="thread-chief-1",
         executable=r"C:\Tools\codex.exe",
+        extra_allowed_senders=("codex-task-code",),
     )
 
-    # Worker handling a plain TASK from the coordinator -> reply goes to the collector.
+    # Worker handling a plain TASK from the coordinator replies directly to it.
     worker_target = acp_cli._host_bridge_reply_target(
         _delivery(sender="codex-chief"), worker_cfg.get("host_bridge_reply_to")
     )
-    assert worker_target == "codex-pilot-reply-collector"
+    assert worker_target == "codex-chief"
 
-    # Coordinator handling the collector's wrapped TASK (reply_to = original worker)
-    # -> reply returns to the worker, NOT the collector. No loop.
-    coordinator_target = acp_cli._host_bridge_reply_target(
-        _delivery(sender="codex-pilot-reply-collector", reply_to="codex-task-code"),
-        coordinator_cfg.get("host_bridge_reply_to"),
-    )
-    assert coordinator_target == "codex-task-code"
-    assert coordinator_target != "codex-pilot-reply-collector"
+    assert coordinator_cfg["host_bridge_allowed_senders"] == ["codex-task-code"]
+    assert coordinator_cfg["host_bridge_accepted_actions"] == ["TASK", "REPLY", "INFO"]
 
 
 def _configure_args(config_path: Path, **overrides: Any) -> argparse.Namespace:
@@ -278,6 +301,8 @@ def _configure_args(config_path: Path, **overrides: Any) -> argparse.Namespace:
         directory=None,
         credential_ref=None,
         reply_collector=None,
+        reply_to=None,
+        accepted_actions=None,
         coordinator="codex-chief",
         bridge_allowed_senders=None,
         state_path=None,
@@ -296,7 +321,7 @@ def test_configure_command_writes_atomically_and_is_idempotent(tmp_path: Path) -
     assert first["status"] == "configured"
     assert first["written"] is True
     written = json.loads(config_path.read_text(encoding="utf-8"))
-    assert written["host_bridge_reply_to"] == "codex-pilot-reply-collector"
+    assert written["host_bridge_reply_to"] == "codex-chief"
     assert written["member_token"] == "SECRET-member-token"
 
     acp_cli.host_bridge_configure_command(_configure_args(config_path))

@@ -11,6 +11,8 @@ from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile
 
 _MODULE_PATH = Path(__file__).resolve()
 _FINGERPRINT_COMMENT_PREFIX = b"ACP_AGENT_FINGERPRINT:"
+_MUTABLE_RUNTIME_DIRS = {"agents", "inbox", "outbox", "sent"}
+_MUTABLE_RUNTIME_FILES = {"BUNDLE_INFO.json"}
 
 
 def _discover_source_dir() -> Path:
@@ -59,7 +61,10 @@ def _iter_source_files(source_dir: Path) -> list[Path]:
     return sorted(
         path
         for path in source_dir.rglob("*")
-        if path.is_file() and "__pycache__" not in path.parts
+        if path.is_file()
+        and "__pycache__" not in path.relative_to(source_dir).parts
+        and not (_MUTABLE_RUNTIME_DIRS & set(path.relative_to(source_dir).parts))
+        and path.relative_to(source_dir).as_posix() not in _MUTABLE_RUNTIME_FILES
     )
 
 

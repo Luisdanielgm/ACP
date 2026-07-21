@@ -205,6 +205,7 @@ class HostDelivery:
     instructions: str
     task_id: str | None = None
     reply_to: str | None = None
+    action: str = "TASK"
 
     def host_message_id(self) -> str:
         digest = hashlib.sha256(self.message_id.encode()).hexdigest()[:24]
@@ -470,6 +471,8 @@ class HostBridge:
         binding: HostBinding,
         store: JsonBridgeStore,
         allowed_senders: tuple[str, ...],
+        accepted_actions: tuple[str, ...] = ("TASK",),
+        reply_actions: tuple[str, ...] | None = None,
     ) -> None:
         if not allowed_senders:
             raise ValueError("host bridge requires at least one trusted sender")
@@ -477,6 +480,17 @@ class HostBridge:
         self.binding = binding
         self.store = store
         self.allowed_senders = allowed_senders
+        normalized_actions = tuple(dict.fromkeys(str(action).strip().upper() for action in accepted_actions))
+        if not normalized_actions or any(action not in {"TASK", "REPLY", "INFO"} for action in normalized_actions):
+            raise ValueError("host bridge accepted_actions must contain TASK, REPLY, and/or INFO")
+        configured_reply_actions = reply_actions if reply_actions is not None else (("TASK",) if "TASK" in normalized_actions else ())
+        normalized_reply_actions = tuple(
+            dict.fromkeys(str(action).strip().upper() for action in configured_reply_actions)
+        )
+        if any(action not in normalized_actions for action in normalized_reply_actions):
+            raise ValueError("host bridge reply_actions must be a subset of accepted_actions")
+        self.accepted_actions = normalized_actions
+        self.reply_actions = normalized_reply_actions
 
     def poll_once(
         self,
@@ -502,7 +516,11 @@ class HostBridge:
             return {"status": "idle"}
         if status != "message":
             raise HostDeliveryError("ACP receive returned an invalid status")
-        message, _delivery = _validated_envelope(response, self.allowed_senders)
+        message, _delivery = _validated_envelope(
+            response,
+            self.allowed_senders,
+            accepted_actions=self.accepted_actions,
+        )
         host_delivery = _host_delivery(message)
         key = hashlib.sha256(f"{message.get('session_id', '')}:{host_delivery.message_id}".encode()).hexdigest()
         record = self.store.get(key)
@@ -525,6 +543,7 @@ class HostBridge:
                     "message_id": host_delivery.message_id,
                     "correlation_id": host_delivery.correlation_id,
                     "sender": host_delivery.sender,
+                    "action": host_delivery.action,
                     "binding": binding_descriptor,
                 }
                 self.store.put(key, record)
@@ -560,11 +579,12 @@ class HostBridge:
                 self.store.put(key, record)
                 outcome_status = "completed"
 
-        reply_id = str(uuid5(NAMESPACE_URL, f"acp-host-bridge-reply:{host_delivery.correlation_id}"))
-        if not record.get("replied"):
-            reply(host_delivery, result, reply_id)
-            record["replied"] = True
-            self.store.put(key, record)
+        if host_delivery.action in self.reply_actions:
+            reply_id = str(uuid5(NAMESPACE_URL, f"acp-host-bridge-reply:{host_delivery.correlation_id}"))
+            if not record.get("replied"):
+                reply(host_delivery, result, reply_id)
+                record["replied"] = True
+                self.store.put(key, record)
         if not record.get("acked"):
             acknowledge(response)
             record["acked"] = True
@@ -747,6 +767,8 @@ def _is_secret_key(key: str) -> bool:
 def _validated_envelope(
     response: Mapping[str, Any],
     allowed_senders: tuple[str, ...],
+    *,
+    accepted_actions: tuple[str, ...] = ("TASK",),
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     message = response.get("message")
     delivery = response.get("delivery")
@@ -761,13 +783,15 @@ def _validated_envelope(
         or not receipt_handle.strip()
     ):
         raise HostDeliveryError("ACP delivery identity is invalid")
-    if message.get("action") != "TASK" or message.get("from") not in allowed_senders:
-        raise HostDeliveryError("ACP delivery is not an authorized TASK")
+    action = str(message.get("action") or "").upper()
+    if action not in accepted_actions or message.get("from") not in allowed_senders:
+        raise HostDeliveryError("ACP delivery action or sender is not authorized")
     return message, delivery
 
 
 def _host_delivery(message: Mapping[str, Any]) -> HostDelivery:
     payload = message.get("payload")
+    action = str(message.get("action") or "").upper()
     task_id: str | None = None
     instructions: str | None = None
     reply_to: str | None = None
@@ -801,7 +825,13 @@ def _host_delivery(message: Mapping[str, Any]) -> HostDelivery:
         elif payload.strip():
             instructions = payload.strip()
     if instructions is None:
-        raise HostDeliveryError("ACP TASK does not contain instructions")
+        if action == "TASK":
+            raise HostDeliveryError("ACP TASK does not contain instructions")
+        rendered_payload = payload if isinstance(payload, str) and payload.strip() else "(empty payload)"
+        instructions = (
+            f"ACP {action} from {message.get('from', '')}. Process this coordination message "
+            f"within the current task and its permissions.\n\n{rendered_payload}"
+        )
     message_id = str(message["id"])
     return HostDelivery(
         message_id=message_id,
@@ -810,4 +840,5 @@ def _host_delivery(message: Mapping[str, Any]) -> HostDelivery:
         instructions=instructions,
         task_id=task_id,
         reply_to=reply_to,
+        action=action,
     )

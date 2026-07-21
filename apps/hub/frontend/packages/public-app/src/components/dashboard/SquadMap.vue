@@ -571,7 +571,7 @@ function labelFor(ux: number, uy: number, shellR: number, isChief: boolean, ring
   return { anchor: 'middle', nameX: 0, nameY: shellR + 22, subX: 0, subY: shellR + 39, clip: 26 }
 }
 
-// Long mixed-family names ("Aero Luxairways Personal…") don't fit one line:
+// Long mixed-family names ("Aero Example Personal…") don't fit one line:
 // split at a word boundary into at most two lines, ellipsizing the second.
 function wrapNodeName(value: string, maxPerLine: number): string[] {
   const text = String(value || '').trim()

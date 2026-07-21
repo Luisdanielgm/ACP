@@ -213,15 +213,15 @@ delivery pasa a un estado terminal `quarantined` (`reason: host_never_accepted`,
 correlacionado y se hace ACK para que la cola siga sin reenviar un `turn/start`
 duplicado ni perder trabajo en silencio. Los casos `inProgress`/desconexion/ambiguos
 siguen fail-closed y reintentan.
-Para enrutar respuestas, `host_bridge_reply_to` (o `--reply-to`) fija el
-destino de los REPLY ante un `TASK` plano, por ejemplo el miembro
-`codex-pilot-reply-collector`, que reenvia envuelto como `TASK` al coordinador
-TASK-only. Un REPLY/INFO ya envuelto responde siempre al worker original, asi el
-coordinador no crea un loop de vuelta al collector.
-Host Bridge espera solo `TASK` por defecto usando el filtro server-side `action: TASK`;
-`REPLY`/`INFO` permanecen encolados para el consumidor correcto. Se puede declarar
-`host_bridge_wait_action: "TASK"` o pasar `--wait-action TASK`; cualquier otro valor
-se rechaza de forma fail-closed.
+Para enrutar resultados de un `TASK`, `host_bridge_reply_to` (o `--reply-to`)
+fija el miembro destino. Un mismo Host Bridge puede aceptar `TASK`, `REPLY` e
+`INFO` mediante `host_bridge_accepted_actions`. Las tres acciones despiertan la
+sesion existente configurada, pero solo un `TASK` genera un `REPLY` automatico;
+procesar `REPLY`/`INFO` termina con ACK y no emite otra respuesta automatica, por
+lo que no se forman loops. Con las tres acciones no se envia filtro al wait; con
+un subconjunto, el bridge rota filtros server-side sin consumir acciones ajenas.
+`--wait-action` y `host_bridge_wait_action` quedan solo para migracion compatible
+de perfiles de una accion.
 17. En operacion ACP continua, publicar `waiting` cuando el agente este disponible y escuchando; no publicar `idle` mientras siga operativo. Para agentes interactivos, la escucha continua se implementa como loop de `listen --stop-after-message`; para daemons LLM always-on, usar `runner start`; para consumidores externos no-LLM, se puede usar `listen` persistente.
 18. `wait` queda reservado para una espera foreground de una sola entrega. Para la politica operativa por defecto, usar `wait-window`: si acaba de cerrar una tarea y se espera otra instruccion inmediata, o si el siguiente paso depende de una decision/instruccion externa despues de enviar el `REPLY` y actualizar `status`, abrir de inmediato una ventana activa de hasta **20 minutos** con `python ACP_AGENT/acp.py wait-window --config ACP_AGENT/agents/<agent>.json --window-minutes 20`. Esa espera externa cuenta como parte del cierre operativo. Internamente la ventana encadena long-polls de hasta **300 segundos**. Si no llega nada en esa ventana, publicar `waiting`; si necesita disponibilidad real sin humano, pasar a `runner start`.
 19. `idle` solo debe usarse si el agente quedo realmente desacoplado de ACP o si la sesion termino. En una sesion viva, `waiting` + `listen` es el estado operativo correcto.
@@ -615,90 +615,64 @@ No pedir al humano que copie archivos manualmente dentro de otra carpeta.
 
 ## Host Bridge y supervisor
 
-`host-bridge` espera únicamente `TASK`, permanece en idle sin invocar modelos y
-despierta al recibir una entrega válida. Cada binding debe tener endpoint y
-session/thread existente explícitos; no hay autodiscovery ni creación de sesiones.
-El `reply-collector` es un miembro ACP separado: recibe `REPLY`/`INFO`, los
-reenvía de forma durable al coordinador y recién después confirma el mensaje.
-No puede compartir identidad con un Host Bridge TASK-only porque el Hub permite
-un solo wait activo por miembro.
+`host-bridge` mantiene un unico wait durable por miembro y no invoca hosts ni
+modelos mientras el inbox esta vacio. Cada binding declara endpoint/ejecutable y
+session/thread existente; no hay autodiscovery ni creacion de sesiones.
 
-El supervisor portable se inicia explícitamente por comando y sólo administra
-los procesos declarados; hace health checks no destructivos, conserva PID/estado
-y detiene árboles limpiamente. No sobrevive un reinicio de Windows hasta que el
-humano vuelva a iniciar el comando; todavía no instala Task Scheduler ni un
-servicio del sistema.
-
-Bootstrap prearmado de perfiles (idempotente, sin llamada al host ni sesión
-nueva; escribe atómicamente, sella `host_profile_schema_version` y migra perfiles
-antiguos). El rol `worker` fija `host_bridge_reply_to = codex-pilot-reply-collector`
-y autoriza a su coordinador; el rol `coordinator` autoriza al collector y nunca
-enruta respuestas de vuelta a él. Usar `--check` para el modo doctor sin escritura:
-
-```powershell
-python ACP_AGENT/acp.py host-bridge configure --config ACP_AGENT/agents/codex-task-code.json --role worker --adapter-id codex_app_server_stdio --host-thread-id <thread-id> --host-executable "C:\ruta\codex.exe" --coordinator codex-chief
-python ACP_AGENT/acp.py host-bridge configure --config ACP_AGENT/agents/codex-chief.json --role coordinator --adapter-id codex_app_server_stdio --host-thread-id <thread-id> --host-executable "C:\ruta\codex.exe"
-```
-
-Generar la config del supervisor para todos los componentes configurados
-(reutiliza el supervisor no-modelo; `autostart: not_installed`, no instala nada):
-
-```powershell
-python ACP_AGENT/acp.py host-supervisor generate --output ACP_AGENT/agents/supervisor.json --coordinator codex-chief --worker codex-task-code --worker codex-task-wiki --reply-collector codex-pilot-reply-collector
-```
-
-Comandos operativos (requieren un JSON local con `host_supervisor_bridges` y
-comandos/endpoint explícitos):
-
-```powershell
-python ACP_AGENT/acp.py host-supervisor once --config ACP_AGENT/agents/supervisor.json
-python ACP_AGENT/acp.py host-supervisor start --config ACP_AGENT/agents/supervisor.json
-python ACP_AGENT/acp.py host-supervisor stop --config ACP_AGENT/agents/supervisor.json
-python ACP_AGENT/acp.py reply-collector start --config ACP_AGENT/agents/coordinator-reply-collector.json --forward-action TASK
-```
-
-Para continuidad determinista por roadmap, el producto —no ACP— declara un
-JSON de plan y un archivo distinto para estado mutable. Configurar ambos en el
-miembro collector (o pasarlos por CLI):
+La politica de ingreso es generica. El sistema consumidor define identidades,
+roles de negocio, remitentes y acciones; ACP solo valida y transporta:
 
 ```json
 {
-  "coordinator_plan_definition_path": "plans/roadmap.json",
-  "coordinator_plan_state_path": "inbox/reply-collector/roadmap.state.json"
+  "host_bridge_allowed_senders": ["coordinator", "worker-a"],
+  "host_bridge_accepted_actions": ["TASK", "REPLY", "INFO"],
+  "host_bridge_reply_to": "coordinator"
 }
 ```
 
+Un `TASK` valido despierta la sesion y produce un `REPLY` correlacionado durable
+antes del ACK. Un `REPLY` o `INFO` valido tambien despierta la misma sesion, pero
+no produce respuesta automatica; se ACKea solo despues del resultado terminal
+durable. Asi todos los miembros pueden recibir las tres acciones sin un agente
+intermediario ni un ciclo REPLY -> REPLY.
+
+Bootstrap generico de perfil (idempotente, sin llamada al host ni sesion nueva):
+
 ```powershell
-python ACP_AGENT/acp.py reply-collector start --config ACP_AGENT/agents/coordinator-reply-collector.json --forward-action TASK --plan-definition plans/roadmap.json --plan-state inbox/reply-collector/roadmap.state.json
+python ACP_AGENT/acp.py host-bridge configure --config ACP_AGENT/agents/coordinator.json --role member --adapter-id codex_app_server_stdio --host-thread-id <thread-id> --host-executable "C:\ruta\codex.exe" --allow-sender worker-a --accept-action TASK --accept-action REPLY --accept-action INFO
 ```
 
-Cada tarea declara `task_id`, `owner`, `instructions`, `depends_on`, `risk`,
-`approval_required` y opcionalmente `max_attempts` (1 por defecto, máximo 5).
-Un resultado sólo avanza si su sender coincide con el
-owner de la tarea despachada. `risk: high` o `risk: sensitive` exige
-`approval_required: true` y nunca se libera implícitamente. El collector
-espera primero; con inbox vacío no carga el plan ni llama al host/modelo.
-Después de un resultado terminal, persiste el resultado y la emisión, envía el
-único TASK dependency-ready con ID determinista, marca `sent` tras aceptación
-durable del Hub y sólo entonces ACKea el REPLY/INFO original. Los INFO que no
-declaran `task_id` + `outcome` siguen por el wrapper compatible y no envenenan
-el plan. Un fallo/interrupción sólo crea otro intento cuando el producto lo
-declaró con `max_attempts`; cada intento tiene un ID determinista distinto,
-mientras el replay por crash del mismo intento conserva su ID. Un resultado
-estructurado ya incorporado al plan que no tiene siguiente tarea lista se ACKea
-sin crear un TASK legacy de wake; esto evita bucles al llegar a un gate o al
-final del plan.
+Los roles compatibles `worker` y `coordinator` son ayudas de wiring, no roles de
+negocio. `worker --coordinator <miembro>` autoriza a ese sender y dirige a el los
+resultados TASK, sin crear un collector predeterminado. `member` exige routing
+explicito y no conoce topologias de ningun proyecto.
 
-Si una tarea del plan tiene como `owner` un Host Bridge worker, ese worker debe
-incluir también la identidad del collector/plan dispatcher en
-`host_bridge_allowed_senders`. El sender real no se suplanta como coordinador:
-la ausencia de esta allowlist falla antes de invocar el host y conserva el TASK
-sin ACK para reintento seguro.
+El supervisor portable administra solo los Host Bridge declarados, conserva
+PID/estado/logs, usa health checks no destructivos y detiene arboles limpiamente.
+No instala un servicio ni sobrevive un reboot hasta que el operador lo arranque:
 
-`--forward-action TASK` es obligatorio cuando el destino es un Host Bridge
-coordinador filtrado a TASK: encapsula la acción original y su trazabilidad en
-el payload, evitando que REPLY/INFO queden fuera del wait. El collector debe
-usar una identidad ACP distinta de la identidad TASK-only, y esa identidad debe
-figurar en `host_bridge_allowed_senders` del coordinador. La respuesta del
-coordinador vuelve al `original_sender` del envelope para no crear un loop en el
-collector.
+```powershell
+python ACP_AGENT/acp.py host-supervisor generate --output ACP_AGENT/agents/supervisor.json --coordinator coordinator --worker worker-a --worker worker-b
+python ACP_AGENT/acp.py host-supervisor once --config ACP_AGENT/agents/supervisor.json
+python ACP_AGENT/acp.py host-supervisor start --config ACP_AGENT/agents/supervisor.json
+python ACP_AGENT/acp.py host-supervisor stop --config ACP_AGENT/agents/supervisor.json
+```
+
+`reply-collector` permanece solo como compatibilidad para instalaciones antiguas
+filtradas a TASK. No se agrega por defecto a perfiles ni supervisores nuevos.
+
+Para continuidad determinista, ACP ofrece el motor generico `CoordinatorPlan`,
+pero el producto consumidor declara el JSON y conserva su estado. Configurando
+`coordinator_plan_definition_path` y `coordinator_plan_state_path` en el mismo
+HostBridge coordinador, un REPLY/INFO confiable primero actualiza el plan, emite
+como maximo un TASK dependency-ready con ID durable, despierta la sesion del
+coordinador con el resultado original y ACKea al final. El replay de crash reusa
+la emision y el resultado del host. Tareas ajenas al plan despiertan al miembro
+sin mutar el plan.
+
+Cada tarea puede declarar `task_id`, `owner`, `instructions`, `depends_on`,
+`risk`, `approval_required` y `max_attempts`. ACP no conoce cargos,
+procedimientos, empresas ni roadmaps del producto. Los gates `high`/`sensitive`
+nunca se liberan implicitamente. El dispatcher real debe figurar en la allowlist
+del owner; ACP no suplanta identidades. `reply-collector` sigue compatible solo
+para perfiles legacy.

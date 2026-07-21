@@ -26,10 +26,10 @@ class CollectorPlanner(Protocol):
 
 
 class ReplyCollector:
-    """Forward REPLY/INFO durably before acknowledging the leased message.
+    """Legacy forwarder for installations that still use TASK-only profiles.
 
-    The collector has no model/provider path.  It is intentionally separate from
-    a TASK-only HostBridge because ACP permits only one active wait per member.
+    It has no model/provider path and preserves durable forward-before-ACK
+    behavior. New HostBridge profiles receive REPLY/INFO directly instead.
     """
 
     def __init__(

@@ -341,7 +341,7 @@ def _host_args(path: Path) -> argparse.Namespace:
         adapter_id=None, endpoint=None, host_executable=None, host_session_id=None,
         directory=None, credential_ref=None, bridge_allowed_senders=None, state_path=None,
         wait_timeout_seconds=None, host_timeout_seconds=None, retry_delay_seconds=None,
-        wait_action=None, reply_to=None,
+        wait_action=None, accepted_actions=None, reply_to=None,
     )
 
 
@@ -377,3 +377,160 @@ def test_planned_task_resumes_same_existing_desktop_thread_once(tmp_path: Path, 
     assert binding.values["thread_id"] == "desktop-thread-existing"
     assert delivery.task_id == "desktop-next"
     assert [route for route, _ in host_hub.calls] == ["/sessions/wait", "/sessions/send", "/sessions/ack"]
+
+
+def test_direct_reply_advances_product_plan_and_wakes_same_coordinator_ingress(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    config_path = _coordinator_config(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    definition_path = tmp_path / "direct-definition.json"
+    definition_path.write_text(json.dumps(_definition()), encoding="utf-8")
+    config.update(
+        {
+            "host_bridge_allowed_senders": ["worker"],
+            "host_bridge_accepted_actions": ["TASK", "REPLY", "INFO"],
+            "coordinator_plan_definition_path": str(definition_path),
+            "coordinator_plan_state_path": str(tmp_path / "direct-plan-state.json"),
+        }
+    )
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    direct_reply = _reply()
+    direct_reply["message"]["to"] = "codex-coordinator"
+    direct_reply["delivery"]["lease_expires_at"] = (
+        datetime.now(timezone.utc) + timedelta(seconds=60)
+    ).isoformat().replace("+00:00", "Z")
+    hub = FakeHub([direct_reply])
+    adapter = RecordingCodexAdapter()
+    registry = AdapterRegistry()
+    registry.register(adapter)
+    monkeypatch.setattr(acp_cli, "post_json", hub)
+    monkeypatch.setattr(acp_cli, "default_registry", lambda **_kwargs: registry)
+
+    result = acp_cli.host_bridge_once(_host_args(config_path))
+
+    assert result == {"status": "completed", "outcome": "success"}
+    assert len(adapter.deliveries) == 1
+    assert adapter.deliveries[0][1].action == "REPLY"
+    assert adapter.deliveries[0][1].message_id == "reply-1"
+    assert [route for route, _ in hub.calls] == ["/sessions/wait", "/sessions/send", "/sessions/ack"]
+    planned = hub.calls[1][1]
+    assert planned["to"] == "codex-coordinator"
+    assert json.loads(planned["payload"])["task_id"] == "desktop-next"
+
+
+def test_direct_plan_ack_retry_reuses_emission_and_host_result(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    config_path = _coordinator_config(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    definition_path = tmp_path / "retry-definition.json"
+    definition_path.write_text(json.dumps(_definition()), encoding="utf-8")
+    config.update(
+        {
+            "host_bridge_allowed_senders": ["worker"],
+            "host_bridge_accepted_actions": ["TASK", "REPLY", "INFO"],
+            "coordinator_plan_definition_path": str(definition_path),
+            "coordinator_plan_state_path": str(tmp_path / "retry-plan-state.json"),
+        }
+    )
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    reply = _reply()
+    reply["message"]["to"] = "codex-coordinator"
+    reply["delivery"]["lease_expires_at"] = (
+        datetime.now(timezone.utc) + timedelta(seconds=60)
+    ).isoformat().replace("+00:00", "Z")
+    hub = FakeHub([reply, reply])
+    hub.fail_ack_once = True
+    adapter = RecordingCodexAdapter()
+    registry = AdapterRegistry()
+    registry.register(adapter)
+    monkeypatch.setattr(acp_cli, "post_json", hub)
+    monkeypatch.setattr(acp_cli, "default_registry", lambda **_kwargs: registry)
+
+    with pytest.raises(Exception, match="ack did not confirm"):
+        acp_cli.host_bridge_once(_host_args(config_path))
+    assert acp_cli.host_bridge_once(_host_args(config_path))["status"] == "duplicate"
+
+    sends = [payload for route, payload in hub.calls if route == "/sessions/send"]
+    assert len(sends) == 2
+    assert sends[0]["id"] == sends[1]["id"]
+    assert len(adapter.deliveries) == 1
+
+
+def test_direct_plan_send_failure_does_not_wake_host_or_ack(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    config_path = _coordinator_config(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    definition_path = tmp_path / "fail-definition.json"
+    definition_path.write_text(json.dumps(_definition()), encoding="utf-8")
+    config.update(
+        {
+            "host_bridge_allowed_senders": ["worker"],
+            "host_bridge_accepted_actions": ["TASK", "REPLY", "INFO"],
+            "coordinator_plan_definition_path": str(definition_path),
+            "coordinator_plan_state_path": str(tmp_path / "fail-plan-state.json"),
+        }
+    )
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    reply = _reply()
+    reply["message"]["to"] = "codex-coordinator"
+    reply["delivery"]["lease_expires_at"] = (
+        datetime.now(timezone.utc) + timedelta(seconds=60)
+    ).isoformat().replace("+00:00", "Z")
+    hub = FakeHub([reply])
+    hub.fail_send = True
+    adapter = RecordingCodexAdapter()
+    registry = AdapterRegistry()
+    registry.register(adapter)
+    monkeypatch.setattr(acp_cli, "post_json", hub)
+    monkeypatch.setattr(acp_cli, "default_registry", lambda **_kwargs: registry)
+
+    with pytest.raises(Exception, match="not durably accepted"):
+        acp_cli.host_bridge_once(_host_args(config_path))
+
+    assert adapter.deliveries == []
+    assert [route for route, _ in hub.calls] == ["/sessions/wait", "/sessions/send"]
+
+
+def test_direct_plan_rejects_untrusted_result_before_state_or_dispatch(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    config_path = _coordinator_config(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    definition_path = tmp_path / "untrusted-definition.json"
+    definition_path.write_text(json.dumps(_definition()), encoding="utf-8")
+    state_path = tmp_path / "untrusted-plan-state.json"
+    config.update(
+        {
+            "host_bridge_allowed_senders": ["worker"],
+            "host_bridge_accepted_actions": ["TASK", "REPLY", "INFO"],
+            "coordinator_plan_definition_path": str(definition_path),
+            "coordinator_plan_state_path": str(state_path),
+        }
+    )
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    reply = _reply()
+    reply["message"]["from"] = "intruder"
+    reply["message"]["to"] = "codex-coordinator"
+    reply["delivery"]["lease_expires_at"] = (
+        datetime.now(timezone.utc) + timedelta(seconds=60)
+    ).isoformat().replace("+00:00", "Z")
+    hub = FakeHub([reply])
+    adapter = RecordingCodexAdapter()
+    registry = AdapterRegistry()
+    registry.register(adapter)
+    monkeypatch.setattr(acp_cli, "post_json", hub)
+    monkeypatch.setattr(acp_cli, "default_registry", lambda **_kwargs: registry)
+
+    with pytest.raises(Exception, match="not authorized"):
+        acp_cli.host_bridge_once(_host_args(config_path))
+
+    assert not state_path.exists()
+    assert adapter.deliveries == []
+    assert [route for route, _ in hub.calls] == ["/sessions/wait"]

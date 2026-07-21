@@ -49,6 +49,30 @@ def test_ensure_bundle_archive_rebuilds_when_source_changes(tmp_path: Path) -> N
         assert archive.read("AGENT.md").decode("utf-8").strip() == "v2"
 
 
+def test_bundle_excludes_mutable_runtime_state_and_ignores_it_for_fingerprint(tmp_path: Path) -> None:
+    source_dir = tmp_path / "ACP_AGENT"
+    bundle_path = tmp_path / "downloads" / "ACP_AGENT.zip"
+    source_dir.mkdir(parents=True)
+    (source_dir / "acp.py").write_text("print('portable')\n", encoding="utf-8")
+    for relative in (
+        "agents/member.json",
+        "inbox/member/ledger.json",
+        "outbox/pending.json",
+        "sent/result.json",
+    ):
+        path = source_dir / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"private":"runtime-state"}\n', encoding="utf-8")
+    (source_dir / "BUNDLE_INFO.json").write_text('{"installed_version":"old"}\n', encoding="utf-8")
+
+    ensure_bundle_archive(source_dir=source_dir, bundle_path=bundle_path)
+
+    with ZipFile(bundle_path) as archive:
+        assert archive.namelist() == ["acp.py"]
+    (source_dir / "inbox/member/ledger.json").write_text("changed\n", encoding="utf-8")
+    assert bundle_is_stale(source_dir=source_dir, bundle_path=bundle_path) is False
+
+
 def test_discover_downloads_dir_falls_back_to_process_cwd(monkeypatch, tmp_path: Path) -> None:
     downloads_dir = tmp_path / "downloads"
     downloads_dir.mkdir()

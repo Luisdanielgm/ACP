@@ -95,6 +95,7 @@ def _message_response(
     sender: str = "chief",
     host_session: str = "host-session-1",
     lease_seconds: float = 300.0,
+    action: str = "TASK",
 ) -> dict[str, Any]:
     return {
         "status": "message",
@@ -103,8 +104,12 @@ def _message_response(
             "session_id": "coordination-session",
             "from": sender,
             "to": "bridge-agent",
-            "action": "TASK",
-            "payload": json.dumps({"task_id": "task-1", "instructions": "Inspect the repository"}),
+            "action": action,
+            "payload": json.dumps(
+                {"task_id": "task-1", "instructions": "Inspect the repository"}
+                if action == "TASK"
+                else {"task_id": "task-1", "outcome": "success", "summary": "Completed by worker"}
+            ),
         },
         "delivery": {
             "ack_required": True,
@@ -157,6 +162,7 @@ def _args(config_path: Path, *, command: str = "once") -> argparse.Namespace:
         host_timeout_seconds=None,
         retry_delay_seconds=None,
         wait_action=None,
+        accepted_actions=None,
     )
 
 
@@ -181,7 +187,7 @@ def test_empty_host_bridge_cycles_never_touch_host_or_model(tmp_path: Path, monk
     assert not (tmp_path / "host-bridge-state.json").exists()
 
 
-def test_host_bridge_waits_only_for_task_action(tmp_path: Path, monkeypatch: Any) -> None:
+def test_host_bridge_default_wait_accepts_all_actions_without_server_filter(tmp_path: Path, monkeypatch: Any) -> None:
     config_path = _write_config(tmp_path)
     hub = FakeHub([{"status": "timeout"}])
     adapter = RecordingAdapter()
@@ -191,19 +197,49 @@ def test_host_bridge_waits_only_for_task_action(tmp_path: Path, monkeypatch: Any
     acp_cli.host_bridge_once(_args(config_path))
 
     wait_payload = hub.calls[0][1]
-    assert wait_payload["action"] == "TASK"
+    assert "action" not in wait_payload
     assert adapter.deliveries == []
 
 
-def test_host_bridge_wait_action_is_fail_closed(tmp_path: Path) -> None:
-    config_path = _write_config(tmp_path, host_bridge_wait_action="REPLY")
+def test_host_bridge_explicit_action_allowlist_is_validated_and_filtered(tmp_path: Path) -> None:
+    config_path = _write_config(tmp_path, host_bridge_accepted_actions=["REPLY", "INFO"])
 
-    with pytest.raises(HostBindingError, match="wait_action must be TASK"):
-        acp_cli.resolve_host_bridge_profile(_args(config_path))
+    profile = acp_cli.resolve_host_bridge_profile(_args(config_path))
 
-    empty_config_path = _write_config(tmp_path, host_bridge_wait_action="")
-    with pytest.raises(HostBindingError, match="wait_action must be TASK"):
+    assert profile["accepted_actions"] == ("REPLY", "INFO")
+
+    invalid_config_path = _write_config(tmp_path, host_bridge_accepted_actions=["REPLY", "DELETE"])
+
+    with pytest.raises(HostBindingError, match="accepted_actions"):
+        acp_cli.resolve_host_bridge_profile(_args(invalid_config_path))
+
+    empty_config_path = _write_config(tmp_path, host_bridge_accepted_actions=[])
+    with pytest.raises(HostBindingError, match="accepted_actions"):
         acp_cli.resolve_host_bridge_profile(_args(empty_config_path))
+
+
+def test_legacy_wait_action_remains_a_single_action_filter(tmp_path: Path, monkeypatch: Any) -> None:
+    config_path = _write_config(tmp_path, host_bridge_wait_action="TASK")
+    hub = FakeHub([{"status": "timeout"}])
+    adapter = RecordingAdapter()
+    monkeypatch.setattr(acp_cli, "post_json", hub.post_json)
+    monkeypatch.setattr(acp_cli, "default_registry", lambda **_kwargs: _registry(adapter))
+
+    acp_cli.host_bridge_once(_args(config_path))
+
+    assert hub.calls[0][1]["action"] == "TASK"
+
+
+def test_multiple_accepted_actions_rotate_server_side_filters(tmp_path: Path, monkeypatch: Any) -> None:
+    config_path = _write_config(tmp_path, host_bridge_accepted_actions=["REPLY", "INFO"])
+    hub = FakeHub([{"status": "timeout"}, {"status": "timeout"}])
+    adapter = RecordingAdapter()
+    monkeypatch.setattr(acp_cli, "post_json", hub.post_json)
+    monkeypatch.setattr(acp_cli, "default_registry", lambda **_kwargs: _registry(adapter))
+
+    acp_cli.host_bridge_start(_args(config_path, command="start"), max_cycles=2)
+
+    assert [payload["action"] for route, payload in hub.calls if route == "/sessions/wait"] == ["REPLY", "INFO"]
 
 
 def test_valid_delivery_uses_bound_session_then_replies_and_acks(tmp_path: Path, monkeypatch: Any) -> None:
@@ -232,6 +268,26 @@ def test_valid_delivery_uses_bound_session_then_replies_and_acks(tmp_path: Path,
     timeout_by_route = dict(hub.timeouts)
     assert 0 < timeout_by_route["/sessions/send"] <= 20
     assert 0 < timeout_by_route["/sessions/ack"] <= 20
+
+
+@pytest.mark.parametrize("action", ["REPLY", "INFO"])
+def test_non_task_action_wakes_same_host_then_acks_without_reply_loop(
+    tmp_path: Path,
+    monkeypatch: Any,
+    action: str,
+) -> None:
+    config_path = _write_config(tmp_path)
+    hub = FakeHub([_message_response(action=action)])
+    adapter = RecordingAdapter()
+    monkeypatch.setattr(acp_cli, "post_json", hub.post_json)
+    monkeypatch.setattr(acp_cli, "default_registry", lambda **_kwargs: _registry(adapter))
+
+    result = acp_cli.host_bridge_once(_args(config_path))
+
+    assert result == {"status": "completed", "outcome": "success"}
+    assert len(adapter.deliveries) == 1
+    assert adapter.deliveries[0][1].action == action
+    assert [route for route, _ in hub.calls] == ["/sessions/wait", "/sessions/ack"]
 
 
 def test_delivery_lease_reduces_host_budget_before_reply_and_ack(tmp_path: Path, monkeypatch: Any) -> None:
@@ -457,7 +513,9 @@ def test_delivery_failure_is_reported_as_waiting_before_retry(tmp_path: Path, mo
     result = acp_cli.host_bridge_start(_args(config_path, command="start"))
 
     assert result == {"status": "stopped", "reason": "interrupted", "cycles": 0}
-    assert statuses == [("waiting", "host bridge delivery failed: ACP delivery is not an authorized TASK; retrying safely")]
+    assert statuses == [
+        ("waiting", "host bridge delivery failed: ACP delivery action or sender is not authorized; retrying safely")
+    ]
 
 
 @pytest.mark.parametrize("response", [{}, {"status": "unexpected"}, []])
@@ -774,18 +832,18 @@ def _delivery(*, sender: str = "coordinator", reply_to: str | None = None) -> Ho
 
 def test_reply_target_prefers_wrapper_then_config_then_sender() -> None:
     # Wrapped REPLY/INFO always answers the original worker (no collector loop).
-    assert acp_cli._host_bridge_reply_target(_delivery(reply_to="worker-1"), "codex-pilot-reply-collector") == "worker-1"
+    assert acp_cli._host_bridge_reply_target(_delivery(reply_to="worker-1"), "result-router") == "worker-1"
     # Plain TASK with a configured reply target routes to the collector.
-    assert acp_cli._host_bridge_reply_target(_delivery(), "codex-pilot-reply-collector") == "codex-pilot-reply-collector"
+    assert acp_cli._host_bridge_reply_target(_delivery(), "result-router") == "result-router"
     # No configuration falls back to the original sender.
     assert acp_cli._host_bridge_reply_target(_delivery(sender="coordinator"), None) == "coordinator"
 
 
 def test_host_bridge_profile_reads_reply_to_from_config(tmp_path: Path) -> None:
-    config_path = _write_config(tmp_path, host_bridge_reply_to="codex-pilot-reply-collector")
+    config_path = _write_config(tmp_path, host_bridge_reply_to="result-router")
     profile = acp_cli.resolve_host_bridge_profile(_args(config_path))
 
-    assert profile["reply_to"] == "codex-pilot-reply-collector"
+    assert profile["reply_to"] == "result-router"
 
 
 def test_host_bridge_reply_to_cannot_equal_bridge_identity(tmp_path: Path) -> None:

@@ -41,6 +41,9 @@ class CoordinatorPlan:
     def snapshot(self) -> dict[str, Any]:
         return json.loads(json.dumps(self._state))
 
+    def recognizes_task(self, task_id: str) -> bool:
+        return isinstance(task_id, str) and task_id in self._state["tasks"]
+
     def record_result(self, *, message_id: str, sender: str, action: str, payload: str) -> dict[str, Any]:
         if not isinstance(message_id, str) or not message_id.strip():
             raise PlanError("result requires a message id")
@@ -323,7 +326,7 @@ class CoordinatorPlan:
 
 
 class CoordinatorPlanCollector:
-    """Adapt a CoordinatorPlan to ReplyCollector's durable planner contract."""
+    """Adapt a CoordinatorPlan to a durable REPLY/INFO ingress contract."""
 
     def __init__(self, plan: CoordinatorPlan) -> None:
         self.plan = plan
@@ -339,6 +342,8 @@ class CoordinatorPlanCollector:
             or not isinstance(candidate.get("task_id"), str)
             or not isinstance(candidate.get("outcome"), str)
         ):
+            return None
+        if not self.plan.recognizes_task(candidate["task_id"]):
             return None
         self.plan.record_result(
             message_id=message_id,

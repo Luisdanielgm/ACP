@@ -20,7 +20,7 @@ estados que no existan en el snapshot de coordinación.
 - **Paleta CÁLIDA**, NO el cian/verde oscuro de los mockups. El cian fue rechazado en sesión previa.
   Se copia **layout + assets** de los mockups, pero con la paleta cálida editorial del sistema.
 - **Alcance**: sala managed + el **SquadMap compartido** (que también fluye al dashboard público).
-- Idiomas: la UI se traduce a español cuando `locale === 'es'` (Chief→Jefe, People Manager→Gerente
+- Idiomas: la UI se traduce a español cuando `locale === 'es'` (Chief→Jefe, Operations Manager→Gerente
   de Personal, etc.). Los identificadores/código/labels internos siguen en inglés.
 - Todo debe **caber en UNA ventana sin scroll de página** (scrolls internos sí, dentro de paneles).
 
@@ -54,7 +54,7 @@ estados que no existan en el snapshot de coordinación.
     (funcionan en ambos build roots).
   - Exporta `avatarUrl(id,size)`, `stateIconUrl(name)`, `objectUrl(id,size)`, `AVATAR_LEADER`,
     `AVATAR_HUMAN`, `ROBOT_AVATAR_IDS`, `CROWN_URL`.
-  - Assets originales del usuario en `C:\Users\Orion\Downloads\acp-complete-dashboard-assets\assets`
+  - Assets originales del usuario en `a local design-assets directory`
     (20 avatares, 31 iconos de estado SVG, 12 objetos/orbes/corona + manifests JSON).
   - **Recoloreados** a teal por un script scratchpad `build_assets.py` (hue verde 120–190 con
     sat>0.22 → teal hue 157; `#42e59e`→`#59cea1`) para que peguen con la paleta cálida.
@@ -62,10 +62,10 @@ estados que no existan en el snapshot de coordinación.
 ### Helpers puros (dirigidos por datos reales) — `public-app/src/composables/sessionHelpers.ts`
 - `agentDisplayNames(names[])`: nombres legibles token-based (quita tokens comunes a TODOS los
   nombres + tokens de marca por prefijo ≥4 chars; con guardas anti-duplicado). Reemplazó al viejo
-  prefix-stripping que fallaba porque los nombres derivan ("aerocostos-" vs "aero-").
+  prefix-stripping que fallaba porque los nombres derivan ("project-" vs "aero-").
 - `humanizeAgentName`, `avatarForMember` (chief→leader, web-operator→human, matchers de dominio por
   keyword → avatar temático, si no name-hash robot; regexes con word-boundaries para no matchear mal
-  "luxairways"/"analyst").
+  "example"/"analyst").
 - `linkFreshness`, `heartbeatTier`/`heartbeatIconName`, `presenceIconName`, `operationIconName`,
   `messageIconNameForEvent` (incluye error/broadcast/heartbeat), `resultIconNameForEvent`.
 - Traducción: `public-app/src/composables/dashboardTranslations.ts` → `translateDisplayName(locale, label)`
