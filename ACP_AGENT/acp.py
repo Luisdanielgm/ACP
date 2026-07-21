@@ -898,6 +898,7 @@ def build_parser() -> argparse.ArgumentParser:
     host_bridge_configure_parser.add_argument("--host-executable", dest="host_executable", default=None, help="Absolute executable path for a CLI/stdio host")
     host_bridge_configure_parser.add_argument("--directory", default=None, help="Optional host directory context (not for Codex app-server)")
     host_bridge_configure_parser.add_argument("--credential-ref", dest="credential_ref", default=None, help="Optional env:NAME reference to a JSON credential")
+    host_bridge_configure_parser.add_argument("--member-token-ref", dest="member_token_ref", default=None, help="Optional env:NAME reference for an existing ACP listener member token")
     host_bridge_configure_parser.add_argument("--reply-to", dest="reply_to", default=None, help="Optional ACP member that receives automatic TASK results")
     host_bridge_configure_parser.add_argument("--reply-collector", dest="reply_collector", default=None, help="Deprecated legacy result-router member")
     host_bridge_configure_parser.add_argument("--coordinator", dest="coordinator", default=None, help="For --role worker: coordinator authorized to send TASKs")
@@ -4616,6 +4617,7 @@ def build_host_bridge_profile(
     executable: str | None = None,
     directory: str | None = None,
     credential_ref: str | None = None,
+    member_token_ref: str | None = None,
     reply_collector: str | None = None,
     reply_to: str | None = None,
     coordinator: str | None = None,
@@ -4650,6 +4652,14 @@ def build_host_bridge_profile(
     config = dict(existing)
     prior_version = config.get("host_profile_schema_version")
     migrated: list[str] = []
+
+    resolved_member_token_ref = _first_str(member_token_ref, config.get("member_token_ref"))
+    if resolved_member_token_ref is not None:
+        if not re.fullmatch(r"env:[A-Za-z_][A-Za-z0-9_]*", resolved_member_token_ref):
+            raise HostBindingError("member_token_ref must use env:NAME")
+        if config.get("member_token") not in {None, ""} and member_token_ref is not None:
+            raise HostBindingError("member_token and member_token_ref are mutually exclusive")
+        config["member_token_ref"] = resolved_member_token_ref
 
     is_cli_adapter = adapter_id in {"codex_cli", "claude_code_cli", "codex_app_server_stdio"}
     is_codex_app_server = adapter_id in {"codex_app_server", "codex_app_server_stdio"}
@@ -4775,6 +4785,7 @@ def build_host_bridge_profile(
         "agent": agent_name,
         "role": role,
         "adapter_id": adapter_id,
+        "member_token_ref": config.get("member_token_ref"),
         "host_id": resolved_id,
         "endpoint": config.get("host_bridge_endpoint"),
         "executable": config.get("host_bridge_executable"),
@@ -4817,6 +4828,7 @@ def host_bridge_configure_command(args: argparse.Namespace) -> dict[str, Any]:
         executable=getattr(args, "host_executable", None),
         directory=getattr(args, "directory", None),
         credential_ref=getattr(args, "credential_ref", None),
+        member_token_ref=getattr(args, "member_token_ref", None),
         reply_collector=getattr(args, "reply_collector", None),
         reply_to=getattr(args, "reply_to", None),
         coordinator=getattr(args, "coordinator", None),

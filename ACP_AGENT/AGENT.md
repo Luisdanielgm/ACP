@@ -647,6 +647,9 @@ Bootstrap generico de perfil (idempotente, sin llamada al host ni sesion nueva):
 python ACP_AGENT/acp.py host-bridge configure --config ACP_AGENT/agents/coordinator.json --role member --adapter-id codex_app_server_stdio --host-thread-id <thread-id> --host-executable "C:\ruta\codex.exe" --allow-sender worker-a --accept-action TASK --accept-action REPLY --accept-action INFO
 ```
 
+Para generar un config de listener sin persistir el token, agrega
+`--member-token-ref env:NAME`; la variable se resuelve solo al iniciar el wait.
+
 Los roles compatibles `worker` y `coordinator` son ayudas de wiring, no roles de
 negocio. `worker --coordinator <miembro>` autoriza a ese sender y dirige a el los
 resultados TASK, sin crear un collector predeterminado. `member` exige routing

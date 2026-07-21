@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.42 - 2026-07-21
+
+- EN: Expose `--member-token-ref` in HostBridge configure so existing listener configs can be generated deterministically without persisting an ACP member token.
+- ES: Expone `--member-token-ref` en HostBridge configure para generar configs de listeners existentes de forma determinista sin persistir un token de miembro ACP.
+
 ## 0.3.41 - 2026-07-21
 
 - EN: Allow an explicitly declared HostBridge listener to resolve its existing ACP member token from `member_token_ref: "env:NAME"`, keeping the token out of config files and failing closed when the reference is missing or ambiguous.

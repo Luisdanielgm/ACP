@@ -317,6 +317,7 @@ def _configure_args(config_path: Path, **overrides: Any) -> argparse.Namespace:
         host_executable=r"C:\Tools\codex.exe",
         directory=None,
         credential_ref=None,
+        member_token_ref=None,
         reply_collector=None,
         reply_to=None,
         accepted_actions=None,
@@ -344,6 +345,29 @@ def test_configure_command_writes_atomically_and_is_idempotent(tmp_path: Path) -
     acp_cli.host_bridge_configure_command(_configure_args(config_path))
     rewritten = json.loads(config_path.read_text(encoding="utf-8"))
     assert rewritten == written
+
+
+def test_configure_command_persists_listener_member_token_reference_without_secret(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "coordinator-listener.json"
+    config_path.write_text(json.dumps(_base_config(member_token=None)), encoding="utf-8")
+
+    result = acp_cli.host_bridge_configure_command(
+        _configure_args(
+            config_path,
+            role="member",
+            agent="coordinator-listener",
+            member_token_ref="env:ACP_COORDINATOR_LISTENER_TOKEN",
+            coordinator=None,
+            bridge_allowed_senders=["codex-pilot-coordinator"],
+        )
+    )
+
+    written = json.loads(config_path.read_text(encoding="utf-8"))
+    assert result["member_token_ref"] == "env:ACP_COORDINATOR_LISTENER_TOKEN"
+    assert written["member_token_ref"] == "env:ACP_COORDINATOR_LISTENER_TOKEN"
+    assert written.get("member_token") in {None, ""}
 
 
 def test_configure_check_mode_does_not_write(tmp_path: Path) -> None:
