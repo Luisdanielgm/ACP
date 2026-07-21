@@ -187,6 +187,29 @@ def test_empty_host_bridge_cycles_never_touch_host_or_model(tmp_path: Path, monk
     assert not (tmp_path / "host-bridge-state.json").exists()
 
 
+def test_host_bridge_retries_active_wait_without_exiting_supervisor(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    config_path = _write_config(tmp_path)
+    hub = FakeHub(
+        [
+            ValueError('hub HTTP 409: {"code":"WAIT_ALREADY_ACTIVE"}'),
+            {"status": "timeout"},
+        ]
+    )
+    adapter = RecordingAdapter()
+    monkeypatch.setattr(acp_cli, "post_json", hub.post_json)
+    monkeypatch.setattr(acp_cli, "default_registry", lambda **_kwargs: _registry(adapter))
+    monkeypatch.setattr(acp_cli.time, "sleep", lambda _seconds: None)
+
+    result = acp_cli.host_bridge_start(_args(config_path, command="start"), max_cycles=2)
+
+    assert result == {"status": "idle", "cycles": 2}
+    assert [route for route, _ in hub.calls if route == "/sessions/wait"] == ["/sessions/wait"] * 2
+    assert adapter.deliveries == []
+
+
 def test_host_bridge_default_wait_accepts_all_actions_without_server_filter(tmp_path: Path, monkeypatch: Any) -> None:
     config_path = _write_config(tmp_path)
     hub = FakeHub([{"status": "timeout"}])

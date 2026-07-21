@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.33 - 2026-07-20
+
+- EN: Keep HostBridge processes alive while a stale Hub wait lease drains; `WAIT_ALREADY_ACTIVE` is retried safely instead of terminating the supervisor child and exhausting restart limits.
+- ES: Se mantienen vivos los procesos HostBridge mientras vence un lease de espera obsoleto del Hub; `WAIT_ALREADY_ACTIVE` se reintenta de forma segura en vez de terminar el hijo del supervisor y agotar los límites de reinicio.
+
 ## 0.3.32 - 2026-07-20
 
 - EN: Reconcile completed Codex app-server turns when the host normalizes surrounding user-message whitespace, preventing a durable completed turn from being retried indefinitely.

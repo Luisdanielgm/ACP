@@ -5264,7 +5264,7 @@ def host_bridge_start(args: argparse.Namespace, *, max_cycles: int | None = None
                     time.sleep(profile["retry_delay_seconds"])
                     result = {"status": "retry"}
                 except ValueError as exc:
-                    if _is_fatal_session_command_error(str(exc)):
+                    if _is_fatal_host_bridge_error(str(exc)):
                         raise
                     _report_host_bridge_retry(profile, exc)
                     time.sleep(profile["retry_delay_seconds"])
@@ -5880,6 +5880,11 @@ def publish_runner_idle(*, settings: HubAgentSettings, profile: dict[str, Any], 
 
 def _is_wait_already_active_error(message: str) -> bool:
     return "WAIT_ALREADY_ACTIVE" in message or "active wait" in message
+
+
+def _is_fatal_host_bridge_error(message: str) -> bool:
+    """Keep a bridge alive while an older wait lease drains on the Hub."""
+    return _is_fatal_session_command_error(message) and not _is_wait_already_active_error(message)
 
 
 def _cancel_wait_for_settings(settings: HubAgentSettings) -> dict[str, Any]:
