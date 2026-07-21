@@ -362,4 +362,4 @@ class CodexAppServerAdapter:
             item["text"]
             for item in content
             if isinstance(item, dict) and item.get("type") == "text" and isinstance(item.get("text"), str)
-        )
+        ).strip()

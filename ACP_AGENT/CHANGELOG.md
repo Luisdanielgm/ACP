@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.32 - 2026-07-20
+
+- EN: Reconcile completed Codex app-server turns when the host normalizes surrounding user-message whitespace, preventing a durable completed turn from being retried indefinitely.
+- ES: Se reconcilian turnos Codex app-server completados aunque el host normalice espacios externos del mensaje de usuario, evitando reintentos indefinidos de un turno ya terminado.
+
 ## 0.3.31 - 2026-07-20
 
 - EN: Fixed Windows Host Bridge supervisor shutdown for detached bridge processes. Stop/restart now requests a graceful full-tree close first, then uses one bounded native force fallback when the process cannot accept the graceful request; PID health checks remain non-signaling.

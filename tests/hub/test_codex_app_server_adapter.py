@@ -579,6 +579,32 @@ def test_codex_reconcile_recovers_completed_turn_without_new_start() -> None:
     assert connection.started_turns == 0
 
 
+def test_codex_reconcile_accepts_completed_turn_when_host_normalizes_user_text() -> None:
+    message_id = _delivery().host_message_id()
+    turns = [
+        {
+            "id": "turn-existing",
+            "status": "completed",
+            "items": [
+                {
+                    "id": "user-1",
+                    "type": "userMessage",
+                    "clientId": message_id,
+                    "content": [{"type": "text", "text": "  Inspect the change\n"}],
+                },
+                {"id": "agent-1", "type": "agentMessage", "text": "Recovered result", "phase": "final_answer"},
+            ],
+        }
+    ]
+    connection = FakeCodexConnection(turns=turns)
+    adapter = CodexAppServerAdapter(request_timeout_seconds=1, connect=FakeConnect(connection))
+
+    result = adapter.reconcile(_binding(), _delivery())
+
+    assert result.summary == "Recovered result"
+    assert connection.started_turns == 0
+
+
 def test_codex_idle_bridge_makes_zero_app_server_connections(tmp_path: Path) -> None:
     connect = FakeConnect()
     adapter = CodexAppServerAdapter(request_timeout_seconds=1, connect=connect)
