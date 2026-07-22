@@ -409,3 +409,36 @@ def test_planner_ignores_structured_results_owned_by_another_product_plan(tmp_pa
 
     assert planner.prepare(message) is None
     assert plan.snapshot()["receipts"] == {}
+
+
+def test_collector_accepts_result_metadata_when_reply_payload_is_human_text(tmp_path: Path) -> None:
+    plan = plan_module.CoordinatorPlan(tmp_path / "plan.json", _plan())
+    planner = plan_module.CoordinatorPlanCollector(plan)
+    message = {
+        "id": "reply-metadata",
+        "from": "worker",
+        "action": "REPLY",
+        "payload": "Human-readable report without a machine envelope.",
+        "metadata": {"task_id": "inspect", "outcome": "success"},
+    }
+
+    action = planner.prepare(message)
+
+    assert action is not None
+    assert action["task_id"] == "next-safe"
+    assert plan.snapshot()["tasks"]["inspect"]["status"] == "completed"
+
+
+def test_collector_fails_closed_without_complete_result_metadata(tmp_path: Path) -> None:
+    plan = plan_module.CoordinatorPlan(tmp_path / "plan.json", _plan())
+    planner = plan_module.CoordinatorPlanCollector(plan)
+    message = {
+        "id": "reply-incomplete-metadata",
+        "from": "worker",
+        "action": "REPLY",
+        "payload": "Human-readable report without a machine envelope.",
+        "metadata": {"task_id": "inspect"},
+    }
+
+    assert planner.prepare(message) is None
+    assert plan.snapshot()["receipts"] == {}

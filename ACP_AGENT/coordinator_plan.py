@@ -391,10 +391,7 @@ class CoordinatorPlanCollector:
 
     def prepare(self, message: Mapping[str, Any]) -> dict[str, Any] | None:
         message_id = str(message.get("id") or "")
-        try:
-            candidate = json.loads(message.get("payload"))
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return None
+        candidate = self._result_candidate(message)
         if (
             not isinstance(candidate, dict)
             or not isinstance(candidate.get("task_id"), str)
@@ -403,17 +400,46 @@ class CoordinatorPlanCollector:
             return None
         if not self.plan.recognizes_task(candidate["task_id"]):
             return None
+        result_payload = json.dumps(
+            {"task_id": candidate["task_id"], "outcome": candidate["outcome"]},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
         self.plan.record_result(
             message_id=message_id,
             sender=str(message.get("from") or ""),
             action=str(message.get("action") or ""),
-            payload=message.get("payload"),
+            payload=result_payload,
         )
         action = self.plan.action_for_receipt(message_id)
         if action is None:
             return {"status": "handled"}
         action.pop("delivery_status", None)
         return action
+
+    @staticmethod
+    def _result_candidate(message: Mapping[str, Any]) -> dict[str, Any] | None:
+        """Extract a machine result without interpreting human report text.
+
+        ACP replies may carry a human-readable payload while the transport
+        preserves a small, structured result in message metadata.  The
+        metadata fallback is deliberately narrow: both task_id and outcome
+        must be explicit strings, otherwise the plan remains untouched.
+        """
+        try:
+            candidate = json.loads(message.get("payload"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            candidate = None
+        if isinstance(candidate, dict) and isinstance(candidate.get("task_id"), str) and isinstance(candidate.get("outcome"), str):
+            return candidate
+        metadata = message.get("metadata")
+        if not isinstance(metadata, Mapping):
+            return None
+        task_id = metadata.get("task_id")
+        outcome = metadata.get("outcome")
+        if not isinstance(task_id, str) or not task_id.strip() or not isinstance(outcome, str) or not outcome.strip():
+            return None
+        return {"task_id": task_id, "outcome": outcome}
 
     def mark_forwarded(self, emission: Mapping[str, Any]) -> None:
         self.plan.mark_sent(message_id=str(emission.get("message_id") or ""))
