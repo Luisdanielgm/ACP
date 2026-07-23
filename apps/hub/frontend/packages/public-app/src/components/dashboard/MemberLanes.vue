@@ -252,13 +252,14 @@ function laneClasses(member: SessionMember): string[] {
 .cockpit-title { font-size:14px; font-weight:700; letter-spacing:-0.02em; }
 
 /* Compact lane rows */
-.lane-stack { display:flex; flex-direction:column; gap:8px; overflow-y:auto; min-height:0; padding-right:4px; }
+.lane-stack { flex:1 1 auto; display:flex; flex-direction:column; gap:8px; overflow-y:auto; min-height:0; padding-right:4px; }
 .lane-stack::-webkit-scrollbar { width:6px; }
 .lane-stack::-webkit-scrollbar-track { background:var(--scroll-track); border-radius:10px; }
 .lane-stack::-webkit-scrollbar-thumb { background:var(--scroll-thumb); border-radius:10px; }
 .lane-stack::-webkit-scrollbar-thumb:hover { background:var(--scroll-thumb-hover); }
 
 .lane {
+  flex-shrink:0;
   display:grid;
   grid-template-columns:60px minmax(0, 1fr) auto;
   grid-template-rows:minmax(24px, auto) auto;
