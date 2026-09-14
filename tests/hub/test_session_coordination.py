@@ -1336,21 +1336,26 @@ def test_cancelled_wait_does_not_lose_auto_delivered_message() -> None:
         )
         assert sent["delivery"] == "immediate"
 
-        # The waiter future is already resolved but the task has not resumed:
-        # cancelling now reproduces the shutdown/disconnect race.
+        # The waiter future is already resolved; whether the task has resumed
+        # before the cancel lands is a race (it resumed before on py3.11 CI).
+        # Either way the message must not be lost.
         wait_task.cancel()
         results = await asyncio.gather(wait_task, return_exceptions=True)
-        assert isinstance(results[0], asyncio.CancelledError)
-
-        # The message must survive: the next wait delivers it.
-        redelivered = await service.wait_for_message(
-            session_id=chief["session_id"],
-            agent_name="worker",
-            member_token=worker["member_token"],
-            timeout_seconds=0.2,
-        )
-        assert redelivered is not None
-        assert redelivered["message"]["payload"] == "critical: rotate the credentials"
+        if isinstance(results[0], asyncio.CancelledError):
+            # Cancelled before resuming: the message must be re-queued, so
+            # the next wait delivers it.
+            redelivered = await service.wait_for_message(
+                session_id=chief["session_id"],
+                agent_name="worker",
+                member_token=worker["member_token"],
+                timeout_seconds=0.2,
+            )
+            assert redelivered is not None
+            assert redelivered["message"]["payload"] == "critical: rotate the credentials"
+        else:
+            # The waiter resumed and consumed the delivery before the cancel
+            # landed; the message went to a live consumer, nothing lost.
+            assert results[0]["message"]["payload"] == "critical: rotate the credentials"
 
     asyncio.run(scenario())
 
