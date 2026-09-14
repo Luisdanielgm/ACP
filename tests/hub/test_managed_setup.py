@@ -61,6 +61,16 @@ def test_init_single_workspace_env_writes_private_env_file(tmp_path) -> None:
 
     content = env_file.read_text(encoding="utf-8")
     assert "ACP_DEPLOYMENT_MODE=single_workspace" in content
-    assert "ACP_WORKSPACE_ADMIN_PASSWORD_HASH=\"scrypt$" in content
+    assert "ACP_WORKSPACE_ADMIN_PASSWORD_HASH='scrypt$" in content
     assert "ACP_MANAGED_SESSION_SECRET=" in content
     assert "ACP_MANAGED_AGENT_TOKEN_SECRET=" in content
+
+
+def test_merge_env_lines_single_quotes_dollar_values_for_compose() -> None:
+    merged = merge_env_lines(
+        "",
+        {"ACP_WORKSPACE_ADMIN_PASSWORD_HASH": "scrypt$32768$8$1$abcdef$012345"},
+    )
+
+    line = next(l for l in merged.splitlines() if l.startswith("ACP_WORKSPACE_ADMIN_PASSWORD_HASH="))
+    assert line == "ACP_WORKSPACE_ADMIN_PASSWORD_HASH='scrypt$32768$8$1$abcdef$012345'"
