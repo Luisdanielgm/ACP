@@ -23,6 +23,13 @@ def _generate_secret() -> str:
 def _quote_env_value(value: str) -> str:
     if value and _SAFE_ENV_VALUE_RE.match(value):
         return value
+    if "$" in value:
+        # Docker Compose interpolates $VAR references even inside double
+        # quotes, both in env_file values and in the .env it reads for
+        # ${VAR} substitution. Single quotes keep the value literal for
+        # Compose and for python-dotenv consumers such as uvicorn.
+        # Generated hashes and secrets never contain single quotes.
+        return f"'{value}'"
     escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
 
