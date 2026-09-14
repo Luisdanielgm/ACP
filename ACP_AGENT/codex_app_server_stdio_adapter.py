@@ -6,11 +6,10 @@ import queue
 import subprocess
 import threading
 import time
-from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from codex_app_server_adapter import CodexAppServerAdapter
-from host_bridge import HostBinding, HostBindingError, HostManifest
+from host_bridge import HostBinding, HostBindingError, HostManifest, is_explicit_absolute_path
 
 
 ConnectionFactory = Callable[[str], Any]
@@ -139,7 +138,7 @@ class CodexAppServerStdioAdapter(CodexAppServerAdapter):
         if binding.adapter_id != self.manifest.adapter_id:
             raise HostBindingError("binding targets a different host adapter")
         executable = self._required(binding.values, "executable")
-        if not Path(executable).is_absolute():
+        if not is_explicit_absolute_path(executable):
             raise HostBindingError("Codex app-server stdio executable must be an explicit absolute path")
         if binding.values.get("endpoint"):
             raise HostBindingError("Codex app-server stdio does not accept an endpoint")

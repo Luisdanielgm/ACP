@@ -6,7 +6,6 @@ import json
 import os
 import subprocess
 import time
-from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from host_bridge import (
@@ -17,6 +16,7 @@ from host_bridge import (
     HostDeliveryError,
     HostManifest,
     HostResult,
+    is_explicit_absolute_path,
 )
 
 
@@ -113,11 +113,11 @@ class CodexCliAdapter:
         if binding.adapter_id != self.manifest.adapter_id:
             raise HostBindingError("binding targets a different host adapter")
         executable = self._required(binding.values, "executable")
-        if not Path(executable).is_absolute():
+        if not is_explicit_absolute_path(executable):
             raise HostBindingError("Codex CLI executable must be an explicit absolute path")
         session_id = self._required(binding.values, "session_id")
         directory = self._optional(binding.values, "directory")
-        if directory is not None and not Path(directory).is_absolute():
+        if directory is not None and not is_explicit_absolute_path(directory):
             raise HostBindingError("Codex CLI workspace must be an absolute path")
         return executable, session_id, directory, self._optional(binding.values, "credential_ref")
 
