@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import hashlib
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -37,14 +39,28 @@ TEXT_SUFFIXES = {
     ".ts",
     ".vue",
 }
-FORBIDDEN_MARKERS: dict[str, str] = {
-    "aerocostos": "private customer brand must not appear in the public repo",
-    "luxairways": "private customer company must not appear in the public repo",
-    "c1054": "private project identifiers must not appear in the public repo",
-    "codex-pilot": "private pilot member identities must not appear in the public repo",
-    "nephila": "private brand must not appear in the public repo",
-    "nefila": "private brand must not appear in the public repo",
+# Fingerprints avoid publishing customer/project names in the guard itself.
+# These are regression checks, not encryption or a general secret scanner.
+PRIVATE_MARKER_FINGERPRINTS = {
+    (10, "aac62148e0cfed01d656aae9a829b0374b210aecca9e033f8d43136af7691276"),
+    (10, "238cb8066630a04e653b22c12aecc2407baad258409d4d8bf05f582365008514"),
+    (5, "ce4919b6de0785ec716757dccb058b8d4ababb7fc1048603400b899b2c67b459"),
+    (11, "2fa89a954fceb94e4902d575903f90f844540993366d56ee2bce6ffea0634a66"),
+    (7, "61bcd4e590465c3b63200090464aa85c25771c1997a49355d6debcc0fa402dc0"),
+    (6, "73ef041995e94147c83239e6e779dbe02b12ebb3792f0bd70f9827b3ba88231a"),
 }
+
+def _contains_private_marker(content: str) -> bool:
+    # Preserve substring matching within the marker alphabet.
+    tokens = set(re.findall(r"[a-z0-9-]+", content.lower()))
+    for length, digest in PRIVATE_MARKER_FINGERPRINTS:
+        for token in tokens:
+            for offset in range(len(token) - length + 1):
+                if hashlib.sha256(token[offset:offset + length].encode()).hexdigest() == digest:
+                    return True
+    return False
+
+
 FORBIDDEN_PATTERNS = {
     re.compile(r"https?://(?:acp|cloud|agents)\.(?!example\.com\b)[a-z0-9-]+\.(?:com|group|io|net|org)\b", re.IGNORECASE):
         "hosted/customer ACP domains must use neutral example hosts",
@@ -107,9 +123,8 @@ def test_public_repo_has_no_private_branding_or_private_host_defaults() -> None:
     for path in _iter_public_text_files():
         content = path.read_text(encoding="utf-8")
         content_lower = content.lower()
-        for marker, reason in FORBIDDEN_MARKERS.items():
-            if marker.lower() in content_lower:
-                violations.append(f"{path.relative_to(REPO_ROOT)} -> {marker} ({reason})")
+        if _contains_private_marker(content_lower):
+            violations.append(f"{path.relative_to(REPO_ROOT)} -> private identifier")
         for pattern, reason in FORBIDDEN_PATTERNS.items():
             for match in pattern.finditer(content):
                 violations.append(f"{path.relative_to(REPO_ROOT)} -> {match.group(0)} ({reason})")
@@ -155,3 +170,31 @@ def test_state_doc_has_no_tbd_and_matches_v03_phase_range() -> None:
     current_phase = int(metadata["current_phase"])
     assert phase_start <= current_phase <= phase_end
     assert metadata["milestone_phase_span"] == f"{phase_start}-{phase_end}"
+
+
+def test_private_marker_detection_preserves_substrings(monkeypatch) -> None:
+    marker = "synthetic-private-id"
+    monkeypatch.setitem(globals(), "PRIVATE_MARKER_FINGERPRINTS", {
+        (len(marker), hashlib.sha256(marker.encode()).hexdigest()),
+    })
+    assert _contains_private_marker("prefixSYNTHETIC-PRIVATE-IDsuffix")
+    assert not _contains_private_marker("neutral-example")
+
+
+def test_environment_files_are_ignored() -> None:
+    paths = [".env", ".env.local", "apps/hub/.env", "apps/hub/.env.production"]
+    result = subprocess.run(
+        ["git", "check-ignore", "--no-index", "--stdin"],
+        input=("\n".join(paths) + "\n").encode(), capture_output=True,
+        cwd=REPO_ROOT, check=False,
+    )
+    assert set(result.stdout.decode().splitlines()) == set(paths)
+
+
+def test_environment_templates_remain_trackable() -> None:
+    result = subprocess.run(
+        ["git", "check-ignore", "--no-index", "--stdin"],
+        input=b".env.example\napps/hub/.env.example\n",
+        capture_output=True, cwd=REPO_ROOT, check=False,
+    )
+    assert result.returncode == 1

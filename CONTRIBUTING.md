@@ -63,3 +63,11 @@ A push is aborted if the suite is red. Override only in emergencies with
 Open an issue describing the problem or proposal with enough context to reproduce
 or evaluate it. For security issues, do **not** open a public issue — see
 [SECURITY.md](SECURITY.md).
+
+## Before sharing a branch
+
+- Keep real credentials in ignored local environment files, never in source or fixtures.
+- Use sanitized `.env.example` files for setup examples.
+- Use synthetic names and identifiers in tests, docs, and screenshots.
+- Review staged files before committing; ignore rules do not protect already tracked files.
+- Report suspected secrets privately through SECURITY.md. Removing a file does not remove its Git history.

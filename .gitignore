@@ -29,3 +29,8 @@ apps/hub/downloads/*.zip
 
 # Local skill-registry tooling artifacts (never commit)
 .atl/
+
+# Local environment secrets (keep sanitized examples trackable)
+.env
+.env.*
+!.env.example
