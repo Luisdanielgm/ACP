@@ -14,7 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import MappingProxyType
 from typing import Any, Callable, Mapping, Protocol
 from uuid import NAMESPACE_URL, uuid5
@@ -22,6 +22,20 @@ from uuid import NAMESPACE_URL, uuid5
 
 class HostBindingError(ValueError):
     """Raised when a host binding is unsafe or incomplete."""
+
+
+def is_explicit_absolute_path(value: str) -> bool:
+    """Return True when value is absolute on POSIX or Windows.
+
+    `pathlib.Path.is_absolute` follows the runtime OS, so a Windows-style
+    binding such as `C:\\Tools\\codex.exe` reads as relative on POSIX hosts.
+    Host bindings cross OS boundaries, so accept either flavor explicitly.
+    """
+    return (
+        Path(value).is_absolute()
+        or PureWindowsPath(value).is_absolute()
+        or PurePosixPath(value).is_absolute()
+    )
 
 
 class HostDeliveryError(RuntimeError):
