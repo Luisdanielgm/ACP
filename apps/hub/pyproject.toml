@@ -36,3 +36,11 @@ namespaces = true
 
 [tool.setuptools.package-data]
 "acp.hub" = ["sql/migrations/*.sql"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# Correctness-only gate: pyflakes + syntax errors + a few real-bug bugbear rules.
+select = ["E9", "F", "B005", "B006", "B018"]

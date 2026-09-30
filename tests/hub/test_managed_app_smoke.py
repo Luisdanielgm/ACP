@@ -614,7 +614,7 @@ def test_workspace_admin_can_create_session_from_workspace_panel(monkeypatch, tm
     password = _bootstrap_env(monkeypatch, tmp_path)
     module = _load_managed_app()
     app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
-    admin_client = TestClient(app)
+    TestClient(app)
     workspace_client = TestClient(app)
     _login_workspace_admin(workspace_client, password)
 
@@ -665,7 +665,7 @@ def test_workspace_admin_creates_team_preset_via_json(monkeypatch, tmp_path) -> 
     password = _bootstrap_env(monkeypatch, tmp_path)
     module = _load_managed_app()
     app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
-    admin_client = TestClient(app)
+    TestClient(app)
     workspace_client = TestClient(app)
     _login_workspace_admin(workspace_client, password)
 
@@ -683,7 +683,7 @@ def test_workspace_admin_create_preset_rejects_unknown_preset(monkeypatch, tmp_p
     password = _bootstrap_env(monkeypatch, tmp_path)
     module = _load_managed_app()
     app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
-    admin_client = TestClient(app)
+    TestClient(app)
     workspace_client = TestClient(app)
     _login_workspace_admin(workspace_client, password)
 

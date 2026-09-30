@@ -9,7 +9,6 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from acp.hub.app import create_app
-from acp.hub.coordination_service import SessionConflictError
 from acp.hub.dashboard_auth import DashboardSessionStore
 
 

@@ -34,3 +34,7 @@ apps/hub/downloads/*.zip
 .env
 .env.*
 !.env.example
+
+# Local agent tooling / virtualenv
+.commandcode/
+.venv/

@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 
 from acp.hub.app import create_app, create_runtime_from_env
 
+from acp_managed.csrf import install_origin_guard
 from acp_managed.auth.session import AgentTokenManager, SessionTokenManager
 from acp_managed.ui.spa import _register_managed_vue_spa
 from acp_managed.config import (
@@ -50,6 +51,7 @@ def create_managed_app() -> FastAPI:
     runtime.public_web_enabled = _public_web_enabled()
     runtime.legacy_dashboard_enabled = False
     app = create_app(runtime=runtime)
+    install_origin_guard(app)
     principal_store = _managed_principal_store()
     session_secret = _managed_session_secret()
     agent_token_secret = _managed_agent_token_secret()

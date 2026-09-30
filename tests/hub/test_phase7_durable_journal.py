@@ -11,7 +11,6 @@ from acp.hub.event_store import InMemoryEventStore
 from acp.hub.journal import append_received
 from acp.hub.migrations import apply_sqlite_migrations
 from acp.hub.sqlite_event_store import SqliteEventStore
-from acp.hub.ws_ingress import run_ws_ingress
 
 
 def _msg_body(*, sender: str, recipient: str, msg_id: str | None = None) -> dict[str, str]:

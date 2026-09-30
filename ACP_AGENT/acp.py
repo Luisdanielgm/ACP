@@ -6599,7 +6599,7 @@ def _infer_reply_outcome(payload: dict[str, Any]) -> tuple[str, bool]:
     text = " ".join(str(part).strip() for part in text_parts if isinstance(part, str) and part.strip()).strip()
     if not text:
         return "unknown", False
-    normalized = text.lower().lstrip("✅☑️✔︎✔:;,.! \t\r\n")
+    normalized = text.lower().lstrip("✅☑️✔︎✔:;,.! \t\r\n")  # noqa: B005 - character set, on purpose
     if re.match(r"^(done|success|succeeded|passed|pass|complete|completed|ok|ready)\b", normalized):
         return "success", True
     if re.match(r"^(failed|fail|error|errored|blocked|cannot|can't|unable)\b", normalized):

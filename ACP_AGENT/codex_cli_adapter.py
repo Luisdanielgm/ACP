@@ -6,7 +6,7 @@ import json
 import os
 import subprocess
 import time
-from typing import Any, Callable, Mapping
+from typing import Callable, Mapping
 
 from host_bridge import (
     CredentialResolver,

@@ -22,7 +22,7 @@ def _owner_with_session(monkeypatch, tmp_path) -> tuple[object, TestClient, str]
     module = _load_managed_app()
     app = _create_managed_app_with_spa(monkeypatch, module, tmp_path)
 
-    admin = TestClient(app)
+    TestClient(app)
     owner = TestClient(app)
     _login_workspace_admin(owner, password)
 

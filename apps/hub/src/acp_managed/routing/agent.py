@@ -21,7 +21,7 @@ from typing import Any
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
 
-from acp.hub.coordination_service import SessionAccessError
+from acp.hub.coordination_service import SessionAccessError, SessionNotFoundError
 
 from acp_managed.contracts import (
     CreateAgentRoomWallPostRequest,

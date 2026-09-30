@@ -26,6 +26,7 @@ from acp_managed.auth.sqlite_store import (
     SqliteManagedPrincipalStore,
 )
 from acp_managed.auth.whitelist import ManagedPrincipal
+from acp_managed.rate_limit import _trust_proxy_headers_from_env
 
 
 def _sanitize_principal(principal: ManagedPrincipal) -> dict[str, str]:
@@ -239,8 +240,15 @@ def _request_is_secure(request: Request) -> bool:
     return _request_scheme(request).lower() == "https"
 
 
+def _trusted_forwarded_host(request: Request) -> str:
+    """``X-Forwarded-Host`` is client-controlled; honor it only behind a trusted proxy."""
+    if not _trust_proxy_headers_from_env():
+        return ""
+    return request.headers.get("x-forwarded-host", "").split(",")[0].strip()
+
+
 def _request_origin(request: Request) -> str:
-    forwarded_host = request.headers.get("x-forwarded-host", "").split(",")[0].strip()
+    forwarded_host = _trusted_forwarded_host(request)
     host = forwarded_host or request.headers.get("host", "").strip()
     scheme = _request_scheme(request)
     if host:
@@ -250,7 +258,7 @@ def _request_origin(request: Request) -> str:
 
 def _request_ws_origin(request: Request) -> str:
     forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip()
-    forwarded_host = request.headers.get("x-forwarded-host", "").split(",")[0].strip()
+    forwarded_host = _trusted_forwarded_host(request)
     host = forwarded_host or request.headers.get("host", "").strip()
     scheme = "wss" if (forwarded_proto or request.url.scheme) == "https" else "ws"
     if host:
@@ -291,7 +299,7 @@ def _managed_agent_bootstrap_payload(
             f"- python ACP_AGENT/acp.py replay --agent {preferred_agent_name} --agent-token {token_value} --session-id SESSION_ID --actor worker-1 --action REPLY --limit 20",
             f"- python ACP_AGENT/acp.py managed-close --agent {preferred_agent_name} --agent-token {token_value} --session-id SESSION_ID",
             f"- python ACP_AGENT/acp.py connect --role worker --agent {preferred_agent_name} --agent-token {token_value} --project PROJECT_ID --workspace /path/to/project --capabilities backend,python",
-            f"- python ACP_AGENT/acp.py invite --role worker --agent worker-1 --capabilities backend,python --session-id SESSION_ID --project PROJECT_ID",
+            "- python ACP_AGENT/acp.py invite --role worker --agent worker-1 --capabilities backend,python --session-id SESSION_ID --project PROJECT_ID",
             f"- python ACP_AGENT/acp.py onboard-help --agent {preferred_agent_name} --project PROJECT_ID",
             f"- python ACP_AGENT/acp.py onboard --agent {preferred_agent_name} --agent-token {token_value} --project PROJECT_ID --workspace /path/to/project --capabilities backend,python",
             f"- python ACP_AGENT/acp.py chief start --agent {preferred_agent_name} --backlog-dir coord/backlog --provider claude_local --workspace /path/to/project",

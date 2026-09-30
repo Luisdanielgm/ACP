@@ -10,7 +10,7 @@ COPY apps/hub/frontend/ ./
 RUN npm run build --workspace=packages/public-app && \
     npm run build --workspace=packages/managed-app
 
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
