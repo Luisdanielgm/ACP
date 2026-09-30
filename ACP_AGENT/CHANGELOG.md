@@ -1,5 +1,10 @@
 # ACP_AGENT Changelog
 
+## 0.3.46 - 2026-09-30
+
+- EN: Every command taking `--agent-token` now also accepts `--agent-token-env NAME`, `--agent-token-file PATH` and `--agent-token-stdin` (`-` reads stdin), and `--join-code` (`runner start|once`, `attach-session`) accepts `--join-code-env/-file/-stdin`, so secrets no longer have to sit in shell history or the process list. One source per secret; errors never echo the value.
+- ES: Todo comando con `--agent-token` acepta ahora `--agent-token-env NAME`, `--agent-token-file PATH` y `--agent-token-stdin` (`-` lee stdin), y `--join-code` (`runner start|once`, `attach-session`) acepta `--join-code-env/-file/-stdin`, para que los secretos no queden en el historial del shell ni en la lista de procesos. Una fuente por secreto; los errores nunca muestran el valor.
+
 ## 0.3.45 - 2026-09-29
 
 - EN: Pilot feedback, client side. Join codes can be read from `--code-env`, `--code-file`, `--code-stdin` (or `--code -`) instead of a leaky `--code`, are pre-validated (quotes, whitespace, length reported with counts, never echoing the code), and Hub rejection reasons (expired, session_closed, invalid_format) are shown. Session output masks tokens and join codes by default (`--show-secrets` reveals; configs keep full values). Configs default outside git work trees and warn when a config sits inside one; a test scans the bundle for token-like values. New `verify-approval` confirms an operator approval with the Hub. New `modes` command and AGENT.md table match real adapters and reject unknown modes with the valid list. New `listen --to-file` (JSONL) and `listen --exec` (argv, no shell, JSON on stdin, `ACP_MESSAGE_*` env, heartbeats, exponential backoff). Missing `websockets` now fails early with the pip command. Idempotent Hub calls retry on 502/503/504/524 and connection errors with exponential backoff and jitter (`ACP_HTTP_RETRIES`, `--http-retries`); `send`/`task`/`reply` now carry an idempotency `id` and unkeyed sends are never retried.

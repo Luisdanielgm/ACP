@@ -1140,6 +1140,7 @@ def build_parser() -> argparse.ArgumentParser:
     chief_once_parser.add_argument("--wait-timeout-seconds", type=float, default=0.0, help="Optional one-shot wait timeout before dispatch")
     chief_once_parser.add_argument("--assignment-ttl-seconds", type=float, default=None, help="Requeue assigned tasks that have not produced a valid REPLY after this many seconds; <=0 disables")
     chief_once_parser.add_argument("--tick-seconds", type=float, default=0.0, help=argparse.SUPPRESS)
+    _add_secret_source_arguments(parser)
     return parser
 
 
@@ -2725,6 +2726,109 @@ def resolve_join_code_from_args(args: argparse.Namespace) -> str:
     else:
         code = _read_join_code_stdin().strip()
     return validate_join_code_format(code)
+
+
+# --- secret sources for --agent-token / --join-code ---------------------------
+# Passing a secret as a plain argument leaks it into shell history and the
+# process list. Every command that takes --agent-token or --join-code also gets
+# --<name>-env NAME, --<name>-file PATH and --<name>-stdin, and "-" reads stdin.
+SECRET_ARGUMENTS = (
+    {"dest": "agent_token", "flag": "--agent-token", "label": "agent token"},
+    {"dest": "join_code", "flag": "--join-code", "label": "join code"},
+)
+
+
+def _iter_parsers(parser: argparse.ArgumentParser, seen: set[int] | None = None):
+    seen = set() if seen is None else seen
+    if id(parser) in seen:
+        return
+    seen.add(id(parser))
+    yield parser
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for child in action.choices.values():
+                yield from _iter_parsers(child, seen)
+
+
+def _add_secret_source_arguments(parser: argparse.ArgumentParser) -> None:
+    for candidate in _iter_parsers(parser):
+        for spec in SECRET_ARGUMENTS:
+            flag, label = spec["flag"], spec["label"]
+            direct = next((a for a in candidate._actions if flag in a.option_strings), None)
+            if direct is None:
+                continue
+            direct.help = f"{direct.help or label.capitalize()} Prefer {flag}-env/-file/-stdin: a value typed here leaks into shell history and the process list ('-' reads stdin)."
+            candidate.add_argument(f"{flag}-env", default=None, metavar="NAME", help=f"Read the {label} from environment variable NAME")
+            candidate.add_argument(f"{flag}-file", default=None, metavar="PATH", help=f"Read the {label} from a file ('-' for stdin)")
+            candidate.add_argument(f"{flag}-stdin", action="store_true", help=f"Read the {label} from stdin (hidden prompt on a terminal)")
+
+
+def _read_secret_stdin(label: str) -> str:
+    if sys.stdin is not None and sys.stdin.isatty():
+        return getpass.getpass(f"{label.capitalize()} (input hidden): ")
+    return sys.stdin.read() if sys.stdin is not None else ""
+
+
+def resolve_secret_sources(args: argparse.Namespace) -> None:
+    """Fold --*-env/--*-file/--*-stdin into ``args.agent_token`` / ``args.join_code``.
+
+    At most one source per secret. Env, file and stdin values are stripped of
+    surrounding whitespace; quotes are never stripped silently. The secret value
+    is never echoed in error messages.
+    """
+    stdin_users: list[str] = []
+    for spec in SECRET_ARGUMENTS:
+        dest, flag, label = spec["dest"], spec["flag"], spec["label"]
+        env_name = getattr(args, f"{dest}_env", None)
+        file_path = getattr(args, f"{dest}_file", None)
+        use_stdin = bool(getattr(args, f"{dest}_stdin", False))
+        direct = getattr(args, dest, None)
+        if not hasattr(args, f"{dest}_env"):
+            continue
+        if direct == "-":
+            direct, use_stdin = None, True
+        if file_path == "-":
+            file_path, use_stdin = None, True
+        provided = [
+            name
+            for name, present in (
+                (flag, direct is not None),
+                (f"{flag}-env", env_name is not None),
+                (f"{flag}-file", file_path is not None),
+                (f"{flag}-stdin", use_stdin),
+            )
+            if present
+        ]
+        if len(provided) > 1:
+            raise ValueError(f"choose only one {label} source; got {', '.join(provided)}.")
+        if not provided:
+            continue
+        if use_stdin:
+            stdin_users.append(label)
+            if len(stdin_users) > 1:
+                raise ValueError("only one secret can be read from stdin per command.")
+            value = _read_secret_stdin(label).strip()
+        elif env_name is not None:
+            name = str(env_name).strip()
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                raise ValueError(f"{flag}-env must be an environment variable name such as ACP_AGENT_TOKEN.")
+            raw = os.environ.get(name)
+            if raw is None or not raw.strip():
+                raise ValueError(f"environment variable {name} is not set or is empty.")
+            value = raw.strip()
+        elif file_path is not None:
+            path = Path(str(file_path)).expanduser()
+            try:
+                value = path.read_text(encoding="utf-8").strip()
+            except OSError as exc:
+                raise ValueError(f"could not read {flag}-file {path}: {exc.strerror or exc}") from exc
+        else:
+            value = str(direct)
+        if not value:
+            raise ValueError(f"the {label} is empty.")
+        if dest == "join_code" and value != direct:
+            value = validate_join_code_format(value)
+        setattr(args, dest, value)
 
 
 def _hub_error_body(message: str) -> Any:
@@ -8191,6 +8295,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
+        resolve_secret_sources(args)
         retries = getattr(args, "http_retries", None)
         if retries is not None:
             if not 0 <= retries <= RETRY_MAX_ATTEMPTS_LIMIT:

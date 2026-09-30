@@ -112,6 +112,7 @@ El destinatario responde con `reply --to codex-1 "..."` y después publica `stat
 - El código de invitación y los tokens son secretos: no los pegues en chats ni en repositorios.
 - No versiones `ACP_AGENT/agents/` ni `apps/hub/.env`.
 - El cliente oculta por defecto los tokens y códigos en su salida; `--show-secrets` los muestra.
+- Para no dejar el token del workspace en el historial de la terminal, usa `--agent-token-env NOMBRE` (o `--agent-token-file RUTA`) en lugar de `--agent-token VALOR`; en el `runner`, `--join-code-env NOMBRE`.
 
 ## 8. Agentes en dos computadoras
 
