@@ -77,6 +77,8 @@ def _normalize_capabilities(value: list[str] | tuple[str, ...] | None) -> tuple[
 
 
 def _payload_preview(value: Any) -> str | None:
+    if isinstance(value, dict) and value.get("kind") == "operator_approval" and isinstance(value.get("text"), str):
+        value = f"[operator approval] {value['text']}"
     if not isinstance(value, str):
         return None
     cleaned = " ".join(value.split())
@@ -109,6 +111,26 @@ class SessionNotFoundError(SessionAccessError):
     (session gone, e.g. closed or lost on a redeploy) instead of 403 (auth),
     letting clients tell "re-create/re-join" apart from "fix your credentials".
     """
+
+
+JOIN_CODE_LENGTH = 8
+_JOIN_CODE_PATTERN = re.compile(r"^[0-9A-F]{8}$")
+_JOIN_CODE_TOMBSTONE_LIMIT = 512
+_JOIN_CODE_TOMBSTONE_TTL_SECONDS = 7 * 24 * 3600
+# Every message keeps the legacy "join code is invalid" prefix so existing
+# clients that match on that substring keep working; the suffix adds the reason.
+JOIN_CODE_REASON_FORMAT = "invalid_format"
+JOIN_CODE_REASON_CLOSED = "session_closed"
+JOIN_CODE_REASON_EXPIRED = "expired"
+JOIN_CODE_REASON_UNKNOWN = "unknown"
+
+
+class JoinCodeError(SessionAccessError):
+    """A join code was rejected; ``reason`` is a safe machine-readable cause."""
+
+    def __init__(self, message: str, *, reason: str) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 class SessionConflictError(SessionAccessError):
@@ -154,6 +176,45 @@ class SessionCoordinationService:
         self._waiters: dict[tuple[str, str], WaitRegistration] = {}
         self._lock = asyncio.Lock()
         self._last_cleanup_at: datetime | None = None
+        # join_code -> (reason, monotonic-ish epoch seconds). In-memory only: a
+        # restart forgets it and the code is then reported as "unknown".
+        self._join_code_tombstones: dict[str, tuple[str, float]] = {}
+
+    def _remember_dead_join_code(self, join_code: str, reason: str) -> None:
+        now = datetime.now(timezone.utc).timestamp()
+        self._join_code_tombstones[join_code] = (reason, now)
+        if len(self._join_code_tombstones) > _JOIN_CODE_TOMBSTONE_LIMIT:
+            for key in sorted(self._join_code_tombstones, key=lambda item: self._join_code_tombstones[item][1])[
+                : len(self._join_code_tombstones) - _JOIN_CODE_TOMBSTONE_LIMIT
+            ]:
+                self._join_code_tombstones.pop(key, None)
+
+    def _join_code_rejection(self, raw_code: str) -> JoinCodeError:
+        code = raw_code.strip().upper()
+        if not _JOIN_CODE_PATTERN.match(code):
+            return JoinCodeError(
+                f"join code is invalid: expected {JOIN_CODE_LENGTH} characters (0-9, A-F), got {len(code)}.",
+                reason=JOIN_CODE_REASON_FORMAT,
+            )
+        tombstone = self._join_code_tombstones.get(code)
+        if tombstone is not None:
+            reason, at = tombstone
+            if datetime.now(timezone.utc).timestamp() - at > _JOIN_CODE_TOMBSTONE_TTL_SECONDS:
+                self._join_code_tombstones.pop(code, None)
+            elif reason == JOIN_CODE_REASON_EXPIRED:
+                return JoinCodeError(
+                    "join code is invalid: the code expired because its session ended for inactivity. Ask for a new invitation.",
+                    reason=reason,
+                )
+            else:
+                return JoinCodeError(
+                    "join code is invalid: the session was closed. Ask for a new invitation.",
+                    reason=JOIN_CODE_REASON_CLOSED,
+                )
+        return JoinCodeError(
+            "join code is invalid: unknown code. Check for typos or stray quotes, or ask for a new invitation.",
+            reason=JOIN_CODE_REASON_UNKNOWN,
+        )
 
     async def create_session(
         self,
@@ -220,7 +281,16 @@ class SessionCoordinationService:
         async with self._lock:
             session = self._store.get_session_by_join_code(join_code.strip().upper())
             if session is None:
-                raise SessionAccessError("join code is invalid.")
+                raise self._join_code_rejection(join_code)
+            existing_member = session.members.get(agent_name)
+            if existing_member is not None:
+                who = "the session owner" if existing_member.role == "chief" else "another member of this session"
+                # Keep the legacy "already attached to another session" phrase for
+                # clients/tests that match on it.
+                raise SessionAccessError(
+                    f"that name is taken by {who}; pick a different agent name "
+                    "(agent is already attached to another session)."
+                )
             self._ensure_agent_is_free(agent_name)
             member_token = _new_member_token()
             member = SessionMember(
@@ -485,7 +555,13 @@ class SessionCoordinationService:
                 if elapsed < _CLEANUP_INTERVAL_SECONDS:
                     return []
             self._last_cleanup_at = now
-            return self._store.cleanup_stale_sessions(stale_after_seconds=_STALE_SESSION_CLEANUP_SECONDS)
+            codes_before = {item.session_id: item.join_code for item in self._store.list_sessions()}
+            removed = self._store.cleanup_stale_sessions(stale_after_seconds=_STALE_SESSION_CLEANUP_SECONDS)
+            for removed_id in removed:
+                dead_code = codes_before.get(removed_id)
+                if dead_code:
+                    self._remember_dead_join_code(dead_code, JOIN_CODE_REASON_EXPIRED)
+            return removed
 
     async def prune_idempotency_older_than(self, cutoff: str) -> int:
         async with self._lock:
@@ -1313,6 +1389,7 @@ class SessionCoordinationService:
                 notice=notice_builder(affected_member),
             )
         self._store.delete_session(session.session_id)
+        self._remember_dead_join_code(session.join_code, JOIN_CODE_REASON_CLOSED)
 
     def _system_message(
         self,

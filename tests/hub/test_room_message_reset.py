@@ -132,3 +132,21 @@ def test_workspace_integration_token_can_reset_but_agent_bound_token_cannot(monk
         json={"reason": "Agent request"},
     )
     assert denied.status_code == 403
+
+
+def test_integration_token_reset_of_inactive_room_returns_404(monkeypatch, tmp_path) -> None:
+    from acp.hub.coordination_service import SessionNotFoundError
+
+    app, owner, session_id = _owner_with_session(monkeypatch, tmp_path)
+    workspace_token = owner.post("/managed/workspaces/team-one/token/rotate").json()["raw_token"]
+
+    async def _missing(**_kwargs):
+        raise SessionNotFoundError("session does not exist.")
+
+    monkeypatch.setattr(app.state.managed_runtime.coordination, "admin_reset_session_messages", _missing)
+    response = TestClient(app).post(
+        f"/managed/agent/workspaces/team-one/sessions/{session_id}/messages/reset",
+        headers={"Authorization": f"Bearer {workspace_token}"},
+        json={"reason": "stale room"},
+    )
+    assert response.status_code == 404, response.text

@@ -44,5 +44,48 @@ jobs:
       - name: Install hub (with test extras)
         run: pip install -e "apps/hub[test]"
 
+      - name: Lint (correctness rules)
+        run: |
+          pip install "ruff>=0.6"
+          ruff check --config apps/hub/pyproject.toml apps ACP_AGENT tests
+
       - name: Run test suite
         run: python -m pytest tests/ -q
+
+  docker-smoke:
+    name: docker compose boots and answers /health
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate env file
+        run: |
+          pip install -e apps/hub
+          python -m acp_managed.setup init-single-workspace \
+            --env-file apps/hub/.env \
+            --workspace-name "CI Workspace" \
+            --workspace-slug default \
+            --admin-email ci@example.com \
+            --admin-password "ci-only-password-123"
+
+      - name: Build and start the hub
+        working-directory: apps/hub
+        run: docker compose up -d --build
+
+      - name: Wait for /health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health; then exit 0; fi
+            sleep 2
+          done
+          docker compose -f apps/hub/docker-compose.yml logs
+          exit 1
+
+      - name: Tear down
+        if: always()
+        working-directory: apps/hub
+        run: docker compose down -v

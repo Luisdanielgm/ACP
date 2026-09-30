@@ -46,6 +46,29 @@
       </div>
     </form>
 
+    <!-- Operator approval (B8): a human approval the agent can verify against
+         the hub without pasting any secret into the room. -->
+    <form class="approval-form" @submit.prevent="handleSendApproval">
+      <strong class="approval-title">{{ t('approval_title') }}</strong>
+      <p class="panel-note">{{ t('approval_help') }}</p>
+      <div class="approval-row">
+        <label class="sr-only" for="room-approval-text">{{ t('approval_title') }}</label>
+        <input
+          id="room-approval-text"
+          v-model="approvalText"
+          type="text"
+          maxlength="1000"
+          :placeholder="t('approval_placeholder')"
+          :disabled="approvalSending"
+        />
+        <button class="secondary-button" type="submit" :disabled="approvalSending || !approvalText.trim()">
+          <span v-if="approvalSending" class="spinner" aria-hidden="true"></span>
+          {{ t('approval_send') }}
+        </button>
+      </div>
+      <p v-if="lastApprovalId" class="panel-note">{{ t('approval_sent_id').replace('{id}', lastApprovalId) }}</p>
+    </form>
+
     <!-- Owner inbox: read the messages queued FOR the dashboard-controlled
          chief. Receiving consumes the message, exactly like the agent would. -->
     <section class="inbox">
@@ -101,6 +124,7 @@ import {
   sendSessionOperatorMessage,
   receiveSessionOperatorMessage,
   resetSessionMessages,
+  createSessionOperatorApproval,
   type OperatorInboxMessage,
 } from '../../api/managed'
 import { getApiErrorMessage } from '../../api/client'
@@ -125,6 +149,9 @@ const operatorAction = ref<(typeof ACTIONS)[number]>('TASK')
 const operatorPayload = ref('')
 const lastOperatorName = ref('')
 const resettingMessages = ref(false)
+const approvalText = ref('')
+const approvalSending = ref(false)
+const lastApprovalId = ref('')
 
 watch(
   () => props.members,
@@ -205,6 +232,22 @@ async function handleSendOperatorMessage() {
     toast.show(getApiErrorMessage(err), 'error')
   } finally {
     operatorSending.value = false
+  }
+}
+
+async function handleSendApproval() {
+  const text = approvalText.value.trim()
+  if (!text) return
+  approvalSending.value = true
+  try {
+    const result = await createSessionOperatorApproval(props.slug, props.sessionId, text)
+    lastApprovalId.value = result.approval.approval_id
+    approvalText.value = ''
+    toast.show(t('approval_sent'), 'success')
+  } catch (err) {
+    toast.show(getApiErrorMessage(err), 'error')
+  } finally {
+    approvalSending.value = false
   }
 }
 
@@ -291,6 +334,11 @@ textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent
 .inbox-reply { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; transition: all 0.15s ease; }
 .inbox-reply:hover { color: var(--accent); border-color: var(--accent-glow); }
 .inbox-body { margin: 8px 0 0; font-size: 0.86rem; line-height: 1.5; color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+.approval-form { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.approval-title { font-size: 0.82rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.approval-row { display: flex; gap: 8px; align-items: center; }
+.approval-row input { flex: 1; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); color: var(--ink); font-size: 0.88rem; }
+.approval-row input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); outline: none; }
 .message-reset { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 12px; border-top: 1px solid var(--line); }
 .message-reset-title { display: block; margin-bottom: 4px; font-size: 0.82rem; color: var(--ink); }
 .danger-button { flex: 0 0 auto; padding: 9px 14px; border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 10px; background: rgba(239, 68, 68, 0.08); color: #ef4444; font-weight: 700; cursor: pointer; }

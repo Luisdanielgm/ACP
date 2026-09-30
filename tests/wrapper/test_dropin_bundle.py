@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import zipfile
@@ -309,7 +310,9 @@ def test_dropin_installer_main_works_in_place_without_prompting_for_optional_tok
     assert (target / "requirements.txt").exists()
     bundle_info = json.loads((target / "BUNDLE_INFO.json").read_text(encoding="utf-8"))
     assert bundle_info["installed_version"] == Path("ACP_AGENT/VERSION").read_text(encoding="utf-8").strip()
-    assert bundle_info["release_date"] == "2026-07-21"
+    latest_heading = re.search(r"^## \S+ - (\d{4}-\d{2}-\d{2})$", Path("ACP_AGENT/CHANGELOG.md").read_text(encoding="utf-8"), re.M)
+    assert latest_heading is not None
+    assert bundle_info["release_date"] == latest_heading.group(1)
     assert bundle_info["installed_at"]
 
 
@@ -441,7 +444,7 @@ def test_session_commands_return_shareable_dashboard_access_metadata(tmp_path: P
     )
     joined = module.join_session_from_args(
         module.build_parser().parse_args(
-            ["join-session", "--config", str(collaborator_config), "--code", "JOIN42"]
+            ["join-session", "--config", str(collaborator_config), "--code", "A1B2C3D4"]
         )
     )
     assert "member_token=worker-token" in joined["session_dashboard_url"]
@@ -501,7 +504,7 @@ def test_join_session_refuses_reusing_live_chief_config(tmp_path: Path) -> None:
     try:
         module.join_session_from_args(
             module.build_parser().parse_args(
-                ["join-session", "--config", str(config_path), "--code", "JOIN42"]
+                ["join-session", "--config", str(config_path), "--code", "A1B2C3D4"]
             )
         )
     except ValueError as exc:
@@ -521,7 +524,7 @@ def test_join_session_bootstraps_a_distinct_missing_config(tmp_path: Path) -> No
         if route == "/sessions/join":
             assert hub_http == "https://hub.example"
             assert payload["agent_name"] == "external-worker"
-            assert payload["join_code"] == "JOIN42"
+            assert payload["join_code"] == "A1B2C3D4"
             return {
                 "session_id": "session-123",
                 "member_token": "worker-token",
@@ -544,7 +547,7 @@ def test_join_session_bootstraps_a_distinct_missing_config(tmp_path: Path) -> No
                 "--hub-http",
                 "https://hub.example",
                 "--code",
-                "JOIN42",
+                "A1B2C3D4",
             ]
         )
     )
@@ -571,7 +574,7 @@ def test_join_session_reserves_missing_config_against_concurrent_overwrite(tmp_p
             "--hub-http",
             "https://hub.example",
             "--code",
-            "JOIN42",
+            "A1B2C3D4",
         ]
     )
     concurrent_error: list[str] = []
@@ -626,7 +629,7 @@ def test_join_session_releases_missing_config_reservation_after_failure(tmp_path
             "--hub-http",
             "https://hub.example",
             "--code",
-            "JOIN42",
+            "A1B2C3D4",
         ]
     )
 
@@ -750,7 +753,7 @@ def test_join_session_clears_stale_local_binding_before_rejoin(tmp_path: Path) -
 
     payload = module.join_session_from_args(
         module.build_parser().parse_args(
-            ["join-session", "--config", str(config_path), "--code", "JOIN99"]
+            ["join-session", "--config", str(config_path), "--code", "A1B2C399"]
         )
     )
 

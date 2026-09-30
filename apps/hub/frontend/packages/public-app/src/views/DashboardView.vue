@@ -503,6 +503,7 @@ function heartbeatLabel(state: string): string {
   if (s === 'live') return t('db_heartbeat_live')
   if (s === 'quiet') return t('db_heartbeat_quiet')
   if (s === 'stale') return t('db_heartbeat_stale')
+  if (s === 'human') return t('db_heartbeat_human')
   return t('db_heartbeat_unknown')
 }
 

@@ -6,7 +6,7 @@
   "main": "src/index.ts",
   "scripts": {
     "dev": "vite",
-    "test": "node --test src/composables/invitePrompt.test.mjs",
+    "test": "node --test src/composables/invitePrompt.test.mjs src/composables/latency.test.mjs",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview"
   },

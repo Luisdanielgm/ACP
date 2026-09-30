@@ -1,3 +1,4 @@
+import { memberLatencyMap, messageLatencies } from './latency'
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { fetchAuthSession, authMemberSession, logoutMemberSession } from '../api/auth'
@@ -79,6 +80,8 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
 
   const members = computed(() => payload.value ? sortedMembers(payload.value) : [])
 
+  // Hub-side send->pickup delay per member, from existing event timestamps.
+  const latencyMap = computed(() => memberLatencyMap(messageLatencies(payload.value?.history || [])))
   const activityMap = computed(() => payload.value ? recentMemberActivity(payload.value) : new Map<string, MemberActivityData>())
 
   const visibleMembers = computed(() => {
@@ -477,6 +480,7 @@ export function useSessionDashboard(options: UseSessionDashboardOptions = {}) {
     connectedSet,
     members,
     activityMap,
+    latencyMap,
     visibleMembers,
     filteredHistory,
     trafficSnapshot,

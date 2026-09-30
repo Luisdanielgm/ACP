@@ -45,6 +45,12 @@
               {{ timeAgo(event.ts, locale) }}
             </div>
           </div>
+          <div v-if="latencyFor(event)" class="event-latency" :title="t('sd_latency_hint')">
+            <template v-if="latencyFor(event)!.deliveryMs !== null">
+              {{ t('sd_latency_picked_up', { delay: formatDelay(latencyFor(event)!.deliveryMs) }) }}
+            </template>
+            <template v-else>{{ t('sd_latency_not_picked_up') }}</template>
+          </div>
           <div v-if="eventIssueSummary(event) || deliveryMode(event)" class="event-thread">
             <span class="event-marker" :class="eventMarkerClasses(event)"></span>
             <span v-if="deliveryMode(event)" class="pill flow-pill delivery" :class="deliveryClass(deliveryMode(event))">
@@ -84,6 +90,7 @@ import {
   normalizedRole, timeAgo, messageIconNameForEvent, resultIconNameForEvent, type Issue,
 } from '../../composables/sessionHelpers'
 import { stateIconUrl } from '../../assets/acp/acpAssets'
+import { formatDelay, latencyIndex, latencyKey, messageLatencies, type MessageLatency } from '../../composables/latency'
 import { translateEvent, translateDelivery } from '../../composables/dashboardTranslations'
 import type { SessionEvent, SessionMember } from '../../api/sessions'
 import type { TimelineFilter } from '../../composables/useSessionDashboard'
@@ -109,6 +116,17 @@ const { locale, t } = useI18n(messages)
 
 const timelineFilters = ['all', 'session', 'message', 'wait', 'status'] as const
 const timelineDensity = ref<'detailed' | 'compact'>(props.compact ? 'compact' : 'detailed')
+
+// Per-message delivery delay from the events already on screen (hub timestamps).
+const latencies = computed(() => latencyIndex(messageLatencies(props.events)))
+
+function latencyFor(event: SessionEvent): MessageLatency | undefined {
+  const name = String(event.event || '').toUpperCase()
+  if (name !== 'MESSAGE_SENT' && name !== 'MESSAGE_DELIVERED') return undefined
+  const id = String((event as Record<string, unknown>).message_id || '')
+  if (!id) return undefined
+  return latencies.value.get(latencyKey(id, String(event.target || '')))
+}
 
 // ── Click-to-expand ──
 // Strip rows are too small to expand in place: clicking one opens the full
@@ -340,4 +358,5 @@ watch(() => props.events.length, () => {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration:0.01ms !important; transition-duration:0.01ms !important; }
 }
+.event-latency { font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
 </style>

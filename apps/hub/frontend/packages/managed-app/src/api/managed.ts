@@ -52,6 +52,9 @@ export interface WorkspaceSession {
   // the coordination service; "closed" when only the persisted record exists.
   // May be omitted by older backends — treat absence as unknown.
   live_status?: 'active' | 'closed'
+  // Permanent room (C12): not closable by agent tokens; may pre-declare members.
+  permanent?: boolean
+  declared_members?: string[]
   member_count?: number | null
   status_counts?: Record<string, number>
 }
@@ -217,7 +220,10 @@ export async function fetchWorkspaceSessions(slug: string) {
   return apiFetch<{ workspace: Workspace; sessions: WorkspaceSession[]; count: number }>(`/managed/workspaces/${encodeURIComponent(slug)}/sessions`)
 }
 
-export async function createWorkspaceSession(slug: string, data: { agent_name: string; title?: string; project?: string; prompt?: string }) {
+export async function createWorkspaceSession(
+  slug: string,
+  data: { agent_name: string; title?: string; project?: string; prompt?: string; permanent?: boolean; declared_members?: string[] },
+) {
   return apiFetch<{ status: string; workspace: Workspace; workspace_session: WorkspaceSession; acp_session: any }>(`/managed/workspaces/${encodeURIComponent(slug)}/sessions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -413,4 +419,39 @@ export async function createTeamPreset(slug: string, presetId: string) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ preset_id: presetId }),
   })
+}
+
+export interface OperatorApproval {
+  approval_id: string
+  session_id: string
+  workspace_id: string
+  text: string
+  created_at: string
+}
+
+/** Human approval posted into the room; agents verify it against the hub. */
+export async function createSessionOperatorApproval(slug: string, sessionId: string, text: string) {
+  return apiFetch<{ status: string; session_id: string; approval: OperatorApproval; message: { id: string; to: string; action: string } }>(
+    `/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}/operator-approvals`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    },
+  )
+}
+
+export async function updateWorkspaceSession(
+  slug: string,
+  sessionId: string,
+  data: { permanent?: boolean; declared_members?: string[] },
+) {
+  return apiFetch<{ status: string; workspace_session: WorkspaceSession }>(
+    `/managed/workspaces/${encodeURIComponent(slug)}/sessions/${encodeURIComponent(sessionId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    },
+  )
 }

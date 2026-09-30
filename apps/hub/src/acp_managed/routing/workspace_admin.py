@@ -25,6 +25,7 @@ from acp_managed.auth.sqlite_store import ManagedWorkspaceSessionRecord
 from acp_managed.contracts import (
     WORKSPACE_TEAM_PRESETS,
     CreateAgentTokenRequest,
+    CreateOperatorApprovalRequest,
     CreateRoomWallPostRequest,
     CreateWorkspacePresetRequest,
     ReceiveRoomOperatorMessageRequest,
@@ -32,6 +33,7 @@ from acp_managed.contracts import (
     SendRoomOperatorMessageRequest,
     CreateWorkspaceSessionRequest,
     UpdateRoomWallPostRequest,
+    UpdateWorkspaceSessionRequest,
 )
 from acp_managed.routing import ManagedRouterDeps
 from acp_managed.routing._helpers import (
@@ -39,6 +41,7 @@ from acp_managed.routing._helpers import (
     _managed_session_aliases,
     _sanitize_agent_token,
     _sanitize_membership,
+    _sanitize_operator_approval,
     _sanitize_room_file,
     _sanitize_room_wall_post,
     _sanitize_workspace,
@@ -346,16 +349,22 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
         )
         if not payload.agent_name.strip():
             raise HTTPException(status_code=422, detail="agent_name is required")
-        record, result = await create_workspace_session_entry(
-            workspace=workspace,
-            created_by_email=principal.email,
-            owner_agent_name=payload.agent_name.strip(),
-            title=payload.title.strip() if isinstance(payload.title, str) and payload.title.strip() else None,
-            project=payload.project.strip() if isinstance(payload.project, str) and payload.project.strip() else None,
-            prompt=payload.prompt,
-            capabilities=payload.capabilities,
-            resolve_name_conflicts=True,
-        )
+        try:
+            record, result = await create_workspace_session_entry(
+                workspace=workspace,
+                created_by_email=principal.email,
+                owner_agent_name=payload.agent_name.strip(),
+                title=payload.title.strip() if isinstance(payload.title, str) and payload.title.strip() else None,
+                project=payload.project.strip() if isinstance(payload.project, str) and payload.project.strip() else None,
+                prompt=payload.prompt,
+                capabilities=payload.capabilities,
+                resolve_name_conflicts=True,
+                owner_kind="human",
+                permanent=payload.permanent,
+                declared_members=payload.declared_members,
+            )
+        except SessionAccessError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return JSONResponse(
             {
                 "status": "created",
@@ -803,6 +812,180 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
             raise HTTPException(status_code=500, detail="web operator member token was not issued")
         return member_token
 
+    async def _resolve_operator_identity(
+        *,
+        principal,
+        workspace,
+        record: ManagedWorkspaceSessionRecord,
+        session_detail: dict[str, object],
+    ) -> tuple[str, str, str, str, bool]:
+        """Return (operator_id, agent_name, member_token, identity_source, created)."""
+        created = False
+        if record.owner_member_token:
+            return (
+                f"session-owner:{record.session_id}",
+                record.owner_agent_name,
+                record.owner_member_token,
+                "session_owner",
+                created,
+            )
+        operator = principal_store.get_room_operator(
+            session_id=record.session_id,
+            principal_email=principal.email,
+        )
+        if operator is None:
+            operator_agent_name = _new_web_operator_agent_name()
+            member_token = await _join_web_operator(
+                session_detail=session_detail,
+                agent_name=operator_agent_name,
+            )
+            operator = principal_store.upsert_room_operator(
+                session_id=record.session_id,
+                workspace_id=workspace.workspace_id,
+                principal_email=principal.email,
+                operator_agent_name=operator_agent_name,
+                member_token=member_token,
+            )
+            created = True
+        elif not _session_has_member(session_detail, operator.operator_agent_name):
+            member_token = await _join_web_operator(
+                session_detail=session_detail,
+                agent_name=operator.operator_agent_name,
+            )
+            operator = principal_store.upsert_room_operator(
+                session_id=record.session_id,
+                workspace_id=workspace.workspace_id,
+                principal_email=principal.email,
+                operator_agent_name=operator.operator_agent_name,
+                member_token=member_token,
+            )
+        return (
+            operator.operator_id,
+            operator.operator_agent_name,
+            operator.member_token,
+            "legacy_web_operator",
+            created,
+        )
+
+    @router.post("/managed/workspaces/{slug}/sessions/{session_id}/operator-approvals")
+    async def managed_workspace_session_operator_approval_create(
+        slug: str,
+        session_id: str,
+        payload: CreateOperatorApprovalRequest,
+        request: Request,
+        acp_managed_session: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        """Human approval into the room, verifiable by agents without secrets (B8).
+
+        The approval text is stored server-side and an INFO message carrying only
+        {kind, approval_id, text} is broadcast. Agents confirm authenticity with
+        GET /managed/agent/sessions/{session_id}/operator-approvals/{approval_id}.
+        """
+        principal, workspace, record = _require_workspace_session_record(
+            slug=slug,
+            session_id=session_id,
+            acp_managed_session=acp_managed_session,
+        )
+        text = payload.text.strip()
+        if not text:
+            raise HTTPException(status_code=422, detail="text is required")
+        session_detail = await _active_session_detail_or_404(record.session_id)
+        _, operator_agent_name, operator_member_token, identity_source, _ = await _resolve_operator_identity(
+            principal=principal,
+            workspace=workspace,
+            record=record,
+            session_detail=session_detail,
+        )
+        approval = principal_store.create_room_operator_approval(
+            session_id=record.session_id,
+            workspace_id=workspace.workspace_id,
+            text=text,
+            created_by_email=principal.email,
+        )
+        message_id = str(uuid4())
+        envelope = {
+            "type": "MSG",
+            "id": message_id,
+            "ts": datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z"),
+            "from": operator_agent_name,
+            "to": "all",
+            "action": "INFO",
+            "payload": {
+                "kind": "operator_approval",
+                "approval_id": approval.approval_id,
+                "text": approval.text,
+            },
+            "thread_id": None,
+            "in_reply_to": None,
+            "session_id": record.session_id,
+        }
+        try:
+            sent = await runtime.coordination.send_message(
+                session_id=record.session_id,
+                agent_name=operator_agent_name,
+                member_token=operator_member_token,
+                payload=envelope,
+            )
+        except SessionAccessError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except SessionNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="managed workspace session is not active") from exc
+        _audit(
+            request,
+            "managed.room_operator_approval_created",
+            actor_email=principal.email,
+            target_type="workspace_session",
+            target_id=record.session_id,
+            metadata={
+                "workspace_id": workspace.workspace_id,
+                "workspace_slug": workspace.slug,
+                "approval_id": approval.approval_id,
+                "identity_source": identity_source,
+                "message_id": message_id,
+            },
+        )
+        return JSONResponse(
+            {
+                "status": "created",
+                "workspace": _sanitize_workspace(workspace),
+                "session_id": record.session_id,
+                "approval": _sanitize_operator_approval(approval),
+                "message": {"id": message_id, "to": "all", "action": "INFO"},
+                "send_result": sent,
+            }
+        )
+
+    @router.patch("/managed/workspaces/{slug}/sessions/{session_id}")
+    async def managed_workspace_session_update(
+        slug: str,
+        session_id: str,
+        payload: UpdateWorkspaceSessionRequest,
+        acp_managed_session: str | None = Cookie(default=None),
+    ) -> JSONResponse:
+        """Reversibly toggle the permanent-room flag / declared member names (C12)."""
+        _, workspace, record = _require_workspace_session_record(
+            slug=slug,
+            session_id=session_id,
+            acp_managed_session=acp_managed_session,
+        )
+        declared = None
+        if payload.declared_members is not None:
+            declared = tuple(
+                dict.fromkeys(name.strip() for name in payload.declared_members if isinstance(name, str) and name.strip())
+            )
+        updated = principal_store.update_workspace_session_permanence(
+            session_id=record.session_id,
+            permanent=record.permanent if payload.permanent is None else payload.permanent,
+            declared_members=declared,
+        )
+        return JSONResponse(
+            {
+                "status": "updated",
+                "workspace": _sanitize_workspace(workspace),
+                "workspace_session": _sanitize_workspace_session(updated or record, include_owner_member_token=True),
+            }
+        )
+
     @router.post("/managed/workspaces/{slug}/sessions/{session_id}/operator/send")
     async def managed_workspace_session_operator_send(
         slug: str,
@@ -824,47 +1007,18 @@ def build_workspace_admin_router(deps: ManagedRouterDeps) -> APIRouter:
             raise HTTPException(status_code=422, detail="payload is required")
 
         session_detail = await _active_session_detail_or_404(record.session_id)
-        created = False
-        if record.owner_member_token:
-            operator_id = f"session-owner:{record.session_id}"
-            operator_agent_name = record.owner_agent_name
-            operator_member_token = record.owner_member_token
-            identity_source = "session_owner"
-        else:
-            operator = principal_store.get_room_operator(
-                session_id=record.session_id,
-                principal_email=principal.email,
-            )
-            if operator is None:
-                operator_agent_name = _new_web_operator_agent_name()
-                member_token = await _join_web_operator(
-                    session_detail=session_detail,
-                    agent_name=operator_agent_name,
-                )
-                operator = principal_store.upsert_room_operator(
-                    session_id=record.session_id,
-                    workspace_id=workspace.workspace_id,
-                    principal_email=principal.email,
-                    operator_agent_name=operator_agent_name,
-                    member_token=member_token,
-                )
-                created = True
-            elif not _session_has_member(session_detail, operator.operator_agent_name):
-                member_token = await _join_web_operator(
-                    session_detail=session_detail,
-                    agent_name=operator.operator_agent_name,
-                )
-                operator = principal_store.upsert_room_operator(
-                    session_id=record.session_id,
-                    workspace_id=workspace.workspace_id,
-                    principal_email=principal.email,
-                    operator_agent_name=operator.operator_agent_name,
-                    member_token=member_token,
-                )
-            operator_id = operator.operator_id
-            operator_agent_name = operator.operator_agent_name
-            operator_member_token = operator.member_token
-            identity_source = "legacy_web_operator"
+        (
+            operator_id,
+            operator_agent_name,
+            operator_member_token,
+            identity_source,
+            created,
+        ) = await _resolve_operator_identity(
+            principal=principal,
+            workspace=workspace,
+            record=record,
+            session_detail=session_detail,
+        )
 
         message_id = str(uuid4())
         action = payload.action.upper()

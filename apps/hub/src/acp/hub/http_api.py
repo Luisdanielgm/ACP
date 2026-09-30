@@ -817,8 +817,17 @@ def build_http_router(runtime: Any, *, legacy_dashboard_enabled: bool = True) ->
         except SessionAccessError as exc:
             if join_rate_limiter is not None:
                 join_rate_limiter.register_failure(client_ip)
-            reason = build_error(INVALID_FIELD, field="join_code", message=str(exc))
-            return JSONResponse(status_code=409, content=_safe_error_payload(reason))
+            join_reason = getattr(exc, "reason", None)
+            reason = build_error(
+                INVALID_FIELD,
+                field="join_code",
+                message=str(exc),
+                details={"reason": join_reason} if join_reason else None,
+            )
+            content = _safe_error_payload(reason)
+            if join_reason:
+                content["reason"] = join_reason
+            return JSONResponse(status_code=409, content=content)
 
         return JSONResponse(status_code=200, content={"status": "ok", **joined})
 

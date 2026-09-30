@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -42,6 +43,21 @@ class ManagedWorkspaceSessionRecord:
     project: str | None
     created_at: str
     prompt: str | None = None
+    # Permanent rooms (C12): a managed-layer flag. The coordination session is
+    # already lifecycle_mode="persistent" (never auto-expired); ``permanent``
+    # additionally blocks agent-token close and enables declared-member checks.
+    permanent: bool = False
+    declared_members: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ManagedRoomOperatorApprovalRecord:
+    approval_id: str
+    session_id: str
+    workspace_id: str
+    text: str
+    created_by_email: str
+    created_at: str
 
 
 @dataclass(frozen=True)
@@ -266,6 +282,34 @@ class SqliteManagedPrincipalStore:
                     ADD COLUMN prompt TEXT NULL
                     """
                 )
+            if "permanent" not in session_columns:
+                conn.execute(
+                    """
+                    ALTER TABLE managed_workspace_sessions
+                    ADD COLUMN permanent INTEGER NOT NULL DEFAULT 0
+                    """
+                )
+            if "declared_members" not in session_columns:
+                conn.execute(
+                    """
+                    ALTER TABLE managed_workspace_sessions
+                    ADD COLUMN declared_members TEXT NULL
+                    """
+                )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS managed_room_operator_approvals (
+                    approval_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL,
+                    text TEXT NOT NULL,
+                    created_by_email TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES managed_workspace_sessions(session_id) ON DELETE CASCADE,
+                    FOREIGN KEY (workspace_id) REFERENCES managed_workspaces(workspace_id) ON DELETE CASCADE
+                )
+                """
+            )
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS managed_room_wall_posts (
@@ -1251,8 +1295,10 @@ class SqliteManagedPrincipalStore:
                     title,
                     project,
                     prompt,
-                    created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at,
+                    permanent,
+                    declared_members
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.session_id,
@@ -1264,6 +1310,8 @@ class SqliteManagedPrincipalStore:
                     record.project,
                     record.prompt,
                     record.created_at,
+                    1 if record.permanent else 0,
+                    json.dumps(list(record.declared_members)) if record.declared_members else None,
                 ),
             )
             conn.commit()
@@ -1473,12 +1521,129 @@ class SqliteManagedPrincipalStore:
         finally:
             conn.close()
 
+    @staticmethod
+    def _workspace_session_from_row(row: sqlite3.Row) -> ManagedWorkspaceSessionRecord:
+        declared: tuple[str, ...] = ()
+        raw_declared = row["declared_members"]
+        if raw_declared:
+            try:
+                parsed = json.loads(str(raw_declared))
+                if isinstance(parsed, list):
+                    declared = tuple(str(item) for item in parsed if isinstance(item, str) and item)
+            except ValueError:
+                declared = ()
+        return ManagedWorkspaceSessionRecord(
+            session_id=str(row["session_id"]),
+            workspace_id=str(row["workspace_id"]),
+            created_by_email=str(row["created_by_email"]),
+            owner_agent_name=str(row["owner_agent_name"]),
+            owner_member_token=str(row["owner_member_token"]) if row["owner_member_token"] is not None else None,
+            title=str(row["title"]) if row["title"] is not None else None,
+            project=str(row["project"]) if row["project"] is not None else None,
+            prompt=str(row["prompt"]) if row["prompt"] is not None else None,
+            created_at=str(row["created_at"]),
+            permanent=bool(int(row["permanent"] or 0)),
+            declared_members=declared,
+        )
+
+    def update_workspace_session_permanence(
+        self,
+        *,
+        session_id: str,
+        permanent: bool,
+        declared_members: tuple[str, ...] | None = None,
+    ) -> ManagedWorkspaceSessionRecord | None:
+        conn = self._connect()
+        try:
+            if declared_members is None:
+                conn.execute(
+                    "UPDATE managed_workspace_sessions SET permanent = ? WHERE session_id = ?",
+                    (1 if permanent else 0, session_id),
+                )
+            else:
+                conn.execute(
+                    "UPDATE managed_workspace_sessions SET permanent = ?, declared_members = ? WHERE session_id = ?",
+                    (1 if permanent else 0, json.dumps(list(declared_members)) if declared_members else None, session_id),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+        return self.get_workspace_session(session_id=session_id)
+
+    def create_room_operator_approval(
+        self,
+        *,
+        session_id: str,
+        workspace_id: str,
+        text: str,
+        created_by_email: str,
+    ) -> ManagedRoomOperatorApprovalRecord:
+        normalized = text.strip() if isinstance(text, str) else ""
+        if not normalized:
+            raise ValueError("operator approval text is required")
+        record = ManagedRoomOperatorApprovalRecord(
+            approval_id=str(uuid4()),
+            session_id=session_id,
+            workspace_id=workspace_id,
+            text=normalized,
+            created_by_email=created_by_email,
+            created_at=self._wall_timestamp(),
+        )
+        conn = self._connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO managed_room_operator_approvals(
+                    approval_id, session_id, workspace_id, text, created_by_email, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.approval_id,
+                    record.session_id,
+                    record.workspace_id,
+                    record.text,
+                    record.created_by_email,
+                    record.created_at,
+                ),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("operator approval references an unknown session or workspace") from exc
+        finally:
+            conn.close()
+        return record
+
+    def get_room_operator_approval(self, *, approval_id: str) -> ManagedRoomOperatorApprovalRecord | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                """
+                SELECT approval_id, session_id, workspace_id, text, created_by_email, created_at
+                FROM managed_room_operator_approvals
+                WHERE approval_id = ?
+                LIMIT 1
+                """,
+                (approval_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            return ManagedRoomOperatorApprovalRecord(
+                approval_id=str(row["approval_id"]),
+                session_id=str(row["session_id"]),
+                workspace_id=str(row["workspace_id"]),
+                text=str(row["text"]),
+                created_by_email=str(row["created_by_email"]),
+                created_at=str(row["created_at"]),
+            )
+        finally:
+            conn.close()
+
     def get_workspace_session(self, *, session_id: str) -> ManagedWorkspaceSessionRecord | None:
         conn = self._connect()
         try:
             row = conn.execute(
                 """
-                SELECT session_id, workspace_id, created_by_email, owner_agent_name, owner_member_token, title, project, prompt, created_at
+                SELECT session_id, workspace_id, created_by_email, owner_agent_name, owner_member_token, title, project, prompt, created_at, permanent, declared_members
                 FROM managed_workspace_sessions
                 WHERE session_id = ?
                 LIMIT 1
@@ -1487,17 +1652,7 @@ class SqliteManagedPrincipalStore:
             ).fetchone()
             if row is None:
                 return None
-            return ManagedWorkspaceSessionRecord(
-                session_id=str(row["session_id"]),
-                workspace_id=str(row["workspace_id"]),
-                created_by_email=str(row["created_by_email"]),
-                owner_agent_name=str(row["owner_agent_name"]),
-                owner_member_token=str(row["owner_member_token"]) if row["owner_member_token"] is not None else None,
-                title=str(row["title"]) if row["title"] is not None else None,
-                project=str(row["project"]) if row["project"] is not None else None,
-                prompt=str(row["prompt"]) if row["prompt"] is not None else None,
-                created_at=str(row["created_at"]),
-            )
+            return self._workspace_session_from_row(row)
         finally:
             conn.close()
 
@@ -1506,27 +1661,14 @@ class SqliteManagedPrincipalStore:
         try:
             rows = conn.execute(
                 """
-                SELECT session_id, workspace_id, created_by_email, owner_agent_name, owner_member_token, title, project, prompt, created_at
+                SELECT session_id, workspace_id, created_by_email, owner_agent_name, owner_member_token, title, project, prompt, created_at, permanent, declared_members
                 FROM managed_workspace_sessions
                 WHERE workspace_id = ?
                 ORDER BY created_at DESC, session_id ASC
                 """,
                 (workspace_id,),
             ).fetchall()
-            return [
-                ManagedWorkspaceSessionRecord(
-                    session_id=str(row["session_id"]),
-                    workspace_id=str(row["workspace_id"]),
-                    created_by_email=str(row["created_by_email"]),
-                    owner_agent_name=str(row["owner_agent_name"]),
-                    owner_member_token=str(row["owner_member_token"]) if row["owner_member_token"] is not None else None,
-                    title=str(row["title"]) if row["title"] is not None else None,
-                    project=str(row["project"]) if row["project"] is not None else None,
-                    prompt=str(row["prompt"]) if row["prompt"] is not None else None,
-                    created_at=str(row["created_at"]),
-                )
-                for row in rows
-            ]
+            return [self._workspace_session_from_row(row) for row in rows]
         finally:
             conn.close()
 

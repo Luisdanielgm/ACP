@@ -6,7 +6,7 @@ import queue
 import subprocess
 import threading
 import time
-from typing import Any, Callable, Mapping
+from typing import Any, Callable
 
 from codex_app_server_adapter import CodexAppServerAdapter
 from host_bridge import HostBinding, HostBindingError, HostManifest, is_explicit_absolute_path

@@ -13,6 +13,8 @@ export interface MemberData {
   pending_count?: number
   heartbeat_age_seconds?: number
   heartbeat_state?: string
+  capabilities?: string[]
+  provider?: string
 }
 
 export interface SessionData {

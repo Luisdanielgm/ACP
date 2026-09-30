@@ -67,13 +67,9 @@
               </div>
 
               <div class="shortcut-grid" role="group" :aria-label="t('session_create_help')">
-                <button class="shortcut-button" @click="quickCreate('codex-chief')" :disabled="sessionLoading">
+                <button class="shortcut-button" @click="quickCreate()" :disabled="sessionLoading">
                   <span class="shortcut-icon" aria-hidden="true">&#9889;</span>
-                  {{ t('create_session_codex') }}
-                </button>
-                <button class="shortcut-button" @click="quickCreate('claude-chief')" :disabled="sessionLoading">
-                  <span class="shortcut-icon" aria-hidden="true">&#9889;</span>
-                  {{ t('create_session_claude') }}
+                  {{ t('create_session_quick', { name: newSession.agent_name.trim() || DEFAULT_OWNER_NAME }) }}
                 </button>
               </div>
 
@@ -84,13 +80,14 @@
                     id="agent-name"
                     v-model="newSession.agent_name"
                     type="text"
-                    placeholder="codex-chief"
+                    :placeholder="DEFAULT_OWNER_NAME"
                     required
                     :aria-required="true"
                     :class="{ 'input-error': sessionErrors.agent_name }"
                     @input="clearSessionErrors"
                   />
                   <span v-if="sessionErrors.agent_name" class="field-error" role="alert">{{ sessionErrors.agent_name }}</span>
+                  <span class="help-text">{{ t('owner_name_help') }}</span>
                 </div>
                 <div class="field">
                   <label for="session-title">{{ t('title_label') }}</label>
@@ -103,6 +100,23 @@
                 <div class="field">
                   <label for="session-prompt">{{ t('prompt_label') }}</label>
                   <textarea id="session-prompt" v-model="newSession.prompt" rows="3" :placeholder="t('prompt_ph')"></textarea>
+                </div>
+                <div class="field full-width permanent-field">
+                  <label class="permanent-toggle" for="session-permanent">
+                    <input id="session-permanent" v-model="newSession.permanent" type="checkbox" />
+                    {{ t('permanent_room_label') }}
+                  </label>
+                  <span class="help-text">{{ t('permanent_room_help') }}</span>
+                  <template v-if="newSession.permanent">
+                    <label for="session-declared-members">{{ t('declared_members_label') }}</label>
+                    <input
+                      id="session-declared-members"
+                      v-model="newSession.declared_members"
+                      type="text"
+                      :placeholder="t('declared_members_ph')"
+                    />
+                    <span class="help-text">{{ t('declared_members_help') }}</span>
+                  </template>
                 </div>
                 <button type="submit" class="primary-button full-width" :disabled="sessionLoading">
                   <span v-if="sessionLoading" class="spinner" aria-hidden="true"></span>
@@ -149,6 +163,7 @@
                           · {{ t('session_member_count', { count: s.member_count }) }}
                         </span>
                       </span>
+                      <span v-if="s.permanent" class="pill pill-status-active permanent-pill" :title="t('permanent_room_help')">{{ t('permanent_room_badge') }}</span>
                       <code class="session-id">{{ s.session_id }}</code>
                       <span v-if="s.project" class="session-project">{{ s.project }}</span>
                       <time class="session-time" :datetime="s.created_at" :title="formatAbsolute(s.created_at)">{{ relativeTime(s.created_at) }}</time>
@@ -298,8 +313,11 @@
                 </div>
               </div>
 
+              <p class="token-join-note" role="note">{{ t('ws_token_join_note') }}</p>
+              <p v-if="activeToken" class="token-rotate-warning">{{ t('ws_token_rotate_warning') }}</p>
+
               <div class="token-actions">
-                <button class="secondary-button" @click="handleRotateToken" :disabled="tokenLoading">
+                <button class="ghost-button token-rotate-button" @click="requestRotateToken" :disabled="tokenLoading">
                   <span v-if="tokenLoading" class="spinner" aria-hidden="true"></span>
                   {{ activeToken ? t('ws_token_rotate') : t('ws_token_generate') }}
                 </button>
@@ -311,6 +329,15 @@
           </aside>
         </div>
       </section>
+      <ConfirmDialog
+        :open="showConfirmRotate"
+        :title="t('ws_token_rotate')"
+        :message="t('ws_token_rotate_confirm')"
+        :confirm-label="t('ws_token_rotate_confirm_btn')"
+        :cancel-label="t('confirm_cancel')"
+        @confirm="handleConfirmRotate"
+        @cancel="showConfirmRotate = false"
+      />
       <ConfirmDialog
         :open="showConfirmRevoke"
         :title="t('ws_token_revoke')"
@@ -382,9 +409,13 @@ const promptCopied = ref(false)
 const tokenLoading = ref(false)
 const sessionLoading = ref(false)
 const showConfirmRevoke = ref(false)
+const showConfirmRotate = ref(false)
 const pageBanner = ref<{ title: string; body: string } | null>(null)
 
-const newSession = ref({ agent_name: '', title: '', project: '', prompt: '' })
+// The room owner is the human at the panel. Default to a name no agent would
+// use, so an agent joining as e.g. codex-chief never collides with the owner.
+const DEFAULT_OWNER_NAME = 'jefe-del-panel'
+const newSession = ref({ agent_name: DEFAULT_OWNER_NAME, title: '', project: '', prompt: '', permanent: false, declared_members: '' })
 const sessionErrors = ref({ agent_name: '', title: '', project: '' })
 
 // ── Closed sessions ──
@@ -398,6 +429,13 @@ const activeSessions = computed(() => sessions.value.filter((s) => s.live_status
 // Anything not explicitly "active" (closed, or missing live_status on older backends)
 // is treated as closed — same rule the status pill already used before this split.
 const closedSessions = computed(() => sessions.value.filter((s) => s.live_status !== 'active'))
+
+const declaredMembers = computed(() =>
+  newSession.value.declared_members
+    .split(/[\s,]+/)
+    .map(name => name.trim())
+    .filter(name => /^[A-Za-z0-9_.-]+$/.test(name)),
+)
 
 function validateSession(): boolean {
   const errors = { agent_name: '', title: '', project: '' }
@@ -464,6 +502,21 @@ async function showFlashBannerIfNeeded() {
   const nextQuery = { ...route.query }
   delete nextQuery.flash
   await router.replace({ query: nextQuery })
+}
+
+function requestRotateToken() {
+  // First-time generation is harmless; rotating invalidates the previous token,
+  // so ask first and spell out what stops working.
+  if (activeToken.value) {
+    showConfirmRotate.value = true
+    return
+  }
+  handleRotateToken()
+}
+
+function handleConfirmRotate() {
+  showConfirmRotate.value = false
+  handleRotateToken()
 }
 
 async function handleRotateToken() {
@@ -543,10 +596,12 @@ function handleCancelDeleteSession() {
 
 async function prefillFromClosedSession(session: WorkspaceSession) {
   newSession.value = {
-    agent_name: '',
+    agent_name: DEFAULT_OWNER_NAME,
     title: session.title ?? '',
     project: session.project ?? '',
     prompt: '',
+    permanent: !!session.permanent,
+    declared_members: (session.declared_members ?? []).join(', '),
   }
   clearSessionErrors()
   createSessionSection.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -605,7 +660,12 @@ async function openCreatedSession(data: { workspace_session: WorkspaceSession },
   await router.push(sessionDetailPath(data.workspace_session))
 }
 
-async function quickCreate(agentName: string) {
+async function quickCreate() {
+  const agentName = newSession.value.agent_name.trim() || DEFAULT_OWNER_NAME
+  if (!/^[A-Za-z0-9_.-]+$/.test(agentName)) {
+    sessionErrors.value = { ...sessionErrors.value, agent_name: t('error_agent_name_format') }
+    return
+  }
   sessionLoading.value = true
   try {
     const result = await createWorkspaceSession(slug.value, { agent_name: agentName })
@@ -626,6 +686,8 @@ async function handleCreateSession() {
       title: newSession.value.title || undefined,
       project: newSession.value.project || undefined,
       prompt: newSession.value.prompt || undefined,
+      permanent: newSession.value.permanent || undefined,
+      declared_members: declaredMembers.value.length ? declaredMembers.value : undefined,
     })
     await openCreatedSession(result, newSession.value.agent_name)
   } catch (err) {
@@ -1187,6 +1249,22 @@ watch(slug, async () => {
   font-weight: 600;
   min-width: 52px;
 }
+.token-join-note {
+  margin: 12px 0 4px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: 0.82rem;
+  color: var(--text-2);
+}
+.token-rotate-warning {
+  margin: 4px 0 8px;
+  font-size: 0.78rem;
+  color: var(--warning, #EF9F27);
+}
+.token-rotate-button { font-size: 0.8rem; opacity: 0.85; }
+.permanent-toggle { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
+.permanent-pill { font-size: 0.7rem; }
 .help-text {
   color: var(--text-2);
   font-size: 0.84rem;

@@ -9,9 +9,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import uuid4
 
-from fastapi.testclient import TestClient
 
-from acp.hub.app import create_app
 from acp.hub.coordination_store import InMemoryCoordinationStore, SqliteCoordinationStore
 from acp.hub.migrations import apply_sqlite_migrations
 

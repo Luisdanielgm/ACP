@@ -33,6 +33,20 @@ class CreateWorkspaceSessionRequest(BaseModel):
     project: str | None = Field(default=None, max_length=160)
     prompt: str | None = Field(default=None, max_length=4000)
     capabilities: list[str] | None = None
+    # Permanent room (C12): survives close-by-agent and pre-declares member names.
+    permanent: bool = False
+    declared_members: list[str] | None = Field(default=None, max_length=16)
+
+
+class UpdateWorkspaceSessionRequest(BaseModel):
+    """Reversible toggle for the permanent-room flag and its declared members."""
+
+    permanent: bool | None = None
+    declared_members: list[str] | None = Field(default=None, max_length=16)
+
+
+class CreateOperatorApprovalRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
 
 
 class CreateAgentTokenRequest(BaseModel):
