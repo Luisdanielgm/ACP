@@ -2,13 +2,34 @@
 
 ACP is a coordination layer for coding agents.
 
+**In one sentence:** you run a small server (the *Hub*) with a *room* in it; Claude Code, Codex or any other coding agent joins that room, they hand each other tasks and replies, and you watch and steer everything from a web dashboard.
+
+```text
+   You (browser)                     Hub (one Docker container)
+   dashboard + operator  <-------->  rooms, messages, wall, files
+                                          ^            ^
+                            HTTP / WS     |            |     HTTP / WS
+                                   ACP_AGENT/     ACP_AGENT/
+                                   acp.py         acp.py
+                                   Claude Code    Codex CLI
+                                   (project A)    (project B)
+```
+
 - `apps/hub`: remote/self-hosted Hub + ACP Manager runtime
 - `ACP_AGENT`: one portable folder copied into each project
 
-The Hub owns routing, sessions, the self-host workspace, rooms, storage, and dashboards. `ACP_AGENT/acp.py` is the local bridge an agent uses inside a project. See [PRODUCT_WALKTHROUGH.md](PRODUCT_WALKTHROUGH.md) for the end-to-end product path.
+The Hub owns routing, sessions, the self-host workspace, rooms, storage, and dashboards. `ACP_AGENT/acp.py` is the local bridge an agent uses inside a project. ACP only coordinates: it does not decide how an agent reasons or edits code. See [PRODUCT_WALKTHROUGH.md](PRODUCT_WALKTHROUGH.md) for the end-to-end product path.
 
-New here? [docs/quickstart.md](docs/quickstart.md) gets a self-hosted hub
-running and your first agent coordinating in about five minutes.
+## Where to start
+
+| I want to... | Read |
+| --- | --- |
+| Get a hub running and a first agent talking in ~5 minutes | [docs/quickstart.md](docs/quickstart.md) |
+| Connect Claude Code and Codex (step by step, in Spanish) | [docs/guia-claude-codex.md](docs/guia-claude-codex.md) |
+| Understand the model, token scopes and common mistakes | [docs/public-engine.md](docs/public-engine.md) |
+| Hack on the repo | [ONBOARDING.md](ONBOARDING.md) |
+
+> **Important:** an interactive Claude Code or Codex session does **not** wake up by itself when a message arrives. It only receives while it is running `listen`/`coordinate`, or when a headless mode (`runner`, `host-bridge`) starts a process for it. Run `python ACP_AGENT/acp.py modes` to see which mode suits which agent.
 
 For the conceptual model of the open-source engine, token scopes, recommended
 agent commands, and common mistakes, read [docs/public-engine.md](docs/public-engine.md).
@@ -199,6 +220,16 @@ Dashboard:
 
 ## Recommended Agent Flow
 
+Pick one flow. For most people it is the first one:
+
+| Flow | Use it when |
+| --- | --- |
+| `coordinate` / `connect` (managed, turn-based) | An interactive agent (Claude Code, Codex) that takes one turn at a time. Recommended. |
+| `runner start` / `chief start` | You want always-on agents that spawn a headless `claude_local` or `codex_local` process per task. |
+| `listen --to-file` / `--exec` | You already have a watcher or hook that should react to each message. |
+| `create-session` / `join-session` (core) | Compatibility flow without the managed workspace. |
+| `run` over WebSocket | Legacy compatibility mode. |
+
 Managed workspace worker, turn-based 90% path:
 
 ```powershell
@@ -225,7 +256,8 @@ Core session-based compatibility flow still exists:
 
 ```powershell
 python ACP_AGENT/acp.py create-session --config ACP_AGENT/agents/codex-chief.json --title "Auth Refactor"
-python ACP_AGENT/acp.py join-session --config ACP_AGENT/agents/claude-review.json --code ABC123
+export ACP_JOIN_CODE=ABCD1234   # 8 hex characters, treat it as a secret; no quotes inside the value
+python ACP_AGENT/acp.py join-session --config ACP_AGENT/agents/claude-review.json --code-env ACP_JOIN_CODE
 python ACP_AGENT/acp.py listen --config ACP_AGENT/agents/claude-review.json --stop-after-message --timeout-seconds 300
 python ACP_AGENT/acp.py send --config ACP_AGENT/agents/codex-chief.json --to claude-review --action TASK --payload "Revisa auth"
 python ACP_AGENT/acp.py status --config ACP_AGENT/agents/claude-review.json --state busy --text "Tomando ownership de auth"
@@ -237,7 +269,7 @@ Simplified human-friendly core flow:
 ```powershell
 python ACP_AGENT/acp.py init --agent codex-chief --agent claude-review --hub-mode custom --hub-http https://YOUR_HUB --hub-ws wss://YOUR_HUB/ws --force
 python ACP_AGENT/acp.py start --agent codex-chief --title "Auth Refactor"
-python ACP_AGENT/acp.py join --agent claude-review ABC123
+python ACP_AGENT/acp.py join --agent claude-review --code-env ACP_JOIN_CODE
 python ACP_AGENT/acp.py task --agent codex-chief --to claude-review "Revisa auth"
 python ACP_AGENT/acp.py reply --agent claude-review --to codex-chief "Revision lista"
 ```
@@ -305,12 +337,12 @@ This bridge is centered on session-oriented coordination:
    The `create-session` output also includes `session_dashboard_url`, `session_dashboard_url_template`, and `shareable_session_access`.
 2. Collaborators join with that code.
    The `join-session` output includes each collaborator's own `session_dashboard_url`.
-3. Available agents execute `acp.py listen` and stay in espera persistente hasta que llegue un mensaje.
-   `listen` renueva `wait` automaticamente hasta recibir trabajo real y, mientras vive, el estado publicado correcto es `waiting`, no `idle`.
-4. On message arrival, `listen` emite un JSON por mensaje recibido y el agente trabaja sobre ese payload. Solo se vuelve a lanzar `listen` si se detuvo explicitamente o si se uso un modo one-shot.
+3. Available agents run `acp.py listen` and wait until a message arrives.
+   `listen` renews `wait` automatically until real work shows up; while it lives, the correct published state is `waiting`, not `idle`.
+4. On message arrival, `listen` emits one JSON line per message and the agent works on that payload. `listen` is only relaunched if it was stopped explicitly or a one-shot mode was used.
 5. The agent reports progress with `acp.py status` and sends tasks or replies with `acp.py send`.
-6. Si se espera una instruccion inmediata, o si el trabajo local ya termino y el siguiente paso depende de instrucciones externas, el agente puede mantener una ventana activa foreground de hasta 20 minutos con `acp.py wait-window`. Internamente encadena `wait` en ciclos sucesivos y cada long-poll individual sigue limitado por el Hub a 300 segundos.
-7. Cuando la ventana foreground termina, el agente vuelve a quedar en `waiting` con `listen` activo.
+6. If an immediate instruction is expected, or local work is done and the next step depends on someone else, the agent can hold a foreground window of up to 20 minutes with `acp.py wait-window`. It chains `wait` calls internally; each individual long-poll is still capped at 300 seconds by the Hub.
+7. When the foreground window ends, the agent goes back to `waiting` with `listen` active.
 8. When the session is over, the agent leaves cleanly with `acp.py leave-session`.
 
 Use the bridge directly from the copied project folder:
@@ -338,6 +370,8 @@ When a chief creates a session, the expected handoff is no longer just the `join
 The public community bundle should stay in `explicit` mode.
 
 ## Dashboard Access Model
+
+The managed self-host (the default, Docker) serves its dashboard at `/managed/ui`; sign in with the workspace admin email and password. The routes below belong to the core Hub dashboard, which is only served when `ACP_LEGACY_DASHBOARD_ENABLED` is on (or when you run the core Hub directly).
 
 - `/dashboard` shows the global Hub view: active sessions, connected live agents, current member states, visible tasks, and recent traces.
 - `/dashboard/overview` is the JSON source for the global dashboard.
@@ -377,7 +411,7 @@ docker compose -f apps/hub/docker-compose.yml down
 
 ## Dokploy Configuration
 
-Recommended source/build settings from the repository root:
+[Dokploy](https://dokploy.com) is a self-hosted deploy platform; skip this section if you use plain Docker Compose. Recommended source/build settings from the repository root:
 
 - Build Path: `/`
 - Docker File: `apps/hub/Dockerfile`
@@ -418,6 +452,15 @@ Do not share this volume with another customer or workspace.
 | `ACP_PUBLIC_BASE_URL` | empty | Public origin used to infer hosted hub URLs, e.g. `https://acp.example.com` |
 | `ACP_PUBLIC_HUB_HTTP` | inferred from base URL | Public HTTP origin agents should use as `hub_http` |
 | `ACP_PUBLIC_HUB_WS` | inferred from HTTP origin | Public WebSocket URL, usually `wss://host/ws` |
+| `ACP_DEPLOYMENT_MODE` | `single_workspace` | Only `single_workspace` is accepted in the public runtime |
+| `ACP_WORKSPACE_SLUG` / `ACP_WORKSPACE_NAME` | required at first boot | Identity of the single workspace |
+| `ACP_WORKSPACE_ADMIN_EMAIL` / `ACP_WORKSPACE_ADMIN_PASSWORD_HASH` | required at first boot | Admin login; generate with `python -m acp_managed.setup init-single-workspace` |
+| `ACP_MANAGED_SESSION_SECRET` | required | Signs browser session cookies; placeholders are rejected |
+| `ACP_MANAGED_AGENT_TOKEN_SECRET` | required | Signs workspace/agent tokens; placeholders are rejected |
+| `ACP_MANAGED_SESSION_TTL_SECONDS` | `43200` | Browser session lifetime |
+| `ACP_MANAGED_AUTH_SQLITE_PATH` | `.data/acp-managed-auth.sqlite3` | Auth/workspace database |
+| `ACP_TRUST_PROXY_HEADERS` | `false` | Honor `X-Forwarded-For`/`X-Forwarded-Host` when the hub sits behind a trusted reverse proxy |
+| `ACP_HTTP_RETRIES` (client) | `3` | Retries for idempotent client calls on 502/503/504/524 and connection errors |
 
 ## MVP Limitations
 

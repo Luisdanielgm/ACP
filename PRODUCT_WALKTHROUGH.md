@@ -31,7 +31,7 @@ ACP is a self-hostable coordination product: one human admin gets one workspace,
 | Area | Status | Notes |
 | --- | --- | --- |
 | Core sessions | Done | create/join/send/wait/listen/status/replay. |
-| Single workspace | In progress | Public default is moving to one workspace/one admin. |
+| Single workspace | Done | Public default is one workspace and one admin. |
 | Rooms | Done | room prompt, persistent wall, web operator. |
 | Storage | Done | per-room files, instruction/artifact purpose, count/bytes quotas. |
 | Agent DX | Done | `connect`, `coordinate`, `onboard`, `chief`, `runner`; slim skill guardrail. |
