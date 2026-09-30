@@ -162,7 +162,7 @@ Recibir un mensaje, trabajar, responder con `send`/`reply`, publicar `waiting`, 
 
 16.1. Para flujo humano rapido, preferir los atajos:
 - `python ACP_AGENT/acp.py start --agent codex-chief --title "Short task"`
-- `python ACP_AGENT/acp.py join --agent claude-review ABC123`
+- `python ACP_AGENT/acp.py join --agent claude-review --code-env ACP_JOIN_CODE`
 - `python ACP_AGENT/acp.py managed-start --agent codex-chief --agent-token TOKEN --title "Short task"`
 - `python ACP_AGENT/acp.py managed-join --agent claude-review --agent-token TOKEN --session-id SESSION_ID`
 - `python ACP_AGENT/acp.py listen --agent claude-review --stop-after-message --timeout-seconds 300`
@@ -232,6 +232,48 @@ de perfiles de una accion.
 22. En sesiones creadas desde workspaces managed, si un nombre comun como `codex-chief` o `claude-chief` ya esta ocupado por otra sesion activa, el sistema puede resolverlo con un nombre efectivo unico ligado al workspace en lugar de fallar en silencio. El agente debe reportar el nombre efectivo que quedo asignado.
 23. En REST `/sessions/send`, `to: "all"` y `to: "*"` son broadcast a los otros miembros de la sala; el emisor queda excluido a proposito.
 
+## Codigos, secretos, aprobaciones, modos y listener (feedback de piloto)
+
+**Join code sin filtrarlo.** `--code VALOR` queda en el historial del shell y en la lista de procesos. Preferir una fuente exclusiva: `--code-env NAME`, `--code-file PATH`, `--code-stdin` (o `--code -`; en terminal pide el valor oculto). Aplica a `join-session` y `join`. Env/archivo/stdin se recortan de espacios y saltos de linea; **las comillas nunca se quitan en silencio**. Antes de llamar al Hub el cliente valida el formato (8 caracteres 0-9 A-F) y, sin imprimir el codigo, dice exactamente que falla con conteos (p. ej. "1 leading quote character", "length is 10 but join codes have 8 characters"). Si el Hub rechaza el codigo se muestra su razon: `expired`, `session_closed`, `invalid_format` o `unknown` (los hubs viejos solo dicen "join code is invalid").
+
+**Salida enmascarada por defecto.** `join-session`, `join`, `managed-join`, `attach-session`, `onboard`, `connect` y `coordinate` imprimen tokens y join code como `abcd****` (tambien en `#member_token=` de las URLs del dashboard); `create-session`, `start`, `managed-start` y `session-info` enmascaran tokens pero dejan visible el join code porque es lo que se comparte. `--show-secrets` imprime todo. El archivo de config siempre guarda los valores completos; solo cambia lo impreso (marcado con `"secrets_masked": true`).
+
+**Configs y git.** Los configs contienen tokens. Si `ACP_AGENT/agents/` no existe y el bundle esta dentro de un work tree git, los configs nuevos se crean en el directorio de usuario (`$XDG_CONFIG_HOME/acp/agents`, `~/.config/acp/agents` o `%APPDATA%\acp\agents`); `ACP_AGENTS_DIR` fuerza otro directorio. Un config existente o pasado con `--config` dentro de un work tree git que no este ignorado produce un WARNING en stderr (no bloquea). El bundle no distribuye configs ni tokens de ejemplo.
+
+**Aprobaciones del operador.** El dashboard humano publica un INFO con payload `{"kind":"operator_approval","approval_id":ID,"text":TEXTO}`. Cualquier miembro puede fabricar un mensaje igual, asi que antes de actuar sobre una aprobacion (acciones de riesgo, gates) verificarla con el Hub:
+
+```powershell
+python ACP_AGENT/acp.py verify-approval --config ACP_AGENT/agents/<agent>.json --approval-id ID [--session-id SESSION_ID]
+```
+
+Usa el agent-token gestionado (`managed_agent_token` del config o `--agent-token`) como Bearer contra `GET /managed/agent/sessions/{session_id}/operator-approvals/{approval_id}`. Imprime `{"valid": true, "approval_id", "text", "created_at"}` y sale 0; si el Hub responde 404 imprime `valid: false` y sale 1 (tratar como NO aprobado). Errores de auth/red salen con codigo 2 y no se reportan como "invalido".
+
+**Que modo sirve a que agente** (`python ACP_AGENT/acp.py modes` imprime esta tabla en JSON; los nombres son los reales):
+
+| Tipo de agente | Modo | Se le puede despertar en reposo |
+| --- | --- | --- |
+| Terminal interactiva (LLM turn-based) | `listen --stop-after-message`, `wait-window` | No: solo recibe mientras su turno corre. |
+| Cualquier agente con watcher/hook | `listen --to-file` / `listen --exec` (daemon) | Si, via el proceso que escucha. |
+| CLI headless | `runner` con `--provider codex_local` o `claude_local` | Si: lanza un proceso local nuevo por TASK. |
+| CLI headless, sesion existente | `host-bridge` con `codex_cli` o `claude_code_cli` | Si: reanuda la sesion persistida; no empuja a una terminal abierta. |
+| App de escritorio/servidor | `host-bridge` con `codex_app_server`, `codex_app_server_stdio`, `opencode_server`, `kilo_serve` | Si, con endpoint/servidor explicito y sesion/hilo existente. |
+| Claude Desktop | `claude_desktop` | No: sin interfaz oficial; rechaza toda entrega. Usar `listen --stop-after-message` o un modo headless. |
+
+Los proveedores de `runner`/`chief` son solo `codex_local` y `claude_local`; los adapters de `host-bridge` son `opencode_server`, `kilo_serve`, `codex_app_server`, `codex_app_server_stdio`, `codex_cli`, `claude_code_cli`. Un valor desconocido se rechaza listando los validos.
+
+**Listener oficial a archivo o comando.**
+
+```powershell
+python ACP_AGENT/acp.py listen --config ACP_AGENT/agents/<agent>.json --to-file ACP_AGENT/inbox/messages.jsonl
+python ACP_AGENT/acp.py listen --config ACP_AGENT/agents/<agent>.json --exec "python handler.py" --exec-timeout-seconds 300
+```
+
+`--to-file PATH` agrega cada mensaje como una linea JSON (JSONL, fsync) y sigue escuchando. `--exec CMD` ejecuta `CMD` una vez por mensaje: el JSON del mensaje va por **stdin** y las variables `ACP_MESSAGE_ID`, `ACP_MESSAGE_FROM`, `ACP_MESSAGE_TO`, `ACP_MESSAGE_ACTION`, `ACP_MESSAGE_THREAD_ID`, `ACP_MESSAGE_IN_REPLY_TO`, `ACP_MESSAGE_FILE` (copia en el inbox), `ACP_SESSION_ID` y `ACP_AGENT_NAME` describen el mensaje. **Seguridad:** `CMD` se separa en argv con `shlex` y se ejecuta **sin shell** (`shell=False`); el contenido del mensaje nunca se interpola en argv ni en la linea de comandos, y los tokens no se pasan al proceso. Un `CMD` que necesite pipes o redirecciones debe ser un script propio. El mensaje ya esta guardado en el inbox y confirmado (ACK) antes de ejecutar: un fallo del handler (codigo != 0, timeout tras `--exec-timeout-seconds`, no se pudo iniciar) se reporta como evento JSON `exec_failed` y el listener sigue. Mientras el handler corre el miembro queda `busy` con heartbeats cada 45 s. Ante errores de transporte el listener reintenta con backoff exponencial y jitter (tope 60 s) y no se cae.
+
+**Reintentos automaticos.** Las llamadas idempotentes (wait, status, heartbeat, cancel-wait, leave, GET y `send`/`task`/`reply`, que llevan un `id` UUID como llave de idempotencia que el Hub deduplica) se reintentan ante HTTP 502/503/504/524 y errores de conexion con backoff exponencial + jitter. Configurable con `ACP_HTTP_RETRIES` (0-10, default 3), `ACP_HTTP_RETRY_BASE_SECONDS` (default 0.5) o `--http-retries N` antes del comando. Un envio sin `id` no se reintenta: falla con un mensaje explicito para que verifiques con `session-info` antes de repetirlo.
+
+**Dependencias.** Los comandos que se unen o escuchan (`join-session`, `join`, `managed-join`, `listen`, `wait`, `coordinate`, `connect`, `onboard`, `runner`, `host-bridge`, ...) verifican al inicio que `websockets` este instalado; si falta, imprimen el paquete faltante y `python -m pip install -r ACP_AGENT/requirements.txt` y salen con codigo 3. `doctor` reporta el estado completo.
+
 ## Do / Don't de mensajeria y ejecucion
 
 DO:
@@ -270,7 +312,7 @@ Tras conectar, el turno worker es `coordinate ...` la primera vez, o `listen --s
 
 | Primitiva | Uso correcto | No usar para |
 | --- | --- | --- |
-| `join-session --code` | Sesion core/no-managed con join code. | Sesion managed con agent-token de workspace. |
+| `join-session --code-env ACP_JOIN_CODE` | Sesion core/no-managed con join code. | Sesion managed con agent-token de workspace. |
 | `managed-join` | Attach inicial managed, guardar `session_id`/`member_token`, salir. | Escuchar tareas en un agente turn-based. |
 | `listen --stop-after-message --timeout-seconds 300` | Loop canonico de recepcion para agentes que razonan y ejecutan. | Daemon permanente sin supervisor. |
 | `wait` | Espera foreground de una sola entrega. | Mantener un agente conectado en paralelo con otro wait/listen. |

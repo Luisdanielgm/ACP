@@ -16,7 +16,7 @@ config. Add `--agent <name>` only when more than one config exists.
 | Managed worker, onboard only and return control | `onboard --agent <agent> --agent-token <TOKEN> --hub-http <HUB> --project <project>` |
 | Unsure whether this agent is worker or chief | `connect --role auto --agent <agent> --agent-token <TOKEN> --hub-http <HUB>` |
 | Managed session id handed to you | `managed-join --agent <agent> --agent-token <TOKEN> --session-id <ID> --no-listen` |
-| Core session with join code | `join-session --agent <agent> --code <CODE>` |
+| Core session with join code | `join-session --agent <agent> --code-env ACP_JOIN_CODE` (or `--code-file`/`--code-stdin`) |
 | Already have session id + member token | `attach-session --agent <agent> --session-id <ID> --member-token <TOKEN> --no-listen` |
 `coordinate` is the 90% worker path: bootstrap/connect/onboard, announce READY,
 publish `waiting`, wait for exactly one message, then exit so the LLM can work.
@@ -42,7 +42,6 @@ message only; a `TASK` remains current until the normal REPLY/completion flow
 clears it. Never acknowledge a delivery before durable local persistence.
 
 ## 3. Must-not-block rule
-
 Turn-based LLM agents that also execute work must not stay in foreground
 persistent `listen` or `managed-join`. Those commands can block the LLM turn.
 Use `coordinate` or one-message `listen --stop-after-message --timeout-seconds
@@ -53,7 +52,6 @@ Always-on LLM workers/chiefs should use `runner start` or `chief start`, not a
 manual foreground listen loop.
 
 ## 4. Chief and runner modes
-
 | Role | Command | Use when |
 | --- | --- | --- |
 | Always-on worker | `runner start --config ACP_AGENT/agents/<worker>.json --provider <provider> --workspace <path> --allow-sender <chief> --reply-to <chief>` | A provider should wake only for trusted TASK senders. |
@@ -75,7 +73,6 @@ Optional `host_bridge_credential_ref: "env:NAME"` resolves JSON `username`/`pass
 Never store literal credentials or run two bridges for one binding; `host-bridge once` is the bounded smoke/debug mode. New Host Bridge profiles accept `TASK`, `REPLY`, and `INFO` by default through one wait. Use repeated `--accept-action` or `host_bridge_accepted_actions` for an explicit subset; subset waits rotate safe server-side action filters and never lease an unauthorized action. `--wait-action`/`host_bridge_wait_action` remain single-action migration compatibility only. A separate listener config is the safe way to keep a visible Desktop member and a headless bridge from competing for the same ACP wait lease; the listener member must already be attached to the same ACP session.
 
 ## 5. Payload safety
-
 Never pass JSON as `--payload "..."`. Shell quoting, especially PowerShell,
 can corrupt it. Write JSON to a file and use `--payload-file`, or pipe via
 `--payload-file -`.
@@ -87,7 +84,6 @@ python ACP_AGENT/acp.py reply --to <chief> --task-id t-1 --payload-file ACP_AGEN
 Plain text may still use positional text or `--payload`.
 
 ## 6. Status and waiting
-
 - Publish `busy` while owning long work.
 - Publish `waiting` when available for the next task.
 - Use `wait-window --window-minutes 20` only when immediate follow-up is likely.
@@ -100,7 +96,6 @@ python ACP_AGENT/acp.py leave-session
 ```
 
 ## 7. Error recovery
-
 | Symptom | Meaning | Recovery |
 | --- | --- | --- |
 | HTTP 409 / `WAIT_ALREADY_ACTIVE` | Another wait/listen is active for this member. | Stop that process if possible; otherwise `cancel-wait`, then re-run one-message listen. |
@@ -113,7 +108,6 @@ python ACP_AGENT/acp.py cancel-wait
 ```
 
 ## 8. Managed workspace notes
-
 Managed workspace tokens auto-discover the workspace through
 `/managed/agent/bootstrap`; workspace slug is optional in the normal case.
 If a common name like `codex-chief` is already used in another active session,
@@ -128,7 +122,6 @@ python ACP_AGENT/acp.py onboard-help --project <PROJECT_ID> --agent <agent>
 Use the bundled `ACP_AGENT/acp.py` and bundled skill as the source of truth.
 
 ## 9. Durable room context
-
 Use the room wall for durable decisions/instructions and room files for shared
 artifacts. These commands use the managed agent token and never expose owner
 credentials:
@@ -157,24 +150,28 @@ python ACP_AGENT/acp.py room-reset --hub-http <HUB> --agent-token <WORKSPACE_TOK
 tokens are denied. Members, operator, wall, files, and room configuration remain.
 
 ## 10. Feedback self-fix
-
 Feedback received over ACP is actionable work even when it arrives as `INFO` or
 `REPLY`: acknowledge it, apply the correction inside your assigned boundary,
 re-run relevant verification, report the fix with evidence, and publish
 `waiting`. Do not wait for the human to relay an already-clear ACP instruction.
 
 ## Hard rules
-
 1. One config per agent identity; do not reuse a chief config as a worker.
 2. Do not hand-copy `session_id` or `member_token` after config is bound.
 3. Do not use persistent foreground listen in a turn-based LLM agent.
 4. Use `--payload-file` for structured payloads.
 5. Keep ACP for coordination only; code ownership and verification stay with the agent.
 ## 11. Resilient host operation
-
 Run `host-bridge start` only with an explicit existing host binding. One bridge may receive configured `TASK`, `REPLY`, and `INFO` actions for that member and consumes no model tokens while idle. The portable supervisor can restart declared bridges after a non-destructive health failure and record PID/state/log paths, but it is not a Windows service and does not survive reboot unless the operator starts it again. Never autodiscover endpoints or sessions.
 Generate the supervisor config with `python ACP_AGENT/acp.py host-supervisor generate --output ACP_AGENT/agents/supervisor.json --coordinator <name> --worker <name>` (repeat `--worker`; no result-router is added by default). This reuses the non-model supervisor and reports `autostart: not_installed`; if another process owns one member config, that bridge is reported `reserved` while independent bridges continue and retry safely. Operational commands are `host-supervisor once|start|stop --config ...`.
 `reply-collector` remains a deprecated compatibility command for older TASK-only profiles. New deployments should configure the destination HostBridge to accept `REPLY` and `INFO` directly instead of adding a topology-specific intermediary.
 For deterministic roadmap continuation, the product may set both `coordinator_plan_definition_path` and `coordinator_plan_state_path` on the same coordinator HostBridge (or pass `--plan-definition` plus `--plan-state`). A direct trusted `REPLY`/`INFO` first advances that product-owned plan and durably emits at most one dependency-ready `TASK`, then wakes the bound coordinator session with the original result, and ACKs last. Crash replay reuses the deterministic emission ID and durable host result. ACP never invents the roadmap: the definition declares task owner, dependencies, risk, approval gate, and optional `max_attempts` (default 1, maximum 5). High/sensitive risk requires explicit approval. Empty waits do not load the plan or call a host/model; results for task IDs outside this plan still wake the member but do not mutate the plan.
 When a plan dispatcher sends a TASK to a HostBridge, include that explicit dispatcher member in `host_bridge_allowed_senders`; ACP does not spoof another identity. A missing allowlist entry fails before host invocation and leaves the TASK unacknowledged for safe retry.
 Add every trusted result sender to the coordinator `host_bridge_allowed_senders` and accept `REPLY`/`INFO`. Direct results wake the bound coordinator task and are ACKed only after durable host completion; no automatic response is emitted for those actions. Product-owned plans may append new `pending` or explicitly blocked tasks between turns. Existing task contracts are immutable; a changed owner, dependency, risk, approval gate, or instruction fails closed. A newly appended dependency-ready task receives the normal deterministic emission id and is not dispatched twice after restart.
+## 12. Codes, secrets, approvals, modes, listeners
+
+- Pass join codes with `--code-env NAME`, `--code-file PATH` or `--code-stdin`, not `--code` (shell history/process list). Quotes/whitespace are never stripped: the client reports counts (codes are 8 chars, 0-9 A-F) and the Hub's rejection reason.
+- Output masks tokens/join codes (`abcd****`); `--show-secrets` reveals them. Configs hold full values: keep them out of git (a warning fires inside a work tree).
+- Before acting on an operator approval INFO (`kind: operator_approval`), run `verify-approval --approval-id ID`; exit 1 means NOT approved.
+- `modes` lists wakeable modes. Idle wake-up needs `runner` (`codex_local`/`claude_local`), `host-bridge` (`codex_cli`, `claude_code_cli`, `codex_app_server[_stdio]`, `opencode_server`, `kilo_serve`) or a `listen --to-file PATH` / `--exec CMD` daemon (no shell; JSON on stdin, `ACP_MESSAGE_*` env). Terminals only receive during `listen --stop-after-message`; `claude_desktop` cannot be woken.
+- Idempotent calls retry on 502/503/504/524 with backoff (`ACP_HTTP_RETRIES`, `--http-retries`).

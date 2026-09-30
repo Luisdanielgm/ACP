@@ -5,10 +5,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 from contextlib import nullcontext
+import getpass
+import importlib
 import json
 import mimetypes
 import os
+import random
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -28,7 +32,10 @@ ACP_ROOT = Path(__file__).resolve().parent
 if str(ACP_ROOT) not in sys.path:
     sys.path.insert(0, str(ACP_ROOT))
 
-import websockets
+try:
+    import websockets
+except ImportError:  # reported early and clearly by main() for join/listen commands
+    websockets = None  # type: ignore[assignment]
 
 from coordinator_plan import CoordinatorPlan, CoordinatorPlanCollector, PlanError
 from reply_collector import CollectorDeliveryError, ReplyCollector, next_wait_action
@@ -60,6 +67,13 @@ from host_bridge import (
     _validated_envelope,
 )
 
+REQUIRED_DEPENDENCIES = (("websockets", "websockets>=15,<16"),)
+DEPENDENCY_GATED_COMMANDS = frozenset(
+    {
+        "run", "join-session", "join", "managed-join", "listen", "wait", "wait-window", "coordinate",
+        "connect", "onboard", "attach-session", "runner", "chief", "host-bridge", "start", "managed-start",
+    }
+)
 DEFAULT_BACKOFF = (0.5, 1.0, 2.0, 5.0)
 DEFAULT_POLL_MS = 800
 DEFAULT_LISTEN_TIMEOUT_SECONDS = 300.0
@@ -80,8 +94,34 @@ HOST_BRIDGE_SUPPORTED_ADAPTERS = (
     "codex_cli",
     "claude_code_cli",
 )
-TRANSIENT_HTTP_STATUS_CODES = {502, 503, 504}
+TRANSIENT_HTTP_STATUS_CODES = {502, 503, 504, 524}
 TRANSIENT_RETRY_BACKOFF_SECONDS = (0.5, 1.0, 2.0)
+RETRY_ATTEMPTS_ENV = "ACP_HTTP_RETRIES"
+RETRY_BASE_DELAY_ENV = "ACP_HTTP_RETRY_BASE_SECONDS"
+RETRY_MAX_ATTEMPTS_LIMIT = 10
+RETRY_MAX_DELAY_SECONDS = 30.0
+RUNNER_PROVIDERS = ("codex_local", "claude_local")
+# name -> (wakes an idle agent, suits which agent kind)
+AGENT_MODE_TABLE: tuple[dict[str, Any], ...] = (
+    {"mode": "listen --stop-after-message", "kind": "interactive terminal (LLM turn loop)", "wakes_idle_agent": False,
+     "notes": "The agent itself must loop; it only receives while its turn is running."},
+    {"mode": "wait-window", "kind": "interactive terminal (LLM turn loop)", "wakes_idle_agent": False,
+     "notes": "Foreground hold of up to 20 minutes; nothing arrives after the turn ends."},
+    {"mode": "listen --to-file / --exec", "kind": "any agent with a watcher or hook (daemon)", "wakes_idle_agent": True,
+     "notes": "A background listener appends JSON lines or runs your command per message."},
+    {"mode": "runner (codex_local, claude_local)", "kind": "headless CLI", "wakes_idle_agent": True,
+     "notes": "Spawns a new local provider process per TASK; does not resume a visible session."},
+    {"mode": "host-bridge codex_cli", "kind": "headless CLI (existing Codex session)", "wakes_idle_agent": True,
+     "notes": "Resumes a persisted session with codex exec resume; cannot push into a running terminal."},
+    {"mode": "host-bridge claude_code_cli", "kind": "headless CLI (existing Claude Code session)", "wakes_idle_agent": True,
+     "notes": "Resumes a persisted session with claude -p --resume; cannot push into a running terminal."},
+    {"mode": "host-bridge codex_app_server / codex_app_server_stdio", "kind": "desktop app / app-server (Codex)", "wakes_idle_agent": True,
+     "notes": "Needs an explicit app-server endpoint (or stdio spawn) and an existing thread id."},
+    {"mode": "host-bridge opencode_server / kilo_serve", "kind": "desktop app / server (OpenCode, Kilo)", "wakes_idle_agent": True,
+     "notes": "Needs a running server and an existing session id."},
+    {"mode": "claude_desktop", "kind": "desktop app (Claude Desktop)", "wakes_idle_agent": False,
+     "notes": "UNSUPPORTED: no official interface to resume a conversation; use listen --stop-after-message or a headless mode."},
+)
 TRANSIENT_RETRY_SAFE_POST_ROUTES = {
     "/sessions/wait",
     "/sessions/status",
@@ -323,12 +363,40 @@ def _bundle_version_string() -> str:
     return "unknown"
 
 
+def _add_join_code_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--code",
+        default=None,
+        help="Join code from the chief agent ('-' reads stdin). Prefer --code-env/--code-file/--code-stdin: --code leaks into shell history and the process list",
+    )
+    parser.add_argument("--code-env", default=None, metavar="NAME", help="Read the join code from environment variable NAME")
+    parser.add_argument("--code-file", default=None, metavar="PATH", help="Read the join code from a file ('-' for stdin)")
+    parser.add_argument("--code-stdin", action="store_true", help="Read the join code from stdin (hidden prompt on a terminal)")
+
+
+def _add_show_secrets_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--show-secrets",
+        action="store_true",
+        help="Print member tokens, join codes and #member_token= URLs in full (masked by default)",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="ACP local bridge")
     parser.add_argument(
         "--version",
         action="version",
         version=f"acp {_bundle_version_string()}",
+    )
+    parser.add_argument(
+        "--http-retries",
+        type=int,
+        default=None,
+        help=(
+            "Automatic retries (0-10) for idempotent Hub calls on HTTP 502/503/504/524 and connection errors, "
+            f"with exponential backoff and jitter. Default 3; env {RETRY_ATTEMPTS_ENV}. Place before the command."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -410,13 +478,15 @@ def build_parser() -> argparse.ArgumentParser:
     create_parser.add_argument("--project", default=None, help="Optional project label")
     create_parser.add_argument("--capabilities", default=None, help="Comma-separated capability tags to advertise for this member")
     create_parser.add_argument("--listen", action="store_true", help="Start persistent listen immediately after creating the session")
+    _add_show_secrets_argument(create_parser)
 
     join_parser = subparsers.add_parser("join-session", help="Join a coordination session using a join code")
     join_parser.add_argument("--config", default=None, help="JSON config path for the local agent")
     join_parser.add_argument("--agent", "--name", dest="agent", default=None, help="Agent name/config stem. If omitted, ACP auto-resolves a single config.")
     join_parser.add_argument("--hub-http", default=None, help="Override Hub HTTP base URL")
     join_parser.add_argument("--token", default=None, help="Optional ACP token")
-    join_parser.add_argument("--code", required=True, help="Join code from the chief agent")
+    _add_join_code_arguments(join_parser)
+    _add_show_secrets_argument(join_parser)
     join_parser.add_argument("--capabilities", default=None, help="Comma-separated capability tags to advertise for this member")
     join_parser.add_argument("--listen", action="store_true", help="Start persistent listen immediately after joining the session")
 
@@ -429,13 +499,18 @@ def build_parser() -> argparse.ArgumentParser:
     start_parser.add_argument("--project", default=None, help="Optional project label")
     start_parser.add_argument("--capabilities", default=None, help="Comma-separated capability tags to advertise for this member")
     start_parser.add_argument("--no-listen", action="store_true", help="Create the session but do not start listen immediately")
+    _add_show_secrets_argument(start_parser)
 
     quick_join_parser = subparsers.add_parser("join", help="Join a session and immediately enter listen mode")
     quick_join_parser.add_argument("--config", default=None, help="JSON config path for the local agent")
     quick_join_parser.add_argument("--agent", "--name", dest="agent", default=None, help="Agent name/config stem. If omitted, ACP auto-resolves a single config.")
     quick_join_parser.add_argument("--hub-http", default=None, help="Override Hub HTTP base URL")
     quick_join_parser.add_argument("--token", default=None, help="Optional ACP token")
-    quick_join_parser.add_argument("code", help="Join code from the chief agent")
+    quick_join_parser.add_argument("code", nargs="?", default=None, help="Join code from the chief agent (or use --code-env/--code-file/--code-stdin; '-' reads stdin)")
+    quick_join_parser.add_argument("--code-env", default=None, metavar="NAME", help="Read the join code from environment variable NAME")
+    quick_join_parser.add_argument("--code-file", default=None, metavar="PATH", help="Read the join code from a file ('-' for stdin)")
+    quick_join_parser.add_argument("--code-stdin", action="store_true", help="Read the join code from stdin")
+    _add_show_secrets_argument(quick_join_parser)
     quick_join_parser.add_argument("--capabilities", default=None, help="Comma-separated capability tags to advertise for this member")
     quick_join_parser.add_argument("--no-listen", action="store_true", help="Join the session but do not start listen immediately")
 
@@ -450,6 +525,7 @@ def build_parser() -> argparse.ArgumentParser:
     managed_start_parser.add_argument("--project", default=None, help="Optional project label")
     managed_start_parser.add_argument("--capabilities", default=None, help="Comma-separated capability tags to advertise for this member")
     managed_start_parser.add_argument("--no-listen", action="store_true", help="Create the session but do not start listen immediately")
+    _add_show_secrets_argument(managed_start_parser)
 
     managed_join_parser = subparsers.add_parser(
         "managed-join",
@@ -462,6 +538,7 @@ def build_parser() -> argparse.ArgumentParser:
     managed_join_parser.add_argument("--workspace", default=None, help="Optional managed workspace slug. Current ACP managed hubs can infer it from the token.")
     managed_join_parser.add_argument("--agent-token", default=None, help="Managed workspace agent token. Defaults to managed_agent_token in the selected config.")
     managed_join_parser.add_argument("--session-id", required=True, help="Workspace session id to join")
+    _add_show_secrets_argument(managed_join_parser)
     managed_join_parser.add_argument("--capabilities", default=None, help="Comma-separated capability tags to advertise for this member")
     managed_join_parser.add_argument("--no-listen", action="store_true", help="Deprecated no-op: managed-join already exits after attach by default")
     managed_join_parser.add_argument(
@@ -526,6 +603,20 @@ def build_parser() -> argparse.ArgumentParser:
     room_files_parser.add_argument("--output", default=None, help="Local output path for download")
     room_files_parser.add_argument("--purpose", default="artifact", choices=("artifact", "instruction"))
 
+    verify_parser = subparsers.add_parser(
+        "verify-approval",
+        help="Verify a human operator approval message against the Hub (exit 0 valid, 1 invalid/unknown)",
+    )
+    verify_parser.add_argument("--config", default=None, help="JSON config path for the local agent")
+    verify_parser.add_argument("--agent", "--name", dest="agent", default=None, help="Agent name/config stem")
+    verify_parser.add_argument("--hub-http", default=None, help="Override managed Hub HTTP base URL")
+    verify_parser.add_argument("--workspace", default=None, help="Optional managed workspace slug")
+    verify_parser.add_argument("--agent-token", default=None, help="Managed workspace agent token (default: managed_agent_token in config)")
+    verify_parser.add_argument("--session-id", default=None, help="Managed room session id (default: session_id in config)")
+    verify_parser.add_argument("--approval-id", required=True, help="approval_id from the operator_approval INFO payload")
+
+    subparsers.add_parser("modes", help="List delivery modes and adapters: which agent kind each suits and which can be woken up")
+
     onboard_parser = subparsers.add_parser(
         "onboard",
         help="Find a managed workspace session for this project, join it, announce readiness, and prepare runner mode",
@@ -541,7 +632,7 @@ def build_parser() -> argparse.ArgumentParser:
     onboard_parser.add_argument("--project", default=None, help="Project label used to match an active managed session. Defaults to .acp/project-id, git root name, or workspace folder name.")
     onboard_parser.add_argument("--role", default="worker", choices=("worker", "chief"), help="Onboarding role. Worker is implemented first; chief is reserved for the autonomous-chief flow.")
     onboard_parser.add_argument("--capabilities", default=None, help="Comma-separated capability tags to advertise, e.g. backend,python")
-    onboard_parser.add_argument("--provider", default=None, choices=("codex_local", "claude_local"), help="Local provider to prepare for runner mode")
+    onboard_parser.add_argument("--provider", default=None, choices=RUNNER_PROVIDERS, help="Local provider to prepare for runner mode")
     onboard_parser.add_argument("--wait-for-session", type=float, default=120.0, help="Seconds to poll managed sessions until a matching project session appears")
     onboard_parser.add_argument("--prefer-latest", action="store_true", help="If several matching sessions exist, pick the latest by created_at instead of failing")
     onboard_parser.add_argument("--to", default=None, help="Chief/member to notify after joining. Defaults to the managed session owner.")
@@ -550,6 +641,7 @@ def build_parser() -> argparse.ArgumentParser:
     onboard_parser.add_argument("--wait-timeout-seconds", type=float, default=120.0, help="Runner per-request wait timeout (max 300)")
     onboard_parser.add_argument("--task-timeout-seconds", type=float, default=1800.0, help="Runner provider execution timeout")
     onboard_parser.add_argument("--retry-delay-seconds", type=float, default=2.0, help="Runner delay before retrying transient errors")
+    _add_show_secrets_argument(onboard_parser)
 
     connect_parser = subparsers.add_parser(
         "connect",
@@ -566,7 +658,7 @@ def build_parser() -> argparse.ArgumentParser:
     connect_parser.add_argument("--project", default=None, help="Project label used to match an active managed session")
     connect_parser.add_argument("--role", default="auto", choices=("auto", "worker", "chief"), help="Connect as worker, chief, or infer from existing config")
     connect_parser.add_argument("--capabilities", default=None, help="Comma-separated capability tags to advertise")
-    connect_parser.add_argument("--provider", default=None, choices=("codex_local", "claude_local"), help="Local provider for worker runner mode")
+    connect_parser.add_argument("--provider", default=None, choices=RUNNER_PROVIDERS, help="Local provider for worker runner mode")
     connect_parser.add_argument("--wait-for-session", type=float, default=120.0, help="Seconds to poll managed sessions until a matching project session appears")
     connect_parser.add_argument("--prefer-latest", action="store_true", help="If several matching sessions exist, pick the latest by created_at instead of failing")
     connect_parser.add_argument("--skip-ready", action="store_true", help="Join and prepare runner mode without sending the readiness INFO message")
@@ -576,6 +668,7 @@ def build_parser() -> argparse.ArgumentParser:
     connect_parser.add_argument("--wait-timeout-seconds", type=float, default=120.0, help="Runner/chief per-request wait timeout")
     connect_parser.add_argument("--task-timeout-seconds", type=float, default=1800.0, help="Runner provider execution timeout")
     connect_parser.add_argument("--retry-delay-seconds", type=float, default=2.0, help="Runner delay before retrying transient errors")
+    _add_show_secrets_argument(connect_parser)
 
     coordinate_parser = subparsers.add_parser(
         "coordinate",
@@ -592,12 +685,13 @@ def build_parser() -> argparse.ArgumentParser:
     coordinate_parser.add_argument("--project", default=None, help="Project label used to match an active managed session")
     coordinate_parser.add_argument("--role", default="worker", choices=("auto", "worker", "chief"), help="Coordinate as worker, chief, or infer from existing config")
     coordinate_parser.add_argument("--capabilities", default=None, help="Comma-separated capability tags to advertise")
-    coordinate_parser.add_argument("--provider", default=None, choices=("codex_local", "claude_local"), help="Local provider to persist for runner mode")
+    coordinate_parser.add_argument("--provider", default=None, choices=RUNNER_PROVIDERS, help="Local provider to persist for runner mode")
     coordinate_parser.add_argument("--wait-for-session", type=float, default=120.0, help="Seconds to poll managed sessions until a matching project session appears")
     coordinate_parser.add_argument("--prefer-latest", action="store_true", help="If several matching sessions exist, pick the latest by created_at instead of failing")
     coordinate_parser.add_argument("--skip-ready", action="store_true", help="Join and prepare runner mode without sending the readiness INFO message")
     coordinate_parser.add_argument("--listen-timeout-seconds", type=float, default=DEFAULT_LISTEN_TIMEOUT_SECONDS, help="Seconds to wait for one incoming coordination message")
     coordinate_parser.add_argument("--retry-delay-seconds", type=float, default=2.0, help="Delay before retrying transient wait errors")
+    _add_show_secrets_argument(coordinate_parser)
 
     invite_parser = subparsers.add_parser("invite", help="Generate a role-aware ACP invitation prompt")
     invite_parser.add_argument("--config", default=None, help="JSON config path for the inviting/local agent")
@@ -627,6 +721,7 @@ def build_parser() -> argparse.ArgumentParser:
     attach_session_parser.add_argument("--join-code", default=None, help="Optional join code to persist for convenience")
     attach_session_parser.add_argument("--member-role", default=None, help="Optional member role to persist")
     attach_session_parser.add_argument("--no-listen", action="store_true", help="Persist the binding but do not start listen immediately")
+    _add_show_secrets_argument(attach_session_parser)
 
     quickstart_parser = subparsers.add_parser(
         "quickstart",
@@ -747,6 +842,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     listen_parser.add_argument("--manifest-url", default=None, help="Override ACP_AGENT release manifest URL")
     listen_parser.add_argument(
+        "--to-file",
+        default=None,
+        metavar="PATH",
+        help="Append each delivered message to PATH as one JSON line (JSONL) and keep listening",
+    )
+    listen_parser.add_argument(
+        "--exec",
+        dest="exec_command",
+        default=None,
+        metavar="CMD",
+        help=(
+            "Run CMD once per delivered message with the message JSON on stdin and ACP_MESSAGE_* env vars. "
+            "CMD is split into argv (shlex) and run WITHOUT a shell; message content is never interpolated"
+        ),
+    )
+    listen_parser.add_argument("--exec-timeout-seconds", type=float, default=300.0, help="Kill the --exec command after this many seconds")
+    listen_parser.add_argument(
         "--allow-tracked-auto-update",
         action="store_true",
         help="Allow auto-when-idle to update even when ACP_AGENT files are tracked by git",
@@ -786,6 +898,7 @@ def build_parser() -> argparse.ArgumentParser:
     info_parser.add_argument("--agent", default=None, help="Agent name/config stem. If omitted, ACP auto-resolves a single config.")
     info_parser.add_argument("--manifest-url", default=None, help="Override ACP_AGENT release manifest URL for update hints")
     info_parser.add_argument("--skip-update-check", action="store_true", help="Do not include release-channel update hints")
+    _add_show_secrets_argument(info_parser)
 
     update_check_parser = subparsers.add_parser("update-check", help="Check the ACP_AGENT release channel")
     update_check_parser.add_argument("--config", default=None, help="JSON config path to resolve hub_http from")
@@ -960,7 +1073,7 @@ def build_parser() -> argparse.ArgumentParser:
     runner_start_parser.add_argument("--hub-http", default=None, help="Override Hub HTTP base URL")
     runner_start_parser.add_argument("--hub-ws", default=None, help="Optional Hub websocket URL to persist in generated config")
     runner_start_parser.add_argument("--token", default=None, help="Optional ACP token")
-    runner_start_parser.add_argument("--provider", default=None, choices=("codex_local", "claude_local"), help="Local provider to spawn")
+    runner_start_parser.add_argument("--provider", default=None, choices=RUNNER_PROVIDERS, help="Local provider to spawn")
     runner_start_parser.add_argument("--workspace", default=None, help="Workspace path for the provider process")
     runner_start_parser.add_argument("--allow-sender", dest="runner_allowed_senders", action="append", default=None, help="Trusted TASK sender; repeat for multiple senders")
     runner_start_parser.add_argument("--reply-to", dest="runner_reply_to", default=None, help="Locally pinned recipient for runner replies")
@@ -983,7 +1096,7 @@ def build_parser() -> argparse.ArgumentParser:
     runner_once_parser.add_argument("--hub-http", default=None, help="Override Hub HTTP base URL")
     runner_once_parser.add_argument("--hub-ws", default=None, help="Optional Hub websocket URL to persist in generated config")
     runner_once_parser.add_argument("--token", default=None, help="Optional ACP token")
-    runner_once_parser.add_argument("--provider", default=None, choices=("codex_local", "claude_local"), help="Local provider to spawn")
+    runner_once_parser.add_argument("--provider", default=None, choices=RUNNER_PROVIDERS, help="Local provider to spawn")
     runner_once_parser.add_argument("--workspace", default=None, help="Workspace path for the provider process")
     runner_once_parser.add_argument("--allow-sender", dest="runner_allowed_senders", action="append", default=None, help="Trusted TASK sender; repeat for multiple senders")
     runner_once_parser.add_argument("--reply-to", dest="runner_reply_to", default=None, help="Locally pinned recipient for runner replies")
@@ -1009,7 +1122,7 @@ def build_parser() -> argparse.ArgumentParser:
     chief_start_parser.add_argument("--token", default=None, help="Optional ACP token")
     chief_start_parser.add_argument("--backlog-dir", default=None, help="File backlog directory. Defaults to coord/backlog relative to config/project.")
     chief_start_parser.add_argument("--workspace", default=None, help="Default workspace path to pass to runner workers")
-    chief_start_parser.add_argument("--provider", default=None, choices=("codex_local", "claude_local"), help="Default provider to pass to runner workers")
+    chief_start_parser.add_argument("--provider", default=None, choices=RUNNER_PROVIDERS, help="Default provider to pass to runner workers")
     chief_start_parser.add_argument("--wait-timeout-seconds", type=float, default=30.0, help="Per-loop wait timeout before a dispatch tick")
     chief_start_parser.add_argument("--tick-seconds", type=float, default=2.0, help="Sleep between dispatch ticks")
     chief_start_parser.add_argument("--assignment-ttl-seconds", type=float, default=None, help="Requeue assigned tasks that have not produced a valid REPLY after this many seconds; <=0 disables")
@@ -1023,7 +1136,7 @@ def build_parser() -> argparse.ArgumentParser:
     chief_once_parser.add_argument("--token", default=None, help="Optional ACP token")
     chief_once_parser.add_argument("--backlog-dir", default=None, help="File backlog directory. Defaults to coord/backlog relative to config/project.")
     chief_once_parser.add_argument("--workspace", default=None, help="Default workspace path to pass to runner workers")
-    chief_once_parser.add_argument("--provider", default=None, choices=("codex_local", "claude_local"), help="Default provider to pass to runner workers")
+    chief_once_parser.add_argument("--provider", default=None, choices=RUNNER_PROVIDERS, help="Default provider to pass to runner workers")
     chief_once_parser.add_argument("--wait-timeout-seconds", type=float, default=0.0, help="Optional one-shot wait timeout before dispatch")
     chief_once_parser.add_argument("--assignment-ttl-seconds", type=float, default=None, help="Requeue assigned tasks that have not produced a valid REPLY after this many seconds; <=0 disables")
     chief_once_parser.add_argument("--tick-seconds", type=float, default=0.0, help=argparse.SUPPRESS)
@@ -1046,8 +1159,80 @@ def resolve_config_file(path_value: str | None) -> Path:
     return Path(path_value).expanduser().resolve()
 
 
+AGENTS_DIR_ENV = "ACP_AGENTS_DIR"
+_GIT_WORKTREE_WARNED: set[str] = set()
+
+
+def _find_git_worktree_root(path: Path) -> Path | None:
+    """Return the enclosing git work tree root for ``path`` (no git subprocess)."""
+    try:
+        resolved = path.expanduser().resolve()
+    except OSError:
+        return None
+    for candidate in (resolved, *resolved.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _user_agents_dir() -> Path:
+    """Per-user config directory that is never inside a project checkout."""
+    if os.name == "nt" and os.environ.get("APPDATA"):
+        base = Path(os.environ["APPDATA"])
+    elif os.environ.get("XDG_CONFIG_HOME"):
+        base = Path(os.environ["XDG_CONFIG_HOME"])
+    else:
+        base = Path.home() / ".config"
+    return (base / "acp" / "agents").resolve()
+
+
 def _default_agents_dir() -> Path:
-    return (ACP_ROOT / "agents").resolve()
+    """Where agent configs (which hold tokens) live when no --config is given.
+
+    Order: ``ACP_AGENTS_DIR``; an already-existing ``ACP_AGENT/agents`` (backward
+    compatible); a per-user directory when the bundle sits inside a git work
+    tree, so new tokens are not created next to versioned files; otherwise
+    ``ACP_AGENT/agents``.
+    """
+    override = os.environ.get(AGENTS_DIR_ENV)
+    if override and override.strip():
+        return Path(override.strip()).expanduser().resolve()
+    bundled = (ACP_ROOT / "agents").resolve()
+    if bundled.exists() or _find_git_worktree_root(bundled) is None:
+        return bundled
+    return _user_agents_dir()
+
+
+def warn_if_config_in_git_worktree(config_path: Path) -> bool:
+    """Warn on stderr (once per path) when a token-bearing config could be committed."""
+    try:
+        resolved = config_path.expanduser().resolve()
+    except OSError:
+        return False
+    root = _find_git_worktree_root(resolved.parent)
+    if root is None or str(resolved) in _GIT_WORKTREE_WARNED:
+        return False
+    try:
+        ignored = subprocess.run(
+            ["git", "check-ignore", "-q", "--", str(resolved)],
+            cwd=str(root),
+            capture_output=True,
+            check=False,
+            timeout=5,
+        ).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        ignored = False
+    if ignored:
+        return False
+    _GIT_WORKTREE_WARNED.add(str(resolved))
+    print(
+        f"WARNING: ACP config {resolved} is inside the git work tree {root} and is not git-ignored. "
+        "Agent configs contain member/agent tokens; do not commit them. Add the file to .gitignore or keep "
+        f"configs outside the repository (default user dir: {_user_agents_dir()}; override with {AGENTS_DIR_ENV}).",
+        file=sys.stderr,
+        flush=True,
+    )
+    return True
 
 
 def list_agent_config_files() -> list[Path]:
@@ -1057,7 +1242,7 @@ def list_agent_config_files() -> list[Path]:
     return sorted(path for path in agents_dir.iterdir() if path.is_file() and path.suffix.lower() == ".json")
 
 
-def resolve_cli_config_path(
+def _resolve_cli_config_path_unchecked(
     *,
     config_path: str | None,
     agent_name: str | None = None,
@@ -1073,7 +1258,7 @@ def resolve_cli_config_path(
         if candidate.is_file() or allow_missing_agent_config:
             return candidate.resolve()
         raise ValueError(
-            f"{command_name} could not find ACP_AGENT/agents/{normalized_agent}.json. "
+            f"{command_name} could not find {candidate}. "
             "Run 'python ACP_AGENT/acp.py init --agent <name>' first or pass --config explicitly."
         )
 
@@ -1082,7 +1267,7 @@ def resolve_cli_config_path(
         return config_files[0].resolve()
     if not config_files:
         raise ValueError(
-            f"{command_name} needs an agent config, but ACP_AGENT/agents is empty. "
+            f"{command_name} needs an agent config, but {_default_agents_dir()} is empty. "
             "Run 'python ACP_AGENT/acp.py init --agent <name>' first."
         )
     available = ", ".join(path.stem for path in config_files)
@@ -1090,6 +1275,23 @@ def resolve_cli_config_path(
         f"{command_name} found multiple agent configs. Pass --agent <name> or --config <path>. "
         f"Available: {available}"
     )
+
+
+def resolve_cli_config_path(
+    *,
+    config_path: str | None,
+    agent_name: str | None = None,
+    command_name: str,
+    allow_missing_agent_config: bool = False,
+) -> Path:
+    resolved = _resolve_cli_config_path_unchecked(
+        config_path=config_path,
+        agent_name=agent_name,
+        command_name=command_name,
+        allow_missing_agent_config=allow_missing_agent_config,
+    )
+    warn_if_config_in_git_worktree(resolved)
+    return resolved
 
 
 def get_config_value(config: dict[str, Any], *keys: str) -> Any:
@@ -1501,7 +1703,11 @@ def build_shareable_session_access(
         shareable["join_code"] = join_code
         shareable["join_command_example"] = (
             "python ACP_AGENT/acp.py join-session "
-            f"--config ACP_AGENT/agents/<agent>.json --code {join_code}"
+            "--config ACP_AGENT/agents/<agent>.json --code-env ACP_JOIN_CODE"
+        )
+        shareable["join_code_hint"] = (
+            "Export the join code as ACP_JOIN_CODE (or use --code-file/--code-stdin) so it stays out of shell "
+            "history and the process list."
         )
     if member_role:
         shareable["member_role"] = member_role
@@ -1752,6 +1958,40 @@ def _request_bytes_with_deadline(
     return value
 
 
+def _env_number(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw.strip())
+    except ValueError:
+        return default
+
+
+def default_retry_backoff() -> tuple[float, ...]:
+    """Exponential backoff schedule (seconds) for idempotent Hub calls.
+
+    Configurable with ``ACP_HTTP_RETRIES`` (number of retries after the first
+    attempt, 0-10, default 3) and ``ACP_HTTP_RETRY_BASE_SECONDS`` (default
+    0.5). Each delay doubles and is capped; jitter is applied when sleeping.
+    """
+    retries = int(max(0, min(RETRY_MAX_ATTEMPTS_LIMIT, _env_number(RETRY_ATTEMPTS_ENV, float(len(TRANSIENT_RETRY_BACKOFF_SECONDS))))))
+    base = max(0.0, _env_number(RETRY_BASE_DELAY_ENV, TRANSIENT_RETRY_BACKOFF_SECONDS[0]))
+    return tuple(min(base * (2**index), RETRY_MAX_DELAY_SECONDS) for index in range(retries))
+
+
+def _jittered_delay(delay: float) -> float:
+    """Equal jitter: half fixed, half random, so concurrent agents de-synchronize."""
+    delay = max(float(delay), 0.0)
+    return delay / 2.0 + random.uniform(0.0, delay / 2.0)
+
+
+def _is_transient_connection_error(exc: BaseException) -> bool:
+    if isinstance(exc, urllib.error.HTTPError):
+        return False
+    return isinstance(exc, (urllib.error.URLError, ConnectionError, TimeoutError))
+
+
 def request_json(
     *,
     method: str,
@@ -1761,12 +2001,29 @@ def request_json(
     timeout_seconds: float = 310.0,
     deadline_monotonic: float | None = None,
     retry_transient: bool = False,
-    retry_backoff_seconds: tuple[float, ...] = TRANSIENT_RETRY_BACKOFF_SECONDS,
+    retry_backoff_seconds: tuple[float, ...] | None = None,
 ) -> dict[str, Any]:
+    """Perform one JSON HTTP call.
+
+    ``retry_transient`` must only be set for idempotent calls (reads, or writes
+    carrying an idempotency key). Retries cover HTTP 502/503/504/524 and
+    connection errors, with exponential backoff and jitter.
+    """
     body = None if payload is None else json.dumps(payload, ensure_ascii=True).encode("utf-8")
+    if retry_backoff_seconds is None:
+        retry_backoff_seconds = default_retry_backoff()
     attempts = 1 + (len(retry_backoff_seconds) if retry_transient else 0)
     last_transient_body: str | None = None
     last_transient_code: int | None = None
+    last_connection_error: BaseException | None = None
+
+    def sleep_before_retry(attempt_index: int) -> bool:
+        delay = _jittered_delay(float(retry_backoff_seconds[attempt_index]))
+        if deadline_monotonic is not None and time.monotonic() + delay >= deadline_monotonic:
+            return False
+        time.sleep(delay)
+        return True
+
     for attempt_index in range(attempts):
         request_headers = _headers_with_user_agent(headers or {"Content-Type": "application/json"})
         request = urllib.request.Request(
@@ -1795,26 +2052,43 @@ def request_json(
             return json.loads(raw_response.decode("utf-8"))
         except urllib.error.HTTPError as exc:
             response_body = exc.read().decode("utf-8", errors="replace")
-            if (
-                retry_transient
-                and exc.code in TRANSIENT_HTTP_STATUS_CODES
-                and attempt_index < attempts - 1
-            ):
+            if retry_transient and exc.code in TRANSIENT_HTTP_STATUS_CODES:
                 last_transient_code = exc.code
                 last_transient_body = response_body
-                time.sleep(max(float(retry_backoff_seconds[attempt_index]), 0.0))
-                continue
+                last_connection_error = None
+                if attempt_index < attempts - 1 and sleep_before_retry(attempt_index):
+                    continue
+                raise ValueError(
+                    f"hub HTTP {exc.code}: {response_body}\n"
+                    f"Action: transient Hub/gateway failure persisted after {attempt_index + 1} attempt(s). "
+                    f"Retry later or raise {RETRY_ATTEMPTS_ENV}."
+                ) from exc
             if exc.code == 409 and ("WAIT_ALREADY_ACTIVE" in response_body or "active wait" in response_body):
                 raise ValueError(
                     f"hub HTTP 409: {response_body}\n"
                     f"Action: do not run concurrent waits. Stop the existing managed-join/listen/wait process, then use: {TURN_BASED_LISTEN_COMMAND}"
                 ) from exc
-            if retry_transient and exc.code in TRANSIENT_HTTP_STATUS_CODES:
+            if exc.code in TRANSIENT_HTTP_STATUS_CODES:
                 raise ValueError(
                     f"hub HTTP {exc.code}: {response_body}\n"
-                    f"Action: transient Hub/gateway failure persisted after {attempts} attempts."
+                    "Action: this call is not idempotent (it carries no idempotency key), so it was NOT retried "
+                    "automatically. Check whether the request took effect (session-info) before repeating it."
                 ) from exc
             raise ValueError(f"hub HTTP {exc.code}: {response_body}") from exc
+        except (urllib.error.URLError, ConnectionError, TimeoutError) as exc:
+            if not retry_transient:
+                raise
+            last_connection_error = exc
+            last_transient_code = None
+            if attempt_index < attempts - 1 and sleep_before_retry(attempt_index):
+                continue
+            raise ValueError(
+                f"hub connection failed ({type(exc).__name__}: {exc}).\n"
+                f"Action: could not reach the Hub after {attempt_index + 1} attempt(s); check the network and hub_http, "
+                f"or raise {RETRY_ATTEMPTS_ENV}."
+            ) from exc
+    if last_connection_error is not None:
+        raise ValueError(f"hub connection failed ({last_connection_error}).")
     raise ValueError(
         f"hub HTTP {last_transient_code}: {last_transient_body}\n"
         f"Action: transient Hub/gateway failure persisted after {attempts} attempts."
@@ -1913,6 +2187,21 @@ def managed_command_hub_http_from_args(args: argparse.Namespace, *, command_name
         ) from exc
 
 
+def _post_is_retry_safe(route: str, payload: dict[str, Any] | None) -> bool:
+    """Only idempotent POSTs are retried automatically.
+
+    Wait/status/heartbeat/cancel/leave are naturally idempotent. A send is
+    idempotent only when it carries a client-supplied ``id`` (the Hub dedups
+    per session, recipient and id), so a retried send never double-delivers.
+    """
+    if route in TRANSIENT_RETRY_SAFE_POST_ROUTES:
+        return True
+    if route == "/sessions/send" and isinstance(payload, dict):
+        message_id = payload.get("id")
+        return isinstance(message_id, str) and bool(message_id.strip())
+    return False
+
+
 def post_json(
     *,
     hub_http: str,
@@ -1929,7 +2218,7 @@ def post_json(
         headers=_http_headers(token=token),
         timeout_seconds=timeout_seconds,
         deadline_monotonic=deadline_monotonic,
-        retry_transient=route in TRANSIENT_RETRY_SAFE_POST_ROUTES,
+        retry_transient=_post_is_retry_safe(route, payload),
     )
 
 
@@ -2224,6 +2513,9 @@ def build_session_send_payload(args: argparse.Namespace, settings: HubAgentSetti
         "to": args.to,
         "action": args.action,
         "payload": resolve_structured_send_payload(args),
+        # Idempotency key: the Hub dedups a retried send with the same id, which
+        # is what makes automatic retry of this non-idempotent call safe.
+        "id": str(uuid4()),
     }
     if args.thread_id:
         payload["thread_id"] = args.thread_id
@@ -2311,7 +2603,7 @@ def create_session_from_args(args: argparse.Namespace) -> dict[str, Any]:
 
 def create_session_and_optionally_listen(args: argparse.Namespace, *, listen_after: bool) -> dict[str, Any]:
     payload = create_session_from_args(args)
-    emit_json_line(payload)
+    emit_json_line(present_output(args, payload, mask_join_code=False))
     config_path = resolve_cli_config_path(
         config_path=getattr(args, "config", None),
         agent_name=getattr(args, "agent", None),
@@ -2325,7 +2617,287 @@ def create_session_and_optionally_listen(args: argparse.Namespace, *, listen_aft
     return payload
 
 
+JOIN_CODE_LENGTH = 8
+JOIN_CODE_ALPHABET = frozenset("0123456789abcdefABCDEF")
+_QUOTE_CHARACTERS = "\"'`\u2018\u2019\u201c\u201d"
+JOIN_CODE_SOURCE_FLAGS = "--code, --code-env, --code-file, --code-stdin"
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" + ("" if count == 1 else "s")
+
+
+def validate_join_code_format(raw_code: str) -> str:
+    """Return the code when well formed; otherwise explain exactly what is wrong.
+
+    The offending value is never echoed (it may be a credential); only counts
+    are reported. Quotes and whitespace are never silently stripped.
+    """
+    problems: list[str] = []
+    stripped = raw_code.strip()
+    whitespace_outer = len(raw_code) - len(stripped)
+    if whitespace_outer:
+        problems.append(f"{_plural(whitespace_outer, 'leading/trailing whitespace character')} (remove them)")
+    lead_quotes = len(stripped) - len(stripped.lstrip(_QUOTE_CHARACTERS))
+    trail_quotes = len(stripped) - len(stripped.rstrip(_QUOTE_CHARACTERS))
+    if lead_quotes or trail_quotes:
+        problems.append(
+            f"{_plural(lead_quotes, 'leading quote character')} and {_plural(trail_quotes, 'trailing quote character')} "
+            "(the shell or a chat client wrapped the code in quotes; pass the bare code)"
+        )
+    core = stripped.strip(_QUOTE_CHARACTERS).strip()
+    inner_whitespace = sum(1 for char in core if char.isspace())
+    if inner_whitespace:
+        problems.append(f"{_plural(inner_whitespace, 'whitespace character')} inside the code")
+    bad_characters = sum(1 for char in core if not char.isspace() and char not in JOIN_CODE_ALPHABET)
+    if bad_characters:
+        problems.append(f"{_plural(bad_characters, 'character')} outside 0-9 and A-F")
+    compact_length = len("".join(core.split()))
+    if compact_length != JOIN_CODE_LENGTH:
+        problems.append(f"length is {compact_length} but join codes have {JOIN_CODE_LENGTH} characters")
+    if not raw_code:
+        problems = ["the code is empty"]
+    if problems:
+        raise ValueError(
+            "join code is malformed (value not shown): "
+            + "; ".join(problems)
+            + ".\nAction: copy the code again exactly as issued, or pass it without shell quoting via "
+            "--code-env NAME, --code-file PATH, or --code-stdin."
+        )
+    return raw_code
+
+
+def _read_join_code_stdin() -> str:
+    if sys.stdin is not None and sys.stdin.isatty():
+        return getpass.getpass("Join code (input hidden): ")
+    return sys.stdin.read() if sys.stdin is not None else ""
+
+
+def resolve_join_code_from_args(args: argparse.Namespace) -> str:
+    """Resolve the join code from exactly one source and validate its format.
+
+    Sources: ``--code VALUE`` (or ``--code -`` for stdin), ``--code-env NAME``,
+    ``--code-file PATH`` (``-`` for stdin), ``--code-stdin``. Values from env,
+    files and stdin are stripped of surrounding whitespace (a trailing newline
+    is normal there); a value given directly on the command line is checked as
+    typed. Quotes are never stripped silently.
+    """
+    direct = getattr(args, "code", None)
+    env_name = getattr(args, "code_env", None)
+    file_path = getattr(args, "code_file", None)
+    use_stdin = bool(getattr(args, "code_stdin", False))
+    if direct == "-":
+        direct = None
+        use_stdin = True
+    if file_path == "-":
+        file_path = None
+        use_stdin = True
+    provided = [
+        name
+        for name, present in (
+            ("--code", direct is not None),
+            ("--code-env", env_name is not None),
+            ("--code-file", file_path is not None),
+            ("--code-stdin", use_stdin),
+        )
+        if present
+    ]
+    if len(provided) > 1:
+        raise ValueError(f"choose only one join code source; got {', '.join(provided)}.")
+    if not provided:
+        raise ValueError(f"a join code is required: pass one of {JOIN_CODE_SOURCE_FLAGS}.")
+    if direct is not None:
+        code = str(direct)
+    elif env_name is not None:
+        name = str(env_name).strip()
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            raise ValueError("--code-env must be an environment variable name such as ACP_JOIN_CODE.")
+        value = os.environ.get(name)
+        if value is None or not value.strip():
+            raise ValueError(f"environment variable {name} is not set or is empty.")
+        code = value.strip()
+    elif file_path is not None:
+        path = Path(str(file_path)).expanduser()
+        try:
+            code = path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise ValueError(f"could not read --code-file {path}: {exc.strerror or exc}") from exc
+    else:
+        code = _read_join_code_stdin().strip()
+    return validate_join_code_format(code)
+
+
+def _hub_error_body(message: str) -> Any:
+    match = re.search(r"hub HTTP \d+: (.*)", message, re.S)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(1))
+    except ValueError:
+        return None
+
+
+def _find_key(value: Any, key: str) -> Any:
+    if isinstance(value, dict):
+        if key in value and isinstance(value[key], str):
+            return value[key]
+        for child in value.values():
+            found = _find_key(child, key)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = _find_key(child, key)
+            if found is not None:
+                return found
+    return None
+
+
+def _find_string_containing(value: Any, needle: str) -> str | None:
+    if isinstance(value, str):
+        return value if needle in value else None
+    if isinstance(value, dict):
+        for child in value.values():
+            found = _find_string_containing(child, needle)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = _find_string_containing(child, needle)
+            if found is not None:
+                return found
+    return None
+
+
+_JOIN_REJECTION_ACTIONS = {
+    "expired": "The session ended for inactivity. Ask the chief for a new invitation.",
+    "session_closed": "The session was closed. Ask the chief for a new invitation.",
+    "invalid_format": "Check the code for quotes, whitespace and length; pass it with --code-env, --code-file or --code-stdin.",
+    "unknown": "Check for typos or stray quotes, or ask the chief for a new invitation.",
+}
+
+
+def explain_join_rejection(exc: ValueError) -> ValueError | None:
+    """Turn a Hub join-code rejection into a specific message (None if unrelated)."""
+    message = str(exc)
+    if "join code is invalid" not in message.lower():
+        return None
+    body = _hub_error_body(message)
+    reason = _find_key(body, "reason") if body is not None else None
+    detail = _find_string_containing(body, "join code is invalid") if body is not None else None
+    if detail is None:
+        found = re.search(r"join code is invalid[^\"\\}]*", message, re.I)
+        detail = found.group(0) if found else "join code is invalid"
+    action = _JOIN_REJECTION_ACTIONS.get(reason or "", "Ask the chief for a new invitation if the code is correct.")
+    reason_text = reason or "unspecified"
+    return ValueError(f"join code rejected by the Hub (reason: {reason_text}): {detail}\nAction: {action}")
+
+
+def mask_secret(value: str) -> str:
+    """First four characters plus asterisks; never enough to reuse the secret."""
+    return f"{value[:4]}****" if len(value) > 4 else "****"
+
+
+_ALWAYS_SECRET_KEYS = frozenset({"member_token", "managed_agent_token", "agent_token", "token"})
+_MEMBER_TOKEN_QUERY = re.compile(r"(member_token=)([^&#\s\"'\\]+)")
+
+
+def _collect_secret_values(value: Any, keys: frozenset[str], found: set[str]) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key in keys and isinstance(child, str) and len(child) > 4:
+                found.add(child)
+            else:
+                _collect_secret_values(child, keys, found)
+    elif isinstance(value, list):
+        for child in value:
+            _collect_secret_values(child, keys, found)
+
+
+def _apply_secret_mask(value: Any, keys: frozenset[str], secrets: list[str]) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: (mask_secret(child) if key in keys and isinstance(child, str) and child else _apply_secret_mask(child, keys, secrets))
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [_apply_secret_mask(child, keys, secrets) for child in value]
+    if isinstance(value, str):
+        masked = value
+        for secret in secrets:
+            masked = masked.replace(secret, mask_secret(secret))
+        return _MEMBER_TOKEN_QUERY.sub(lambda match: match.group(1) + mask_secret(urllib.parse.unquote(match.group(2))), masked)
+    return value
+
+
+def mask_session_output(payload: dict[str, Any], *, mask_join_code: bool) -> dict[str, Any]:
+    """Mask tokens (and optionally the join code) in printed output.
+
+    Only the printed copy is masked; config files keep full values.
+    """
+    keys = _ALWAYS_SECRET_KEYS | ({"join_code"} if mask_join_code else frozenset())
+    secrets: set[str] = set()
+    _collect_secret_values(payload, keys, secrets)
+    # Longest first so a secret that contains another is replaced whole.
+    ordered = sorted(secrets, key=len, reverse=True)
+    masked = _apply_secret_mask(payload, keys, ordered)
+    if isinstance(masked, dict) and masked != payload:
+        masked["secrets_masked"] = True
+    return masked
+
+
+_MASK_NOTICE_PRINTED = False
+
+
+def present_output(args: argparse.Namespace, payload: dict[str, Any], *, mask_join_code: bool = True) -> dict[str, Any]:
+    """Mask secrets in printed output unless ``--show-secrets`` was passed."""
+    global _MASK_NOTICE_PRINTED
+    if bool(getattr(args, "show_secrets", False)):
+        return payload
+    masked = mask_session_output(payload, mask_join_code=mask_join_code)
+    if masked is not payload and masked.get("secrets_masked") and not _MASK_NOTICE_PRINTED:
+        _MASK_NOTICE_PRINTED = True
+        print(
+            "note: tokens"
+            + (" and join codes" if mask_join_code else "")
+            + " are masked in this output (config files keep the full values). Use --show-secrets to print them.",
+            file=sys.stderr,
+            flush=True,
+        )
+    return masked
+
+
+def present_coordinate_output(args: argparse.Namespace, payload: dict[str, Any]) -> dict[str, Any]:
+    # Only the session-binding section holds credentials; the received message
+    # is user content and must not be rewritten.
+    if bool(getattr(args, "show_secrets", False)) or not isinstance(payload.get("connect"), dict):
+        return payload
+    presented = dict(payload)
+    presented["connect"] = present_output(args, payload["connect"])
+    return presented
+
+
+def _missing_dependencies() -> list[str]:
+    missing: list[str] = []
+    for module_name, requirement in REQUIRED_DEPENDENCIES:
+        try:
+            importlib.import_module(module_name)
+        except ImportError:
+            missing.append(requirement)
+    return missing
+
+
+def dependency_error_message(missing: list[str]) -> str:
+    names = ", ".join(missing)
+    return (
+        f"ACP_AGENT cannot start: required Python package(s) missing: {names}.\n"
+        f"Install with: {sys.executable} -m pip install -r {ACP_ROOT / 'requirements.txt'}\n"
+        "Then re-run the command. `python ACP_AGENT/acp.py doctor` reports the full install status."
+    )
+
+
 def join_session_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    join_code = resolve_join_code_from_args(args)
     config_path = resolve_cli_config_path(
         config_path=getattr(args, "config", None),
         agent_name=getattr(args, "agent", None),
@@ -2338,17 +2910,23 @@ def join_session_from_args(args: argparse.Namespace) -> dict[str, Any]:
             command_name="join-session",
             config_reservation=config_reservation,
         )
-        response = post_json(
-            hub_http=settings.hub_http,
-            route="/sessions/join",
-            payload={
-                "agent_name": settings.agent_name,
-                "join_code": args.code,
-                **({"capabilities": optional_capabilities_from_args_config(args, settings.config)} if optional_capabilities_from_args_config(args, settings.config) is not None else {}),
-                "token": settings.token,
-            },
-            token=settings.token,
-        )
+        try:
+            response = post_json(
+                hub_http=settings.hub_http,
+                route="/sessions/join",
+                payload={
+                    "agent_name": settings.agent_name,
+                    "join_code": join_code,
+                    **({"capabilities": optional_capabilities_from_args_config(args, settings.config)} if optional_capabilities_from_args_config(args, settings.config) is not None else {}),
+                    "token": settings.token,
+                },
+                token=settings.token,
+            )
+        except ValueError as exc:
+            explained = explain_join_rejection(exc)
+            if explained is not None:
+                raise explained from None
+            raise
         operational_settings = _persist_session_binding(
             settings=settings,
             session_id=response["session_id"],
@@ -2371,7 +2949,7 @@ def join_session_from_args(args: argparse.Namespace) -> dict[str, Any]:
 
 def join_session_and_optionally_listen(args: argparse.Namespace, *, listen_after: bool) -> dict[str, Any]:
     payload = join_session_from_args(args)
-    emit_json_line(payload)
+    emit_json_line(present_output(args, payload))
     config_path = resolve_cli_config_path(
         config_path=getattr(args, "config", None),
         agent_name=getattr(args, "agent", None),
@@ -2630,7 +3208,7 @@ def managed_join_from_args(args: argparse.Namespace) -> dict[str, Any]:
 
 def managed_start_and_optionally_listen(args: argparse.Namespace, *, listen_after: bool) -> dict[str, Any]:
     payload = managed_start_from_args(args)
-    emit_json_line(payload)
+    emit_json_line(present_output(args, payload, mask_join_code=False))
     config_path = resolve_cli_config_path(
         config_path=getattr(args, "config", None),
         agent_name=getattr(args, "agent", None),
@@ -2646,7 +3224,7 @@ def managed_start_and_optionally_listen(args: argparse.Namespace, *, listen_afte
 
 def managed_join_and_optionally_listen(args: argparse.Namespace, *, listen_mode: str) -> dict[str, Any]:
     payload = managed_join_from_args(args)
-    emit_json_line(payload)
+    emit_json_line(present_output(args, payload))
     config_path = resolve_cli_config_path(
         config_path=getattr(args, "config", None),
         agent_name=getattr(args, "agent", None),
@@ -2703,6 +3281,64 @@ def room_reset_from_args(args: argparse.Namespace) -> dict[str, Any]:
     )
     response["managed_command"] = "room-reset"
     return response
+
+
+def verify_approval_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    """Ask the Hub whether an operator approval is genuine.
+
+    The dashboard posts an INFO message ``{"kind": "operator_approval",
+    "approval_id": ..., "text": ...}``. Anyone in the room can forge such a
+    message, so an agent must confirm the approval with the Hub, using its own
+    agent token, before acting on it.
+    """
+    hub_http, workspace_slug, agent_token, config = _managed_room_command_context(args, command_name="verify-approval")
+    approval_id = str(getattr(args, "approval_id", None) or "").strip()
+    if not approval_id:
+        raise ValueError("--approval-id is required for verify-approval.")
+    session_id = str(getattr(args, "session_id", None) or get_config_value(config, "session_id") or "").strip()
+    if not session_id:
+        raise ValueError("verify-approval needs a session id: pass --session-id or use a config bound to a session.")
+    suffix = (
+        f"/sessions/{urllib.parse.quote(session_id, safe='')}"
+        f"/operator-approvals/{urllib.parse.quote(approval_id, safe='')}"
+    )
+    route = _managed_agent_route(workspace_slug=workspace_slug, suffix=suffix)
+    try:
+        response = request_json(
+            method="GET",
+            url=f"{hub_http.rstrip('/')}{route}",
+            payload=None,
+            headers=_managed_agent_headers(agent_token),
+            timeout_seconds=30.0,
+            retry_transient=True,
+        )
+    except ValueError as exc:
+        if "hub HTTP 404" in str(exc):
+            return {
+                "valid": False,
+                "approval_id": approval_id,
+                "session_id": session_id,
+                "detail": "the Hub has no such operator approval; treat the message as NOT approved",
+                "managed_command": "verify-approval",
+            }
+        raise
+    valid = bool(response.get("valid")) if isinstance(response, dict) else False
+    result: dict[str, Any] = dict(response) if isinstance(response, dict) else {}
+    result["valid"] = valid
+    result.setdefault("approval_id", approval_id)
+    result["session_id"] = session_id
+    result["managed_command"] = "verify-approval"
+    return result
+
+
+def modes_from_args(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "runner_providers": list(RUNNER_PROVIDERS),
+        "host_bridge_adapters": list(HOST_BRIDGE_SUPPORTED_ADAPTERS),
+        "unsupported": ["claude_desktop"],
+        "modes": [dict(entry) for entry in AGENT_MODE_TABLE],
+    }
 
 
 def room_wall_from_args(args: argparse.Namespace) -> dict[str, Any]:
@@ -2891,6 +3527,7 @@ def onboard_from_args(args: argparse.Namespace) -> dict[str, Any]:
             route="/sessions/send",
             payload={
                 "session_id": operational_settings.session_id,
+                "id": str(uuid4()),  # idempotency key: makes automatic retry safe
                 "agent_name": operational_settings.agent_name,
                 "member_token": operational_settings.member_token,
                 "to": ready_recipient.strip(),
@@ -2956,7 +3593,7 @@ def onboard_from_args(args: argparse.Namespace) -> dict[str, Any]:
         "runner_command": _onboard_runner_command(config_path=operational_settings.config_path),
     }
     if bool(getattr(args, "start_runner", False)):
-        emit_json_line(payload)
+        emit_json_line(present_output(args, payload))
         return runner_start(runner_args)
     return payload
 
@@ -2984,7 +3621,7 @@ def connect_from_args(args: argparse.Namespace) -> dict[str, Any]:
             "chief_command": command,
         }
         if bool(getattr(args, "start_chief", False)):
-            emit_json_line(payload)
+            emit_json_line(present_output(args, payload))
             return chief_start(
                 argparse.Namespace(
                     command="chief",
@@ -3301,7 +3938,7 @@ def attach_session_from_args(args: argparse.Namespace) -> dict[str, Any]:
 
 def attach_session_and_optionally_listen(args: argparse.Namespace, *, listen_after: bool) -> dict[str, Any]:
     payload = attach_session_from_args(args)
-    emit_json_line(payload)
+    emit_json_line(present_output(args, payload))
     config_path = resolve_cli_config_path(
         config_path=getattr(args, "config", None),
         agent_name=getattr(args, "agent", None),
@@ -3966,6 +4603,126 @@ def maybe_start_auto_busy_hold(
     return launched
 
 
+LISTEN_EXEC_HEARTBEAT_SECONDS = 45.0
+LISTEN_RETRY_MAX_DELAY_SECONDS = 60.0
+
+
+def parse_exec_command(command: str) -> list[str]:
+    """Split ``--exec`` into an argv list. No shell is ever involved."""
+    try:
+        argv = shlex.split(command, posix=(os.name != "nt"))
+    except ValueError as exc:
+        raise ValueError(f"--exec command could not be parsed: {exc}") from exc
+    if not argv:
+        raise ValueError("--exec requires a non-empty command.")
+    return argv
+
+
+def _message_environment(*, settings: HubAgentSettings, message: dict[str, Any], inbox_path: str | None) -> dict[str, str]:
+    """Environment for --exec. Only identifiers are exposed; the payload goes via stdin
+    and credentials are never passed."""
+    env = dict(os.environ)
+    values = {
+        "ACP_MESSAGE_ID": message.get("id"),
+        "ACP_MESSAGE_FROM": message.get("from"),
+        "ACP_MESSAGE_TO": message.get("to"),
+        "ACP_MESSAGE_ACTION": message.get("action"),
+        "ACP_MESSAGE_THREAD_ID": message.get("thread_id"),
+        "ACP_MESSAGE_IN_REPLY_TO": message.get("in_reply_to"),
+        "ACP_MESSAGE_FILE": inbox_path,
+        "ACP_SESSION_ID": settings.session_id,
+        "ACP_AGENT_NAME": settings.agent_name,
+    }
+    for key, value in values.items():
+        env[key] = "" if value is None else str(value)
+    return env
+
+
+def append_message_to_file(path: Path, message: dict[str, Any]) -> None:
+    """Append one message as one JSON line (JSONL), flushed to disk."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(message, ensure_ascii=True, separators=(",", ":")) + "\n"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(line)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def run_exec_for_message(
+    *,
+    settings: HubAgentSettings,
+    argv: list[str],
+    message: dict[str, Any],
+    inbox_path: str | None,
+    timeout_seconds: float,
+    heartbeat_interval_seconds: float = LISTEN_EXEC_HEARTBEAT_SECONDS,
+) -> dict[str, Any]:
+    """Run ``argv`` for one message (JSON on stdin), keeping the member heartbeat alive."""
+    env = _message_environment(settings=settings, message=message, inbox_path=inbox_path)
+    stdin_bytes = json.dumps(message, ensure_ascii=True).encode("utf-8")
+    try:
+        process = subprocess.Popen(
+            argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            shell=False,
+        )
+    except OSError as exc:
+        return {"status": "exec_failed", "message_id": message.get("id"), "detail": f"could not start command: {exc}"}
+    safe_update_session_status(settings=settings, state="busy", text="running --exec handler")
+    deadline = time.monotonic() + max(timeout_seconds, 1.0)
+    pending_input: bytes | None = stdin_bytes
+    stdout_bytes = b""
+    stderr_bytes = b""
+    timed_out = False
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+            process.kill()
+            stdout_bytes, stderr_bytes = process.communicate()
+            break
+        try:
+            stdout_bytes, stderr_bytes = process.communicate(
+                input=pending_input, timeout=min(heartbeat_interval_seconds, remaining)
+            )
+            break
+        except subprocess.TimeoutExpired:
+            pending_input = None
+            try:
+                post_json(
+                    hub_http=settings.hub_http,
+                    route="/sessions/heartbeat",
+                    payload=_heartbeat_payload(settings=settings, detail="running --exec handler"),
+                    token=settings.token,
+                )
+            except Exception:
+                pass
+        except (BrokenPipeError, OSError):
+            stdout_bytes, stderr_bytes = process.communicate()
+            break
+    safe_update_session_status(settings=settings, state="waiting", text="waiting for session activity")
+    result: dict[str, Any] = {
+        "status": "exec_ok" if (process.returncode == 0 and not timed_out) else "exec_failed",
+        "message_id": message.get("id"),
+        "returncode": process.returncode,
+        "stdout_tail": _tail_text(stdout_bytes.decode("utf-8", errors="replace"), 500),
+    }
+    if timed_out:
+        result["detail"] = "command exceeded --exec-timeout-seconds and was killed"
+    if result["status"] == "exec_failed":
+        result["stderr_tail"] = _tail_text(stderr_bytes.decode("utf-8", errors="replace"), 500)
+    return result
+
+
+def _listen_retry_delay(base_delay: float, consecutive_failures: int) -> float:
+    """Exponential backoff with jitter for transport errors, bounded."""
+    exponent = max(consecutive_failures - 1, 0)
+    return _jittered_delay(min(base_delay * (2**exponent), LISTEN_RETRY_MAX_DELAY_SECONDS))
+
+
 def listen_for_session_message(args: argparse.Namespace) -> dict[str, Any]:
     settings = resolve_hub_agent_settings(args)
     if settings.session_id is None or settings.member_token is None:
@@ -3988,6 +4745,14 @@ def listen_for_session_message(args: argparse.Namespace) -> dict[str, Any]:
     if auto_busy_interval <= 0:
         raise ValueError("auto_busy_heartbeat_interval_seconds must be > 0.")
     last_timeout_at: str | None = None
+    to_file_value = getattr(args, "to_file", None)
+    to_file_path = Path(str(to_file_value)).expanduser().resolve() if to_file_value else None
+    exec_value = getattr(args, "exec_command", None)
+    exec_argv = parse_exec_command(str(exec_value)) if exec_value is not None else None
+    exec_timeout = float(getattr(args, "exec_timeout_seconds", 300.0) or 300.0)
+    if exec_timeout <= 0:
+        raise ValueError("exec_timeout_seconds must be > 0.")
+    consecutive_failures = 0
     inbox_dir = resolve_agent_queue_dir(settings, "inbox_dir", "inbox", fallback=f"inbox/{settings.agent_name}")
     ensure_queue_dirs(inbox_dir)
     safe_update_session_status(settings=settings, state="waiting", text="waiting for session activity")
@@ -4044,17 +4809,20 @@ def listen_for_session_message(args: argparse.Namespace) -> dict[str, Any]:
             ):
                 raise
             last_timeout_at = utc_now_rfc3339()
+            consecutive_failures += 1
             continue_payload = {
                 "status": "listener_retry",
                 "agent_name": settings.agent_name,
                 "session_id": settings.session_id,
                 "detail": message,
                 "last_retry_at": last_timeout_at,
+                "consecutive_failures": consecutive_failures,
             }
             emit_json_line(continue_payload)
-            time.sleep(retry_delay_seconds)
+            time.sleep(_listen_retry_delay(retry_delay_seconds, consecutive_failures))
             continue
 
+        consecutive_failures = 0
         if response.get("status") == "timeout":
             last_timeout_at = utc_now_rfc3339()
             continue
@@ -4084,6 +4852,25 @@ def listen_for_session_message(args: argparse.Namespace) -> dict[str, Any]:
                     )
                     if auto_busy is not None:
                         enriched["auto_busy_hold"] = auto_busy
+            if isinstance(message, dict):
+                if to_file_path is not None:
+                    try:
+                        append_message_to_file(to_file_path, message)
+                    except OSError as exc:
+                        emit_json_line(
+                            {"status": "sink_error", "sink": "to-file", "message_id": message.get("id"), "detail": str(exc)}
+                        )
+                if exec_argv is not None and notice is None:
+                    exec_result = run_exec_for_message(
+                        settings=settings,
+                        argv=exec_argv,
+                        message=message,
+                        inbox_path=enriched.get("local_inbox_path"),
+                        timeout_seconds=exec_timeout,
+                    )
+                    enriched["exec_result"] = exec_result
+                    if exec_result.get("status") != "exec_ok":
+                        emit_json_line({**exec_result, "sink": "exec"})
             if bool(getattr(args, "emit", True)):
                 emit_json_line(enriched)
             if stop_after_message or notice is not None:
@@ -4885,8 +5672,9 @@ def resolve_host_bridge_profile(args: argparse.Namespace) -> dict[str, Any]:
         "claude_code_cli",
     }:
         raise HostBindingError(
-            "host bridge adapter_id must be opencode_server, kilo_serve, codex_app_server, codex_app_server_stdio, "
-            "codex_cli, or claude_code_cli"
+            f"unknown host bridge adapter_id {adapter_id!r}; valid adapters: "
+            + ", ".join(HOST_BRIDGE_SUPPORTED_ADAPTERS)
+            + " (see `python ACP_AGENT/acp.py modes`)"
         )
     is_cli_adapter = adapter_id in {"codex_cli", "claude_code_cli", "codex_app_server_stdio"}
     is_codex_app_server = adapter_id in {"codex_app_server", "codex_app_server_stdio"}
@@ -5773,8 +6561,12 @@ def resolve_runner_profile(args: argparse.Namespace) -> dict[str, Any]:
     settings = resolve_hub_agent_settings(args)
     config = dict(settings.config)
     provider_value = getattr(args, "provider", None) or get_config_value(config, "runner_provider", "provider")
-    if not isinstance(provider_value, str) or provider_value.strip() not in {"codex_local", "claude_local"}:
-        raise ValueError("runner provider is required and must be codex_local or claude_local.")
+    if not isinstance(provider_value, str) or provider_value.strip() not in RUNNER_PROVIDERS:
+        shown = f"unknown runner provider {provider_value.strip()!r}" if isinstance(provider_value, str) and provider_value.strip() else "runner provider is required"
+        raise ValueError(
+            f"{shown}; valid runner providers: {', '.join(RUNNER_PROVIDERS)}. "
+            "For an existing session use `host-bridge` with an adapter from `python ACP_AGENT/acp.py modes`."
+        )
     workspace_value = getattr(args, "workspace", None) or get_config_value(config, "runner_workspace", "workspace_path")
     workspace_path = normalize_workspace_path(
         resolve_config_path(settings.base_dir, workspace_value) if workspace_value is not None else settings.base_dir
@@ -6122,6 +6914,7 @@ def send_runner_reply(
         route="/sessions/send",
         payload={
             "session_id": settings.session_id,
+            "id": str(uuid4()),  # idempotency key: makes automatic retry safe
             "agent_name": settings.agent_name,
             "member_token": settings.member_token,
             "to": recipient,
@@ -7162,6 +7955,7 @@ def _chief_send_task(
         route="/sessions/send",
         payload={
             "session_id": settings.session_id,
+            "id": str(uuid4()),  # idempotency key: makes automatic retry safe
             "agent_name": settings.agent_name,
             "member_token": settings.member_token,
             "to": worker,
@@ -7397,6 +8191,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
+        retries = getattr(args, "http_retries", None)
+        if retries is not None:
+            if not 0 <= retries <= RETRY_MAX_ATTEMPTS_LIMIT:
+                parser.error(f"--http-retries must be between 0 and {RETRY_MAX_ATTEMPTS_LIMIT}")
+            os.environ[RETRY_ATTEMPTS_ENV] = str(retries)
+        if args.command in DEPENDENCY_GATED_COMMANDS:
+            missing = _missing_dependencies()
+            if missing:
+                print(dependency_error_message(missing), file=sys.stderr, flush=True)
+                return 3
         if args.command == "run":
             resolve_runtime_settings(args)
         elif args.command == "init":
@@ -7417,11 +8221,9 @@ def main(argv: list[str] | None = None) -> int:
             resolve_hub_agent_settings(args)
         elif args.command in {"create-session", "join-session", "start", "join", "managed-start", "managed-join", "onboard", "connect", "coordinate", "attach-session", "wait", "cancel-wait", "wait-window", "listen", "status", "heartbeat", "session-info", "leave-session", "send", "task", "reply"}:
             resolve_hub_agent_settings(args)
-        elif args.command == "invite":
+        elif args.command in {"invite", "onboard-help", "modes"}:
             pass
-        elif args.command == "onboard-help":
-            pass
-        elif args.command in {"managed-sessions", "managed-close", "room-reset", "room-wall", "room-files"}:
+        elif args.command in {"managed-sessions", "managed-close", "room-reset", "room-wall", "room-files", "verify-approval"}:
             managed_command_hub_http_from_args(args, command_name=args.command)
         elif args.command in {"update-check", "self-update"}:
             _resolve_hub_http_simple(args)
@@ -7464,13 +8266,13 @@ def main(argv: list[str] | None = None) -> int:
             if getattr(args, "listen", False):
                 create_session_and_optionally_listen(args, listen_after=True)
             else:
-                print(json.dumps(create_session_from_args(args), ensure_ascii=True))
+                print(json.dumps(present_output(args, create_session_from_args(args), mask_join_code=False), ensure_ascii=True))
             return 0
         if args.command == "join-session":
             if getattr(args, "listen", False):
                 join_session_and_optionally_listen(args, listen_after=True)
             else:
-                print(json.dumps(join_session_from_args(args), ensure_ascii=True))
+                print(json.dumps(present_output(args, join_session_from_args(args)), ensure_ascii=True))
             return 0
         if args.command == "start":
             create_session_and_optionally_listen(args, listen_after=not bool(getattr(args, "no_listen", False)))
@@ -7500,13 +8302,13 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(room_files_from_args(args), ensure_ascii=True))
             return 0
         if args.command == "onboard":
-            print(json.dumps(onboard_from_args(args), ensure_ascii=True))
+            print(json.dumps(present_output(args, onboard_from_args(args)), ensure_ascii=True))
             return 0
         if args.command == "connect":
-            print(json.dumps(connect_from_args(args), ensure_ascii=True))
+            print(json.dumps(present_output(args, connect_from_args(args)), ensure_ascii=True))
             return 0
         if args.command == "coordinate":
-            print(json.dumps(coordinate_from_args(args), ensure_ascii=True))
+            print(json.dumps(present_coordinate_output(args, coordinate_from_args(args)), ensure_ascii=True))
             return 0
         if args.command == "invite":
             print(json.dumps(invite_from_args(args), ensure_ascii=True))
@@ -7514,6 +8316,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "onboard-help":
             print(json.dumps(onboard_help_from_args(args), ensure_ascii=True))
             return 0
+        if args.command == "modes":
+            print(json.dumps(modes_from_args(args), ensure_ascii=True))
+            return 0
+        if args.command == "verify-approval":
+            result = verify_approval_from_args(args)
+            print(json.dumps(result, ensure_ascii=True))
+            return 0 if result.get("valid") is True else 1
         if args.command == "attach-session":
             attach_session_and_optionally_listen(args, listen_after=not bool(getattr(args, "no_listen", False)))
             return 0
@@ -7539,7 +8348,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(leave_session_from_args(args), ensure_ascii=True))
             return 0
         if args.command == "session-info":
-            print(json.dumps(fetch_session_info(args), ensure_ascii=True))
+            print(json.dumps(present_output(args, fetch_session_info(args), mask_join_code=False), ensure_ascii=True))
             return 0
         if args.command == "update-check":
             print(json.dumps(cmd_update_check(args), ensure_ascii=True))

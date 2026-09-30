@@ -402,7 +402,7 @@ Typical flow:
 
 ```bash
 python ACP_AGENT/acp.py create-session --config ACP_AGENT/agents/codex-chief.json --title "Auth Refactor"
-python ACP_AGENT/acp.py join-session --config ACP_AGENT/agents/claude-review.json --code ABC123
+python ACP_AGENT/acp.py join-session --config ACP_AGENT/agents/claude-review.json --code-env ACP_JOIN_CODE
 python ACP_AGENT/acp.py listen --config ACP_AGENT/agents/claude-review.json
 python ACP_AGENT/acp.py status --config ACP_AGENT/agents/claude-review.json --state waiting --text "Listening for next task"
 python ACP_AGENT/acp.py send --config ACP_AGENT/agents/codex-chief.json --to claude-review --action TASK --payload "Review auth module"
@@ -413,7 +413,7 @@ Operational policy:
 - Turn-based LLM agents receive with `listen --stop-after-message`; do not use persistent `listen` as their default receiver.
 - Always-on workers/chiefs should prefer `runner start`.
 - Persistent `listen` is only for external daemon consumers that can safely block.
-- Managed workspace sessions use `managed-join --agent-token TOKEN --session-id SESSION_ID --no-listen`; core sessions use `join-session --code`.
+- Managed workspace sessions use `managed-join --agent-token TOKEN --session-id SESSION_ID --no-listen`; core sessions use `join-session --code-env ACP_JOIN_CODE` (or `--code-file`/`--code-stdin`).
 - Publish `waiting` while the agent is available and listening.
 - Reserve `idle` for true detach/teardown states only.
 - If immediate follow-up is likely, or local work is done and the next step depends on external instructions, hold a foreground active-wait window of up to 20 minutes.
