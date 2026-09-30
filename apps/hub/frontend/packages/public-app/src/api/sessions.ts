@@ -17,6 +17,7 @@ export interface SessionMember {
   heartbeat_state?: string
   delivery_mode?: string
   provider?: string
+  capabilities?: string[]
   workspace_path?: string
   current_run?: RunInfo
   last_run?: RunInfo

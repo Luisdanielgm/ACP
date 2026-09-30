@@ -1,5 +1,5 @@
 {
-  "route_count": 109,
+  "route_count": 113,
   "routes": [
     {
       "path": "/",
@@ -178,6 +178,12 @@
       ]
     },
     {
+      "path": "/managed/agent/sessions/{session_id}/operator-approvals/{approval_id}",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
       "path": "/managed/agent/sessions/{session_id}/replay",
       "methods": [
         "GET"
@@ -247,6 +253,12 @@
       "path": "/managed/agent/workspaces/{slug}/sessions/{session_id}/messages/reset",
       "methods": [
         "POST"
+      ]
+    },
+    {
+      "path": "/managed/agent/workspaces/{slug}/sessions/{session_id}/operator-approvals/{approval_id}",
+      "methods": [
+        "GET"
       ]
     },
     {
@@ -452,6 +464,12 @@
       ]
     },
     {
+      "path": "/managed/workspaces/{slug}/sessions/{session_id}",
+      "methods": [
+        "PATCH"
+      ]
+    },
+    {
       "path": "/managed/workspaces/{slug}/sessions/{session_id}/files",
       "methods": [
         "GET"
@@ -477,6 +495,12 @@
     },
     {
       "path": "/managed/workspaces/{slug}/sessions/{session_id}/messages/reset",
+      "methods": [
+        "POST"
+      ]
+    },
+    {
+      "path": "/managed/workspaces/{slug}/sessions/{session_id}/operator-approvals",
       "methods": [
         "POST"
       ]

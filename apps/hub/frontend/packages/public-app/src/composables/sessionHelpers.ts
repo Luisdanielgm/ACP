@@ -47,6 +47,18 @@ export function isWebOperator(name: string | undefined): boolean {
   return String(name || '').startsWith('web-operator-')
 }
 
+export const HUMAN_MEDIATOR_CAPABILITY = 'human_mediator'
+
+// The panel-created session owner (and legacy web operators) is a person
+// mediating from the dashboard: it never runs a heartbeat loop, so it must not
+// be flagged for silence. The hub marks the owner with the `human_mediator`
+// capability when the room is created from the panel.
+export function isHumanMediator(member: Pick<SessionMember, 'agent_name'> & { capabilities?: string[]; provider?: string }): boolean {
+  if (isWebOperator(member.agent_name)) return true
+  const caps = Array.isArray(member.capabilities) ? member.capabilities : []
+  return caps.includes(HUMAN_MEDIATOR_CAPABILITY) || caps.includes('web_operator')
+}
+
 // Human-legible display name: strip the shared prefix and hex hash suffixes,
 // then title-case what remains ("people_manager-6a2b15e1" -> "People Manager").
 // The FULL agent name stays available in tooltips and detail views.
@@ -130,6 +142,7 @@ export function statusTone(status: string | undefined): string {
 // ── Heartbeat ──
 
 export function heartbeatAgeSeconds(member: SessionMember): number | null {
+  if (isHumanMediator(member)) return null
   if (typeof member.heartbeat_age_seconds === 'number' && Number.isFinite(member.heartbeat_age_seconds)) {
     return Math.max(0, Math.round(member.heartbeat_age_seconds))
   }
@@ -139,6 +152,8 @@ export function heartbeatAgeSeconds(member: SessionMember): number | null {
 }
 
 export function heartbeatState(member: SessionMember, connectedSet: Set<string> = new Set()): string {
+  // A human mediator has no heartbeat to expect: neither live nor stale.
+  if (isHumanMediator(member)) return 'human'
   if (connectedSet.has(member.agent_name)) return 'live'
   const provided = String(member.heartbeat_state || '').toLowerCase()
   if (['live', 'quiet', 'stale'].includes(provided)) return provided
@@ -375,6 +390,7 @@ export interface OperationalState {
 }
 
 export function memberOperationalState(member: SessionMember, activity: MemberActivityData, issues: Issue[] = []): OperationalState {
+  if (isHumanMediator(member)) return { key: 'op_state_human', tone: 'idle' }
   if (issues.some(i => i.level === 'high')) return { key: 'op_state_warning', tone: 'warning' }
   if (activity.isBusy) return { key: 'op_state_working', tone: 'working' }
   if (activity.hasOutgoing || activity.hasIncoming) return { key: 'op_state_alert', tone: 'alert' }
@@ -520,6 +536,7 @@ export type HeartbeatTier = 'strong' | 'normal' | 'weak' | 'none'
 
 export function heartbeatTier(member: SessionMember, connectedSet: Set<string> = new Set()): HeartbeatTier {
   const state = heartbeatState(member, connectedSet)
+  if (state === 'human') return 'normal'
   if (state === 'live') {
     const age = heartbeatAgeSeconds(member)
     return connectedSet.has(member.agent_name) && (age === null || age <= 30) ? 'strong' : 'normal'
@@ -536,7 +553,7 @@ export function heartbeatIconName(tier: HeartbeatTier): string {
 // something the protocol reports, so it is intentionally never selected).
 export function presenceIconName(member: SessionMember, connectedSet: Set<string> = new Set()): string {
   const state = heartbeatState(member, connectedSet)
-  if (state === 'live') return 'presence-online'
+  if (state === 'live' || state === 'human') return 'presence-online'
   if (state === 'quiet') return 'presence-silent'
   return 'presence-disconnected'
 }
@@ -725,4 +742,5 @@ export function recentTrafficSnapshot(payload: SessionDetailPayload, windowMs = 
 
 // ── Invite ──
 
-export { buildInvitePrompt, hubOriginForInvite, hubWsForInvite } from './invitePrompt'
+export { buildInvitePrompt, buildDangerousUpdatePrompt, inviteJoinCode, hubOriginForInvite, hubWsForInvite } from './invitePrompt'
+export type { InvitePromptVariant } from './invitePrompt'

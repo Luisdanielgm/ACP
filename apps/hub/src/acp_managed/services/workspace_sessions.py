@@ -46,10 +46,26 @@ class ManagedWorkspaceSessionService:
         prompt: str | None = None,
         capabilities: list[str] | None = None,
         resolve_name_conflicts: bool = False,
+        owner_kind: str = "agent",
+        permanent: bool = False,
+        declared_members: list[str] | tuple[str, ...] | None = None,
     ) -> tuple[ManagedWorkspaceSessionRecord, dict[str, object]]:
         result: dict[str, object] | None = None
         resolved_agent_name = owner_agent_name.strip()
         last_conflict: SessionAccessError | None = None
+
+        # A room created from the dashboard is owned by a person mediating from
+        # the panel: mark it so the dashboards do not expect a heartbeat and do
+        # not flag the owner for silence (C9).
+        member_capabilities = list(capabilities or [])
+        member_provider: str | None = None
+        if owner_kind == "human":
+            if "human_mediator" not in member_capabilities:
+                member_capabilities.append("human_mediator")
+            member_provider = "managed-web"
+        normalized_declared = tuple(
+            dict.fromkeys(name.strip() for name in (declared_members or []) if isinstance(name, str) and name.strip())
+        )
 
         candidates = (
             self._workspace_agent_candidates(owner_agent_name=owner_agent_name, workspace=workspace)
@@ -62,7 +78,8 @@ class ManagedWorkspaceSessionService:
                     owner_agent=candidate,
                     title=title,
                     project=project,
-                    capabilities=capabilities,
+                    capabilities=member_capabilities or None,
+                    provider=member_provider,
                     lifecycle_mode="persistent",
                 )
                 resolved_agent_name = candidate
@@ -88,6 +105,8 @@ class ManagedWorkspaceSessionService:
             project=str(session.get("project")) if session.get("project") is not None else None,
             created_at=str(session.get("created_at")),
             prompt=prompt.strip() if isinstance(prompt, str) and prompt.strip() else None,
+            permanent=bool(permanent),
+            declared_members=normalized_declared,
         )
         self.principal_store.create_workspace_session(record)
         return record, result

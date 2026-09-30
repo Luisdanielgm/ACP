@@ -138,6 +138,78 @@ returns a result, `INFO` shares status or context.
 > agent takes one turn and returns control. Persistent `listen`, `runner`, and
 > `chief` are for real always-on daemons.
 
+## Inviting more agents with the join code (no workspace token needed)
+
+To join agents you do not need the workspace token: open the room in the
+dashboard and use the invite button. The room header shows the **session ID**
+and the **join code** (with a "Copy only the code" button), and the invite
+dialog offers two prompts:
+
+- **Short** — for someone who already has the client: join + listen only.
+- **Full** — installs the client safely from scratch, then joins and listens.
+
+The prompt contains a **real join code: treat it as a secret**. A force-update
+of a version-controlled `ACP_AGENT` (`--allow-tracked-repo`) is a separate,
+clearly-warned prompt and is never part of the default ones.
+
+Store the code in an environment variable without stray quotes and print only
+its LENGTH (it must be 8 hex characters):
+
+```bash
+# bash / zsh
+export ACP_JOIN_CODE='ABCD1234'
+python -c "import os; print(len(os.environ['ACP_JOIN_CODE']))"
+```
+
+```powershell
+# PowerShell
+$env:ACP_JOIN_CODE = 'ABCD1234'
+python -c "import os; print(len(os.environ['ACP_JOIN_CODE']))"
+```
+
+```bat
+:: cmd (quotes wrap the whole set so none end up in the value)
+set "ACP_JOIN_CODE=ABCD1234"
+python -c "import os; print(len(os.environ['ACP_JOIN_CODE']))"
+```
+
+```bash
+python ACP_AGENT/acp.py join-session --agent worker-1 --hub-http https://acp.example.com --code-env ACP_JOIN_CODE
+python ACP_AGENT/acp.py listen --agent worker-1 --stop-after-message --timeout-seconds 300
+```
+
+The client also accepts `--code-file PATH` and stdin for the code, masks
+secrets in its output (`--show-secrets` unmasks), and `listen` can hand
+messages to `--to-file PATH` or `--exec COMMAND`.
+
+Notes:
+
+- A room created from the dashboard is owned by you, the **human mediator**.
+  The owner occupies a name (default `jefe-del-panel`), expects no heartbeat
+  and is not flagged "Attention". Agents must join with a different name; using
+  the owner name returns "that name is taken by the session owner".
+- A rejected code now says why: `invalid_format` ("expected 8 characters, got
+  10"), `session_closed`, `expired`, or `unknown` (the response also carries a
+  `reason` field; the legacy "join code is invalid" text is kept).
+- **Operator approval:** from the room's operator panel, send an approval. The
+  agent sees an `INFO` message with `{"kind":"operator_approval","approval_id",
+  "text"}` and verifies it with `GET
+  /managed/agent/sessions/{session_id}/operator-approvals/{approval_id}`
+  (Bearer token) — no secrets pasted into the room.
+- **Permanent rooms:** tick "Permanent room" when creating a session (optionally
+  listing the agent names allowed to join). Workspace rooms are never
+  auto-expired by the hub, but a permanent room additionally cannot be closed
+  with an agent token, and a non-empty declared list restricts the *managed*
+  join. Limits: joining with a raw join code is not filtered by the declared
+  list, and the room only survives restarts when the hub uses the SQLite
+  persistence backend. Toggle it back with
+  `PATCH /managed/workspaces/{slug}/sessions/{session_id}`.
+- The dashboard shows hub-side delivery delay (send -> pickup) per message and
+  per member, derived from the existing event timestamps.
+- Rotating the workspace token stops the previous one: integrations using it
+  (scripts, CI, agents started with it) must be updated. Agents that joined with
+  an invitation code are unaffected.
+
 ## 6. See what happened
 
 ```bash

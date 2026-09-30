@@ -75,6 +75,14 @@
             <span>·</span>
             <span>{{ t('sd_last_seen_label') }}: {{ timeAgo(member.last_seen_at || member.joined_at, locale) }}</span>
           </div>
+          <div v-if="latencyFor(member)" class="member-quick-meta member-latency" :title="t('sd_latency_hint')">
+            <span>{{ t('sd_latency_receive') }}: {{ formatDelay(latencyFor(member)!.avgReceiveMs) }}
+              <template v-if="latencyFor(member)!.maxReceiveMs !== null">({{ t('sd_latency_max') }} {{ formatDelay(latencyFor(member)!.maxReceiveMs) }})</template>
+              <template v-if="latencyFor(member)!.pendingCount"> · {{ t('sd_latency_pending', { count: String(latencyFor(member)!.pendingCount) }) }}</template>
+            </span>
+            <span>·</span>
+            <span>{{ t('sd_latency_send') }}: {{ formatDelay(latencyFor(member)!.avgSentMs) }}</span>
+          </div>
           <div class="member-quick-meta">
             <span>{{ t('sd_workspace_label') }}: {{ compactPath(member.workspace_path) }}</span>
             <span>·</span>
@@ -96,12 +104,14 @@ import {
   type Issue, type MemberActivityData,
 } from '../../composables/sessionHelpers'
 import { translateRole, translateStatus, translateDelivery } from '../../composables/dashboardTranslations'
+import { formatDelay, type MemberLatencyStats } from '../../composables/latency'
 import type { SessionMember } from '../../api/sessions'
 
 const props = defineProps<{
   members: SessionMember[]
   visibleMembers: SessionMember[]
   activityMap: Map<string, MemberActivityData>
+  latencyMap?: Map<string, MemberLatencyStats>
   connectedSet: Set<string>
   isFirstRender: boolean
   agentFilter: string
@@ -140,6 +150,10 @@ function heartbeatAgeSuffix(member: SessionMember): string {
   return age === null ? '-' : `${age}s`
 }
 
+function latencyFor(member: SessionMember): MemberLatencyStats | undefined {
+  return props.latencyMap?.get(member.agent_name)
+}
+
 function getMemberIssues(member: SessionMember): Issue[] {
   return memberIssues(member, props.connectedSet)
 }
@@ -174,7 +188,7 @@ function activityChips(member: SessionMember): ActivityChip[] {
 
 function laneMetrics(member: SessionMember): LaneMetric[] {
   const hbState = getHeartbeatState(member)
-  const hbPercent = hbState === 'live' ? 100 : hbState === 'quiet' ? 58 : hbState === 'stale' ? 18 : 34
+  const hbPercent = hbState === 'live' || hbState === 'human' ? 100 : hbState === 'quiet' ? 58 : hbState === 'stale' ? 18 : 34
   const pending = Number(member.pending_count || 0)
   const queuePercent = Math.min(100, pending * 24)
   const activity = memberActivity(member, props.activityMap)

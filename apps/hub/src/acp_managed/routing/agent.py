@@ -476,6 +476,14 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
             )
         except Exception as exc:
             raise HTTPException(status_code=404, detail="managed workspace session is not active") from exc
+        if record.declared_members and requested_agent_name not in record.declared_members:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "this permanent room only admits declared members: "
+                    + ", ".join(record.declared_members)
+                ),
+            )
         session_payload = session_detail if isinstance(session_detail, dict) else None
         join_code = session_payload.get("join_code") if isinstance(session_payload, dict) else None
         if not isinstance(join_code, str) or not join_code.strip():
@@ -513,6 +521,11 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
             raise HTTPException(status_code=404, detail="managed workspace session does not exist")
         if token_record.agent_name not in {None, "", record.owner_agent_name}:
             raise HTTPException(status_code=403, detail="managed agent token can only close sessions owned by that agent_name")
+        if record.permanent:
+            raise HTTPException(
+                status_code=403,
+                detail="permanent room: it cannot be closed with an agent token; close it from the dashboard (or clear the permanent flag first)",
+            )
         actor_name = token_record.agent_name.strip() if isinstance(token_record.agent_name, str) and token_record.agent_name.strip() else "workspace-token"
         result = await close_workspace_session_entry(
             record=record,
@@ -761,6 +774,54 @@ def build_agent_router(deps: ManagedRouterDeps) -> APIRouter:
             session_id=session_id,
             file_id=file_id,
             slug=slug,
+        )
+
+    async def _managed_agent_operator_approval_response(
+        *,
+        request: Request,
+        session_id: str,
+        approval_id: str,
+        slug: str | None = None,
+    ) -> JSONResponse:
+        _, workspace = current_agent_token(request=request, slug=slug)
+        record = principal_store.get_workspace_session(session_id=session_id)
+        if record is None or record.workspace_id != workspace.workspace_id:
+            raise HTTPException(status_code=404, detail="operator approval does not exist")
+        approval = principal_store.get_room_operator_approval(approval_id=approval_id)
+        if (
+            approval is None
+            or approval.session_id != record.session_id
+            or approval.workspace_id != workspace.workspace_id
+        ):
+            raise HTTPException(status_code=404, detail="operator approval does not exist")
+        return JSONResponse(
+            {
+                "valid": True,
+                "approval_id": approval.approval_id,
+                "text": approval.text,
+                "created_at": approval.created_at,
+            }
+        )
+
+    @router.get("/managed/agent/sessions/{session_id}/operator-approvals/{approval_id}")
+    async def managed_agent_operator_approval_auto(
+        session_id: str,
+        approval_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        return await _managed_agent_operator_approval_response(
+            request=request, session_id=session_id, approval_id=approval_id
+        )
+
+    @router.get("/managed/agent/workspaces/{slug}/sessions/{session_id}/operator-approvals/{approval_id}")
+    async def managed_agent_operator_approval(
+        slug: str,
+        session_id: str,
+        approval_id: str,
+        request: Request,
+    ) -> JSONResponse:
+        return await _managed_agent_operator_approval_response(
+            request=request, session_id=session_id, approval_id=approval_id, slug=slug
         )
 
     @router.post("/managed/agent/sessions/{session_id}/join")

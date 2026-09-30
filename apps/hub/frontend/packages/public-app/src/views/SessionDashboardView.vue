@@ -119,6 +119,7 @@
           :members="session.members.value"
           :visible-members="session.visibleMembers.value"
           :activity-map="session.activityMap.value"
+          :latency-map="session.latencyMap.value"
           :connected-set="session.connectedSet.value"
           :is-first-render="session.isFirstRender.value"
           v-model:agent-filter="session.agentFilter.value"

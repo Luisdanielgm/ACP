@@ -10,4 +10,4 @@ def test_invite_prompt_behavior_runs_in_node_20_ci() -> None:
     assert "npm run build" in workflow
     assert "npm test" in workflow
     assert '"test": "npm test --workspace=packages/public-app"' in root_package
-    assert '"test": "node --test src/composables/invitePrompt.test.mjs"' in public_package
+    assert '"test": "node --test src/composables/invitePrompt.test.mjs src/composables/latency.test.mjs"' in public_package

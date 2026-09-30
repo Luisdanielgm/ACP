@@ -41,6 +41,19 @@
         </span>
       </div>
 
+      <div v-if="props.sessionId" class="room-ids">
+        <span class="room-chip id" :title="t('room_session_id_title', { id: props.sessionId })">
+          {{ t('room_session_id_label') }} <code>{{ shortSessionId }}</code>
+        </span>
+        <CopyButton :text="props.sessionId" :label="t('room_copy_session_id')" />
+        <template v-if="joinCode">
+          <span class="room-chip code" :title="t('room_join_code_secret_hint')">
+            {{ t('room_join_code_label') }} <code>{{ joinCode }}</code>
+          </span>
+          <CopyButton :text="joinCode" :label="t('room_copy_code_only')" />
+        </template>
+      </div>
+
       <div class="room-actions">
         <span class="room-chip clock" :title="t('room_clock_title')">
           <RoomIcon name="clock" :size="14" />{{ clockLabel }}
@@ -95,13 +108,56 @@
             <RoomIcon name="x" :size="15" />
           </button>
         </div>
+        <p class="invite-secret" role="note">{{ t('room_invite_secret_notice') }}</p>
         <p class="invite-help">{{ t('room_invite_help') }}</p>
-        <pre class="invite-text">{{ inviteText }}</pre>
-        <div class="invite-actions">
-          <button class="primary-button" type="button" @click="copyInviteText">
-            {{ t('room_invite_copy') }}
+        <div class="invite-variants" role="radiogroup" :aria-label="t('room_invite_variant_label')">
+          <button
+            type="button"
+            role="radio"
+            class="invite-variant"
+            :class="{ active: inviteVariant === 'short' }"
+            :aria-checked="inviteVariant === 'short'"
+            @click="inviteVariant = 'short'"
+          >
+            <strong>{{ t('room_invite_variant_short') }}</strong>
+            <span>{{ t('room_invite_variant_short_hint') }}</span>
+          </button>
+          <button
+            type="button"
+            role="radio"
+            class="invite-variant"
+            :class="{ active: inviteVariant === 'full' }"
+            :aria-checked="inviteVariant === 'full'"
+            @click="inviteVariant = 'full'"
+          >
+            <strong>{{ t('room_invite_variant_full') }}</strong>
+            <span>{{ t('room_invite_variant_full_hint') }}</span>
           </button>
         </div>
+        <pre class="invite-text">{{ inviteText }}</pre>
+        <div class="invite-actions">
+          <button
+            v-if="joinCode"
+            class="secondary-button"
+            type="button"
+            @click="copyJoinCodeOnly"
+          >
+            {{ t('room_copy_code_only') }}
+          </button>
+          <button class="primary-button" type="button" @click="copyInviteText">
+            {{ t('room_invite_copy_secret') }}
+          </button>
+        </div>
+        <details class="invite-danger">
+          <summary>{{ t('room_invite_danger_title') }}</summary>
+          <p class="invite-danger-warning" role="alert">{{ t('room_invite_danger_warning') }}</p>
+          <pre class="invite-text danger">{{ dangerousUpdateText }}</pre>
+          <div class="invite-actions">
+            <button class="secondary-button danger" type="button" @click="copyDangerousUpdate">
+              {{ t('room_invite_danger_copy') }}
+            </button>
+          </div>
+        </details>
       </div>
     </div>
 
@@ -280,6 +336,7 @@
                   :members="session.members.value"
                   :visible-members="session.visibleMembers.value"
                   :activity-map="session.activityMap.value"
+                  :latency-map="session.latencyMap.value"
                   :connected-set="session.connectedSet.value"
                   :is-first-render="session.isFirstRender.value"
                   v-model:agent-filter="session.agentFilter.value"
@@ -311,7 +368,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch, watchEffect, type CSSProperties } from 'vue'
-import { useI18n, useMotion } from '@acp/shared'
+import { CopyButton, useI18n, useMotion } from '@acp/shared'
 import {
   SquadMap,
   MemberLanes,
@@ -323,6 +380,8 @@ import {
 import { messages as sdMessages } from '@acp/public-app/i18n'
 import {
   buildInvitePrompt,
+  buildDangerousUpdatePrompt,
+  inviteJoinCode,
   timeAgo,
   messageActionType,
   deliveryMode,
@@ -731,7 +790,6 @@ async function copyValue(value: string, label: string) {
 }
 
 const inviteOpen = ref(false)
-const inviteText = ref('')
 const inviteDialogRef = ref<HTMLElement | null>(null)
 
 function onInviteKeydown(event: KeyboardEvent) {
@@ -757,15 +815,41 @@ onUnmounted(() => {
   clearInterval(clockTimer)
 })
 
+const inviteVariant = ref<'short' | 'full'>('short')
+
+const joinCode = computed(() => (session.payload.value ? inviteJoinCode(session.payload.value) : ''))
+const shortSessionId = computed(() => {
+  const id = props.sessionId || ''
+  return id.length > 13 ? `${id.slice(0, 8)}...${id.slice(-4)}` : id
+})
+
+const inviteText = computed(() => {
+  if (!inviteOpen.value || !session.payload.value) return ''
+  return buildInvitePrompt(session.payload.value, locale.value, window.location.origin, inviteVariant.value)
+})
+
+const dangerousUpdateText = computed(() => {
+  if (!inviteOpen.value || !session.payload.value) return ''
+  return buildDangerousUpdatePrompt(session.payload.value, locale.value, window.location.origin)
+})
+
 async function copyInvite() {
   if (!session.payload.value) return
-  inviteText.value = buildInvitePrompt(session.payload.value, locale.value, window.location.origin)
   inviteOpen.value = true
+  await nextTick()
   copyValue(inviteText.value, st('sd_invite_prompt_label'))
 }
 
 function copyInviteText() {
   if (inviteText.value) copyValue(inviteText.value, st('sd_invite_prompt_label'))
+}
+
+function copyJoinCodeOnly() {
+  if (joinCode.value) copyValue(joinCode.value, t('room_join_code_label'))
+}
+
+function copyDangerousUpdate() {
+  if (dangerousUpdateText.value) copyValue(dangerousUpdateText.value, t('room_invite_danger_title'))
 }
 
 // Styled confirmations instead of the browser's native confirm() popup.
@@ -963,7 +1047,51 @@ watchEffect(() => {
 .invite-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
 }
+.invite-secret {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(239, 159, 39, 0.35);
+  border-radius: 10px;
+  background: rgba(239, 159, 39, 0.08);
+  color: #EF9F27;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.invite-variants { display: flex; gap: 8px; flex-wrap: wrap; }
+.invite-variant {
+  flex: 1 1 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+.invite-variant strong { color: var(--ink); font-size: 0.84rem; }
+.invite-variant.active { border-color: var(--accent, #85B7EB); background: var(--soft); }
+.invite-danger {
+  border: 1px solid rgba(240, 153, 123, 0.3);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.invite-danger summary { cursor: pointer; color: #F0997B; font-weight: 600; }
+.invite-danger-warning { margin: 8px 0; color: #F0997B; font-weight: 600; }
+.invite-text.danger { max-height: 180px; border-color: rgba(240, 153, 123, 0.4); }
+.room-ids { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.room-chip.id code, .room-chip.code code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.74rem; user-select: all; }
+.room-chip.code { color: #EF9F27; border-color: rgba(239, 159, 39, 0.3); background: rgba(239, 159, 39, 0.08); }
 
 /* Error + loading */
 .room-error {
