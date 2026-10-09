@@ -154,6 +154,11 @@ def build_reply_payload(
     payload: dict[str, Any] = {
         "run_id": run_id,
         "outcome": outcome,
+        # ``outcome`` only says how the provider PROCESS ended (exit code), not
+        # whether the task was accomplished. The runner cannot tell, so the
+        # task-level verdict stays "unverified" until a chief verifies it.
+        "outcome_scope": "process",
+        "task_outcome": "unverified",
         "summary": summary,
         "provider": provider,
         "workspace_path": workspace_path,

@@ -8,12 +8,17 @@ file lives one directory deeper than the old app.py, so it uses parents[3]
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.types import Scope
+
+logger = logging.getLogger(__name__)
+
+FRONTEND_BUILD_HINT = "cd apps/hub/frontend && npm install && npm run build"
 
 # apps/hub — the directory that contains src/. Keep this anchored to the package
 # location so it does not depend on the process working directory.
@@ -64,7 +69,10 @@ def _managed_spa_index() -> str | None:
 def _managed_spa_response() -> HTMLResponse:
     content = _managed_spa_index()
     if content is None:
-        raise HTTPException(status_code=503, detail="managed frontend not built")
+        raise HTTPException(
+            status_code=503,
+            detail=f"managed frontend not built: run `{FRONTEND_BUILD_HINT}` (Docker images build it for you)",
+        )
     return HTMLResponse(content=content, headers={"Cache-Control": _NO_CACHE_CONTROL})
 
 
@@ -72,6 +80,10 @@ def _register_managed_vue_spa(app: FastAPI) -> None:
     """Mount managed Vue SPA assets."""
     managed_static_dir = _managed_static_dir()
     if managed_static_dir is None:
+        logger.warning(
+            "Managed frontend is not built: /managed/login and the dashboard will answer 503. Run: %s",
+            FRONTEND_BUILD_HINT,
+        )
         return
     assets_dir = managed_static_dir / "assets"
     if assets_dir.is_dir():

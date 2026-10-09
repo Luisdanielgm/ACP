@@ -17,6 +17,8 @@ dependencies = [
     "pydantic==2.11.7",
     "python-multipart==0.0.20",
     "uvicorn[standard]==0.35.0",
+    # Keep in step with ACP_AGENT/requirements.txt; uvicorn[standard] alone would pull the newest major.
+    "websockets>=15,<16",
 ]
 
 [project.optional-dependencies]
