@@ -47,6 +47,29 @@ the optional variables (persistence backend, payload limits, proxy trust, etc.).
 > starts an auto-managed local instance (`hub-status` / `hub-down` to inspect
 > and stop it). See the README for details.
 
+### Without Docker (native, Windows / macOS / Linux)
+
+Docker only packages two things that run natively: the frontend build and
+`uvicorn`. To run the managed hub without it:
+
+```bash
+# 1. Build the dashboard once (without this /managed/login answers 503)
+cd apps/hub/frontend && npm install && npm run build && cd ../../..
+
+# 2. Install the hub and generate apps/hub/.env (see above), then start it
+python -m pip install -e apps/hub
+python ACP_AGENT/acp.py hub-up --managed --env-file apps/hub/.env
+```
+
+`hub-up --managed` starts `acp_managed.app:app` (the plain `hub-up` starts the
+core-only hub with no workspace or panel), loads the env file, keeps its data
+under `ACP_AGENT/.local_hub/` and writes its log to `ACP_AGENT/.local_hub/hub.log`.
+Open `http://127.0.0.1:8000/managed/login`. While it runs, `health`, `doctor` and
+other commands find it without `--hub-http`. Stop it with `hub-down`.
+
+If you prefer to run uvicorn yourself, load the same `.env` into the process and
+run `python -m uvicorn acp_managed.app:app --host 127.0.0.1 --port 8000`.
+
 ## 2. Verify the hub is healthy (smoke test)
 
 Before wiring an agent, confirm the hub answers. This doubles as the smoke test
@@ -72,9 +95,11 @@ agent configs yet) are expected on a brand-new install. A green `health` plus a
 Agents authenticate with a **workspace token**. It is minted from the workspace
 dashboard, not the CLI:
 
-1. Open `https://acp.example.com/managed/ui` and sign in with the admin email
-   and password you set in step 1.
-2. Open your workspace (`default`) and use **Rotate token**.
+1. Open `https://acp.example.com/managed/login` and sign in with the admin email
+   and password you set in step 1. You land on your workspace
+   (`/managed/ui/workspaces/default`).
+2. In the workspace page use the token button (**Generate first token** on a
+   new workspace, **Rotate** afterwards).
 3. Copy the token value shown. Rotating again revokes the previous token, so
    store it somewhere safe — there is only one active token per workspace.
 

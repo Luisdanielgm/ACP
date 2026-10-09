@@ -34,10 +34,22 @@ Comprueba que responde:
 curl http://localhost:8000/health
 ```
 
+### Alternativa sin Docker
+
+Si no puedes usar Docker (por ejemplo, en Windows sin WSL), el hub también corre de forma nativa:
+
+```bash
+cd apps/hub/frontend && npm install && npm run build && cd ../../..
+python -m pip install -e apps/hub
+python ACP_AGENT/acp.py hub-up --managed --env-file apps/hub/.env
+```
+
+Sin el `npm run build`, el panel no carga (responde 503). `hub-up --managed` guarda sus datos en `ACP_AGENT/.local_hub/` y su registro en `ACP_AGENT/.local_hub/hub.log`; se detiene con `hub-down`.
+
 ## 2. Crear la sala en el panel
 
-1. Abre `http://localhost:8000/managed/ui` e inicia sesión con ese correo y contraseña.
-2. Entra al workspace `default` y crea una sala (título y proyecto).
+1. Abre `http://localhost:8000/managed/login` e inicia sesión con ese correo y contraseña. Llegas al workspace `default`.
+2. En el workspace crea una sala (título y proyecto).
 3. Deja el **nombre del dueño** en `jefe-del-panel`. Es tu usuario como mediador humano y **no debe coincidir con el nombre de ningún agente**.
 4. En la cabecera de la sala verás el **ID** y el **código de invitación** (8 caracteres).
 

@@ -1,5 +1,12 @@
 # ACP_AGENT Changelog
 
+## 0.3.47 - 2026-10-09
+
+- EN: Runner replies now say that `outcome` is the provider process verdict (`outcome_scope: "process"`) and carry `task_outcome: "unverified"`; the chief records its own `task_outcome` (`verified`, `unverified`, `verification_failed`, `judge_failed`, `failed`) and honors `require_verify: true` on a task (no `verify_command` means not done). Fixes a chief trusting a "success" exit code for work that never happened (issue #5).
+- ES: Las respuestas del runner indican que `outcome` es el veredicto del proceso (`outcome_scope: "process"`) y llevan `task_outcome: "unverified"`; el chief anota su propio `task_outcome` (`verified`, `unverified`, `verification_failed`, `judge_failed`, `failed`) y respeta `require_verify: true` en una tarea (sin `verify_command` no cuenta como hecha). Corrige que un chief confiara en un codigo de salida "success" para trabajo que nunca ocurrio (issue #5).
+- EN: `hub-up --managed [--env-file PATH]` starts the managed hub natively (no Docker) with its settings, local data paths and a log file; it warns when the dashboard is not built. `health`, `doctor` and other simple commands now find a running local hub without `--hub-http`.
+- ES: `hub-up --managed [--env-file RUTA]` arranca el hub managed de forma nativa (sin Docker) con su configuracion, rutas de datos locales y un archivo de log; avisa si el panel no esta compilado. `health`, `doctor` y otros comandos simples encuentran un hub local en marcha sin `--hub-http`.
+
 ## 0.3.46 - 2026-09-30
 
 - EN: Every command taking `--agent-token` now also accepts `--agent-token-env NAME`, `--agent-token-file PATH` and `--agent-token-stdin` (`-` reads stdin), and `--join-code` (`runner start|once`, `attach-session`) accepts `--join-code-env/-file/-stdin`, so secrets no longer have to sit in shell history or the process list. One source per secret; errors never echo the value.

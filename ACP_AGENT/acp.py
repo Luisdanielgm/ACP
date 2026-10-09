@@ -750,6 +750,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=15.0,
         help="Seconds to wait for the local hub to become healthy",
     )
+    hub_up_parser.add_argument(
+        "--managed",
+        action="store_true",
+        help="Start the managed hub (acp_managed.app:app: workspace login, rooms, dashboard) instead of the core-only hub. "
+        "Reads --env-file, or apps/hub/.env when it exists. Build the frontend first: cd apps/hub/frontend && npm install && npm run build",
+    )
+    hub_up_parser.add_argument(
+        "--env-file",
+        default=None,
+        metavar="PATH",
+        help="dotenv file with the hub settings (implies --managed); generate it with python -m acp_managed.setup init-single-workspace",
+    )
 
     subparsers.add_parser("hub-down", help="Stop the local Hub started by hub-up")
     subparsers.add_parser("hub-status", help="Show local Hub status")
@@ -4399,12 +4411,22 @@ def local_hub_sqlite_path() -> Path:
     return ACP_ROOT / ".local_hub" / "acp.sqlite3"
 
 
-def build_local_hub_command(*, host: str, port: int, python_executable: str | None = None) -> list[str]:
+LOCAL_HUB_CORE_APP = "acp.hub.app:app"
+LOCAL_HUB_MANAGED_APP = "acp_managed.app:app"
+
+
+def build_local_hub_command(
+    *,
+    host: str,
+    port: int,
+    python_executable: str | None = None,
+    asgi_app: str = LOCAL_HUB_CORE_APP,
+) -> list[str]:
     return [
         python_executable or sys.executable,
         "-m",
         "uvicorn",
-        "acp.hub.app:app",
+        asgi_app,
         "--host",
         host,
         "--port",
@@ -4412,11 +4434,60 @@ def build_local_hub_command(*, host: str, port: int, python_executable: str | No
     ]
 
 
-def build_local_hub_env(*, sqlite_path: str, base_env: dict[str, str] | None = None) -> dict[str, str]:
+def build_local_hub_env(
+    *,
+    sqlite_path: str,
+    base_env: dict[str, str] | None = None,
+    extra_env: dict[str, str] | None = None,
+    auth_sqlite_path: str | None = None,
+) -> dict[str, str]:
     env = dict(base_env if base_env is not None else os.environ)
+    if extra_env:
+        env.update(extra_env)
+    # A native hub keeps its data next to the bundle, never in a Docker-style /data path.
     env["ACP_PERSISTENCE_BACKEND"] = "sqlite"
     env["ACP_SQLITE_PATH"] = sqlite_path
+    if auth_sqlite_path is not None:
+        env["ACP_MANAGED_AUTH_SQLITE_PATH"] = auth_sqlite_path
     return env
+
+
+def load_env_file(path: str | Path) -> dict[str, str]:
+    """Parse a simple dotenv file (KEY=value, optional quotes, # comments)."""
+    resolved = Path(path).expanduser()
+    try:
+        text = resolved.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"could not read env file {resolved}: {exc.strerror or exc}") from exc
+    values: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
+        key, separator, value = line.partition("=")
+        key = key.strip()
+        if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        values[key] = value
+    return values
+
+
+def default_managed_env_file() -> Path | None:
+    candidate = ACP_ROOT.parent / "apps" / "hub" / ".env"
+    return candidate if candidate.is_file() else None
+
+
+def managed_frontend_built() -> bool:
+    return (ACP_ROOT.parent / "apps" / "hub" / "frontend" / "packages" / "managed-app" / "dist" / "index.html").is_file()
+
+
+def local_hub_log_path() -> Path:
+    return ACP_ROOT / ".local_hub" / "hub.log"
 
 
 def local_hub_dependencies_available() -> bool:
@@ -4462,21 +4533,29 @@ def resolve_local_hub_http() -> str | None:
     return None
 
 
-def _spawn_local_hub_process(command: list[str], env: dict[str, str]) -> subprocess.Popen:
+def _spawn_local_hub_process(command: list[str], env: dict[str, str], log_path: Path | None = None) -> subprocess.Popen:
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    log_handle = None
+    if log_path is not None:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_handle = open(log_path, "ab")  # noqa: SIM115 - inherited by the child process
     # Launch from a neutral cwd so `python -m uvicorn acp.hub.app:app` resolves
     # `acp` to the installed acp-hub package, not a shadowing acp.py in the
     # caller's directory (the ACP_AGENT folder ships an acp.py module).
-    return subprocess.Popen(
-        command,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        close_fds=True,
-        creationflags=creationflags,
-        env=env,
-        cwd=tempfile.gettempdir(),
-    )
+    try:
+        return subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle if log_handle is not None else subprocess.DEVNULL,
+            stderr=subprocess.STDOUT if log_handle is not None else subprocess.DEVNULL,
+            close_fds=True,
+            creationflags=creationflags,
+            env=env,
+            cwd=tempfile.gettempdir(),
+        )
+    finally:
+        if log_handle is not None:
+            log_handle.close()
 
 
 def _terminate_pid(pid: int) -> bool:
@@ -4501,6 +4580,8 @@ def ensure_local_hub_running(
     port: int = LOCAL_HUB_DEFAULT_PORT,
     startup_timeout_seconds: float = 15.0,
     poll_interval_seconds: float = 0.3,
+    managed: bool = False,
+    env_file: str | Path | None = None,
 ) -> dict[str, Any]:
     existing = read_local_hub_state()
     if existing and local_hub_health_ok(str(existing.get("hub_http", ""))):
@@ -4519,21 +4600,54 @@ def ensure_local_hub_running(
 
     sqlite_path = local_hub_sqlite_path()
     sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-    command = build_local_hub_command(host=host, port=port)
-    env = build_local_hub_env(sqlite_path=str(sqlite_path))
-    process = _spawn_local_hub_process(command, env)
+    managed = bool(managed or env_file)
+    warnings: list[str] = []
+    if managed:
+        env_path = Path(env_file).expanduser() if env_file else default_managed_env_file()
+        if env_path is None:
+            raise ValueError(
+                "managed hub needs its settings: pass --env-file PATH or generate apps/hub/.env with "
+                "python -m acp_managed.setup init-single-workspace --env-file apps/hub/.env ..."
+            )
+        extra_env = load_env_file(env_path)
+        if not managed_frontend_built():
+            warnings.append(
+                "managed frontend is not built, so /managed/login and the dashboard will not load. "
+                "Run: cd apps/hub/frontend && npm install && npm run build"
+            )
+        command = build_local_hub_command(host=host, port=port, asgi_app=LOCAL_HUB_MANAGED_APP)
+        env = build_local_hub_env(
+            sqlite_path=str(sqlite_path),
+            extra_env=extra_env,
+            auth_sqlite_path=str(sqlite_path.parent / "acp-managed-auth.sqlite3"),
+        )
+        process = _spawn_local_hub_process(command, env, log_path=local_hub_log_path())
+    else:
+        command = build_local_hub_command(host=host, port=port)
+        env = build_local_hub_env(sqlite_path=str(sqlite_path))
+        process = _spawn_local_hub_process(command, env)
 
     deadline = time.monotonic() + max(startup_timeout_seconds, 0.1)
     while time.monotonic() < deadline:
         if local_hub_health_ok(hub_http):
             state = {"hub_http": hub_http, "host": host, "port": port, "pid": process.pid}
+            if managed:
+                state["managed"] = True
             write_local_hub_state(state)
-            return {"status": "started", **state}
+            result = {"status": "started", **state}
+            if managed:
+                result["log"] = str(local_hub_log_path())
+                result["login_url"] = f"{hub_http}/managed/login"
+            if warnings:
+                result["warnings"] = warnings
+            return result
         if process.poll() is not None:
-            raise ValueError(
-                f"Local hub exited early (code {process.returncode}). "
-                "Confirm 'apps/hub' is installed: python -m pip install -e apps/hub"
+            hint = (
+                f"See {local_hub_log_path()} for the reason (missing or placeholder settings in the env file are the usual cause)."
+                if managed
+                else "Confirm 'apps/hub' is installed: python -m pip install -e apps/hub"
             )
+            raise ValueError(f"Local hub exited early (code {process.returncode}). {hint}")
         time.sleep(poll_interval_seconds)
 
     raise ValueError(f"Local hub at {hub_http} did not become healthy within {startup_timeout_seconds}s.")
@@ -5072,7 +5186,8 @@ def _resolve_hub_http_simple(args: argparse.Namespace) -> tuple[str, str | None]
     1. Explicit --hub-http on the command line.
     2. Config file selected via --config or --agent (no requirement that the
        config already holds session credentials).
-    3. Distribution default if the bundle ships one.
+    3. A healthy local hub started with ``hub-up``.
+    4. Distribution default if the bundle ships one.
     """
     hub_http = getattr(args, "hub_http", None)
     token = getattr(args, "token", None)
@@ -5098,10 +5213,13 @@ def _resolve_hub_http_simple(args: argparse.Namespace) -> tuple[str, str | None]
         except (ValueError, OSError):
             pass
 
+    local_hub_http = resolve_local_hub_http()
+    if local_hub_http:
+        return local_hub_http, token.strip() if isinstance(token, str) and token.strip() else None
     default_hub_http = _default_hub_http()
     if default_hub_http:
         return default_hub_http, token.strip() if isinstance(token, str) and token.strip() else None
-    raise ValueError("hub_http is required (via --hub-http, --agent config, or a distribution default)")
+    raise ValueError("hub_http is required (via --hub-http, --agent config, a running local hub from hub-up, or a distribution default)")
 
 
 def _release_manifest_url(*, hub_http: str | None = None, manifest_url: Any = None) -> str:
@@ -7392,6 +7510,7 @@ def _load_chief_task(path: Path, *, default_provider: str | None, default_worksp
         judge_provider = parsed.get("judge_provider")
         judge_timeout_seconds = parsed.get("judge_timeout_seconds")
         max_attempts = parsed.get("max_attempts")
+        require_verify = parsed.get("require_verify") is True
     else:
         instructions = path.read_text(encoding="utf-8").strip()
         required_capabilities = []
@@ -7401,6 +7520,7 @@ def _load_chief_task(path: Path, *, default_provider: str | None, default_worksp
         judge_provider = None
         judge_timeout_seconds = None
         max_attempts = None
+        require_verify = False
     if not isinstance(instructions, str) or not instructions.strip():
         raise ValueError(f"task file {path} does not include instructions.")
     return {
@@ -7416,6 +7536,7 @@ def _load_chief_task(path: Path, *, default_provider: str | None, default_worksp
         "judge_provider": judge_provider.strip() if isinstance(judge_provider, str) and judge_provider.strip() else None,
         "judge_timeout_seconds": judge_timeout_seconds,
         "max_attempts": max_attempts,
+        "require_verify": require_verify,
     }
 
 
@@ -7890,6 +8011,10 @@ def _chief_record_reply(*, dirs: dict[str, Path], message: dict[str, Any]) -> di
             attempt_number = _task_attempt_number(assigned_task)
             max_attempts = _task_max_attempts(assigned_task)
             verify_result = _chief_run_verify(assigned_task)
+            if assigned_task.get("require_verify") and verify_result.get("status") == "skipped":
+                # The task opted in to "no proof, no done": a worker's own
+                # claim of success is not enough without a verify_command.
+                verify_result = {"status": "failed", "reason": "verify_required_but_missing"}
             if verify_result.get("status") != "failed":
                 judge_result = _chief_run_judge(task=assigned_task, reply_payload=payload, verify_result=verify_result)
         except Exception as exc:
@@ -7930,12 +8055,24 @@ def _chief_record_reply(*, dirs: dict[str, Path], message: dict[str, Any]) -> di
         effective_outcome = "verification_failed"
     elif judge_failed:
         effective_outcome = "judge_failed"
+    # What the chief can actually vouch for, as opposed to what the worker said.
+    if not reported_success:
+        task_outcome = "failed"
+    elif verification_failed:
+        task_outcome = "verification_failed"
+    elif judge_failed:
+        task_outcome = "judge_failed"
+    elif verify_result.get("status") == "passed":
+        task_outcome = "verified"
+    else:
+        task_outcome = "unverified"
     result_path = _unique_destination(result_dir, f"{task_id.strip()}.result.json")
     write_json_atomic(
         result_path,
         {
             "task_id": task_id.strip(),
             "outcome": effective_outcome,
+            "task_outcome": task_outcome,
             "reported_outcome": outcome,
             "inferred_outcome": inferred_outcome,
             "from": message.get("from"),
@@ -7957,6 +8094,7 @@ def _chief_record_reply(*, dirs: dict[str, Path], message: dict[str, Any]) -> di
         "status": "recorded",
         "task_id": task_id.strip(),
         "outcome": effective_outcome,
+        "task_outcome": task_outcome,
         "reported_outcome": outcome,
         "inferred_outcome": inferred_outcome,
         "verify_result": verify_result,
@@ -8349,6 +8487,8 @@ def main(argv: list[str] | None = None) -> int:
                     host=args.host,
                     port=args.port,
                     startup_timeout_seconds=getattr(args, "startup_timeout_seconds", 15.0),
+                    managed=bool(getattr(args, "managed", False)),
+                    env_file=getattr(args, "env_file", None),
                 )
             )
             return 0

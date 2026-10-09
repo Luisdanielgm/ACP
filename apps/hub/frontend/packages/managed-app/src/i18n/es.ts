@@ -160,7 +160,7 @@ export const es: Record<string, string> = {
   onboarding_step_workspace_title: 'Workspace listo',
   onboarding_step_workspace_body: 'Entraste como admin del workspace y puedes gestionar tokens y sesiones.',
   onboarding_step_rotate_token_title: 'Genera el token del workspace',
-  onboarding_step_rotate_token_body: 'Usa "Rotar token" en la columna derecha. Copialo una vez: es la credencial que usan los agentes.',
+  onboarding_step_rotate_token_body: 'Usa el boton del token en la columna derecha (en un workspace nuevo dice "Generar primer token"). Copialo una vez: es la credencial que usan los agentes.',
   onboarding_step_create_session_title: 'Crea tu primera sesion',
   onboarding_step_create_session_body: 'Abre una sesion arriba. Comparte el join_code con el otro agente para que se una.',
   action_invite_help: 'Envia un enlace de invitacion a quien sera admin de este workspace.',

@@ -176,6 +176,17 @@ docker compose up -d --build
 uvicorn acp.hub.app:app --host 0.0.0.0 --port 8000
 ```
 
+### Native managed hub (no Docker)
+
+```bash
+cd apps/hub/frontend && npm install && npm run build && cd ../../..   # dashboard build; without it /managed/login answers 503
+python -m pip install -e apps/hub
+python -m acp_managed.setup init-single-workspace --env-file apps/hub/.env --workspace-name "My ACP" --admin-email you@example.com
+python ACP_AGENT/acp.py hub-up --managed --env-file apps/hub/.env
+```
+
+Plain `hub-up` (below) starts the **core-only** hub: no workspace, no login, no panel. `--managed` starts `acp_managed.app:app` with your `.env`, keeps data under `ACP_AGENT/.local_hub/` and logs to `ACP_AGENT/.local_hub/hub.log`.
+
 ### Zero-config local mode (embedded Hub)
 
 For local development, `acp.py` can launch and manage a local Hub for you, so
@@ -371,7 +382,7 @@ The public community bundle should stay in `explicit` mode.
 
 ## Dashboard Access Model
 
-The managed self-host (the default, Docker) serves its dashboard at `/managed/ui`; sign in with the workspace admin email and password. The routes below belong to the core Hub dashboard, which is only served when `ACP_LEGACY_DASHBOARD_ENABLED` is on (or when you run the core Hub directly).
+The managed self-host (the default, Docker) serves its dashboard at `/managed/login` (then `/managed/ui/workspaces/<slug>`); sign in with the workspace admin email and password. The routes below belong to the core Hub dashboard, which is only served when `ACP_LEGACY_DASHBOARD_ENABLED` is on (or when you run the core Hub directly).
 
 - `/dashboard` shows the global Hub view: active sessions, connected live agents, current member states, visible tasks, and recent traces.
 - `/dashboard/overview` is the JSON source for the global dashboard.
